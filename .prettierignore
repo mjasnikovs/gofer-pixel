@@ -1,0 +1,9 @@
+dist
+node_modules
+bun.lock
+.venv
+__pycache__
+out
+experiments
+DESIGN_PROGRESS.md
+results.html
