@@ -13,6 +13,7 @@ interface Handle {
     raycaster: {frames: number; renderNow: (basis: unknown, mode?: number) => Promise<number>}
     state: {cameras: unknown[]; selected: string | undefined; sheet: unknown}
     dispatch: (action: unknown) => void
+    firstFrame: Promise<void>
 }
 
 declare global {
@@ -21,10 +22,17 @@ declare global {
     }
 }
 
+/**
+ * Await the first frame, not the first paint.
+ *
+ * Waiting for a thumbnail to appear is waiting for the wrong thing: React commits the camera list
+ * on its first render, but the viewport cannot draw until a `ResizeObserver` has told it how big it
+ * is, which lands a beat later. Reading the canvas at that point returned an empty buffer about one
+ * run in five. `firstFrame` is the event that was missing, and adding it was part of the fix.
+ */
 const ready = async (page: Page): Promise<void> => {
     await page.goto('/')
-    // Not a poll: the locator resolves as soon as React has committed the first render.
-    await page.locator('canvas.thumbnail').first().waitFor()
+    await page.evaluate(() => window.goferPixel.firstFrame)
 }
 
 const frames = (page: Page): Promise<number> =>

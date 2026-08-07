@@ -30,6 +30,10 @@ export const App = ({volume, name}: {volume: Volume; name: string}) => {
         handle.raycaster = raycaster
     }, [])
 
+    const onFrame = useCallback(() => {
+        handle.markDrawn()
+    }, [])
+
     // Publishing to the browser-test seam is exactly what an effect is for: pushing React's latest
     // state out to something that is not React.
     useEffect(() => {
@@ -75,6 +79,7 @@ export const App = ({volume, name}: {volume: Volume; name: string}) => {
                     map={state.map}
                     onOrbit={onOrbit}
                     onReady={onReady}
+                    onFrame={onFrame}
                 />
 
                 <div className='panel app-rail'>

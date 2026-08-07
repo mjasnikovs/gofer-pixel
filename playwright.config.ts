@@ -15,7 +15,20 @@ const BASE_URL = `http://127.0.0.1:${String(PORT)}`
 export default defineConfig({
     testDir: './browser',
     fullyParallel: true,
-    workers: 2,
+    /*
+     * One browser at a time, and this is not caution — it is the only way the suite is honest here.
+     *
+     * Both GPUs on this machine sit at ~95 % VRAM with a model loaded (see `CLAUDE.md`), so a
+     * second Chromium starting at the same time as the first intermittently fails to bring up a
+     * hardware Vulkan device and silently drops to SwiftShader. Measured over eight two-worker
+     * runs: five failed, either at 58–63 ms per frame on `SwiftShader driver` or with the viewport
+     * reading back an empty canvas. Serially, eight of eight launches got the NVIDIA device.
+     *
+     * Parallelism would buy about five seconds and cost the suite its meaning: the parity tests
+     * exist to prove the shader matches the exporter, and they cannot do that from a driver that
+     * only turned up half the time.
+     */
+    workers: 1,
     reporter: process.env['CI'] === undefined ? [['list']] : [['github']],
     use: {baseURL: BASE_URL},
     projects: [

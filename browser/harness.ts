@@ -56,10 +56,27 @@ const gpuFrameMs = async (basis: Basis, mode: number, count: number): Promise<nu
     return (performance.now() - started) / count
 }
 
+/**
+ * What actually rendered, for a failure message only.
+ *
+ * Never branch on this — WebKit masks the string and reports "Apple GPU" on an NVIDIA box, which
+ * is why the suite decides hardware-versus-software by timing a draw. But when that timing
+ * assertion fails, the first question is always "what was it running on", and answering it in the
+ * message beats another round of bisecting.
+ */
+const gpuInfo = (): string => {
+    const canvas = document.getElementById('gl')
+    if (!(canvas instanceof HTMLCanvasElement)) return 'no canvas'
+    const gl = canvas.getContext('webgl2')
+    if (!gl) return 'no context'
+    const debug = gl.getExtension('WEBGL_debug_renderer_info')
+    return debug ? String(gl.getParameter(debug.UNMASKED_RENDERER_WEBGL)) : 'renderer not exposed'
+}
+
 declare global {
     interface Window {
-        gofer: {gpuRender: typeof gpuRender; gpuFrameMs: typeof gpuFrameMs}
+        gofer: {gpuRender: typeof gpuRender; gpuFrameMs: typeof gpuFrameMs; gpuInfo: typeof gpuInfo}
     }
 }
 
-window.gofer = {gpuRender, gpuFrameMs}
+window.gofer = {gpuRender, gpuFrameMs, gpuInfo}

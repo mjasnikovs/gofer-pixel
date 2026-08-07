@@ -18,13 +18,16 @@ export const Viewport = ({
     camera,
     map,
     onOrbit,
-    onReady
+    onReady,
+    onFrame
 }: {
     volume: Volume
     camera: Camera
     map: number
     onOrbit: (event: OrbitEvent, height: number) => void
     onReady?: (raycaster: Raycaster) => void
+    /** Fired after a frame has landed, not after a draw was issued. */
+    onFrame?: (frames: number) => void
 }) => {
     const hostRef = useRef<HTMLDivElement>(null)
     const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -91,8 +94,8 @@ export const Viewport = ({
         const raycaster = glRef.current?.raycaster
         if (!raycaster || size.width === 0) return
         raycaster.resize(size.width, size.height)
-        void raycaster.renderNow(basisFor(camera, volume, size.height), map)
-    }, [camera, map, size, volume])
+        void raycaster.renderNow(basisFor(camera, volume, size.height), map).then(onFrame)
+    }, [camera, map, size, volume, onFrame])
 
     // React's wheel listener is passive, so it cannot stop the page scrolling under a zoom.
     useEffect(() => {

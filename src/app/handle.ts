@@ -16,10 +16,31 @@ export interface AppHandle {
     raycaster: Raycaster | undefined
     state: AppState | undefined
     dispatch: ((action: AppAction) => void) | undefined
+    /**
+     * Resolves once the viewport's first frame has landed.
+     *
+     * Without this a test has nothing to await: the camera thumbnails are on screen after React's
+     * first commit, but the viewport cannot draw until a `ResizeObserver` has told it how big it
+     * is, which happens a beat later. A test that starts reading pixels when the thumbnails appear
+     * reads an empty canvas perhaps one run in five — and the fix for that is an event, never a
+     * wait, so here is the event.
+     */
+    firstFrame: Promise<void>
+    /** Called by the app when a frame lands. Idempotent; a consumer never calls it. */
+    markDrawn: () => void
 }
+
+let resolveFirstFrame: (() => void) | undefined
 
 export const handle: AppHandle = {
     raycaster: undefined,
     state: undefined,
-    dispatch: undefined
+    dispatch: undefined,
+    firstFrame: new Promise<void>(resolve => {
+        resolveFirstFrame = resolve
+    }),
+    markDrawn: () => {
+        resolveFirstFrame?.()
+        resolveFirstFrame = undefined
+    }
 }

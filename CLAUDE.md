@@ -125,7 +125,12 @@ brighter than body text, a control border under 3:1 — and it runs inside `bun 
   root/container process split across both GPUs. **Do not restart it casually.** It sends permissive
   CORS headers, so the browser calls it directly; no proxy.
 - Both GPUs sit at ~95 % VRAM with that model loaded. Nothing else gets meaningful VRAM; CLIP runs
-  on CPU by necessity.
+  on CPU by necessity. **The browser suite therefore runs one worker.** Two Chromiums starting at
+  once intermittently fail to bring up a hardware Vulkan device and drop to SwiftShader without
+  saying so — measured over eight two-worker runs, five failed, at 58–63 ms per frame or with the
+  viewport reading back an empty canvas. Serially it is stable and the whole suite is ~14 s.
+- A frame costs 0.17 ms on the idle GPU and up to 2.4 ms while llama-server is busy on the same
+  card. Any timing assertion has to clear that 14× spread, not the idle number.
 - WebGL2 under the Tauri webview here is **hardware**, measured 2026-08-06 with
   `legacy/experiments/webgl_probe.py` — 735× SwiftShader. Do not detect this by reading the renderer
   string: WebKit masks it and reports "Apple GPU" on an NVIDIA box. Time a draw instead.

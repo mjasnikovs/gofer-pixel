@@ -12,6 +12,14 @@ import {goferPixelTheme} from './theme/gofer-pixel'
 import carVox from './assets/car.vox?url'
 import {readVox} from './vox/vox-file'
 
+/*
+ * The browser suite drives the app through this rather than by polling the DOM — see
+ * `app/handle.ts`. Published before the `await` below, so that a test which has finished loading
+ * the page can always reach `firstFrame`; published after it, there is a window in which the
+ * handle does not exist yet and the test's own first call is what races.
+ */
+;(globalThis as unknown as {goferPixel: typeof handle}).goferPixel = handle
+
 /**
  * One hard-coded model, as the proof of concept asks for. `car.vox` came over from the old build
  * with its bytes untouched; the reader is new.
@@ -34,6 +42,3 @@ if (host) {
         </StrictMode>
     )
 }
-
-// The browser suite drives the app through this rather than by polling the DOM. See app/handle.ts.
-;(globalThis as unknown as {goferPixel: typeof handle}).goferPixel = handle
