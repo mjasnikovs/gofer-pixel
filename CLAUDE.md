@@ -1,126 +1,77 @@
 # gofer-pixel
 
-Local pixel-art generation via sprite stacking. A Python research pipeline and a TypeScript library
-share this directory.
+A local pixel sprite editor. An artist builds voxel art; the software turns cameras into sprite
+sheets and turns geometry into colour, normal, depth, AO and emission maps.
+
+It is **not** a 3D editor and does not grow into one. Every feature is judged by whether it helps
+produce pixels.
 
 ## Read these first, in order
 
-1. `PRODUCTION_PLAN.md` — what is being built and why. §14 lists what is _not_ settled.
-2. `DESIGN_PROGRESS.md` — the research record. Opens with a START HERE section.
-3. `results.html` — visual summary of the Python pipeline's output.
+1. `docs/techstack.md` — the stack, the renderer architecture, and the testing law. §4 lists what is
+   still undecided.
+2. `docs/FEATURESET.md` — the product intent, 40 items. Treat it as a someday-list.
+3. `docs/editor.png` and `docs/featureset.png` — **these two mockups are the spec.** When the two
+   disagree with FEATURESET.md, the mockups win.
 
-## Before changing the renderer
+## The rebuild
 
-`src/vox/parity.test.ts` pins the TypeScript renderers to SHA-256 hashes of the Python's output. It
-passing means the port is pixel-identical; it failing means output changed.
+The project was restarted on 2026-08-07. Everything built before that is in `legacy/`, which is
+excluded from lint, format, typecheck, test and build. Read `legacy/README.md` before opening
+anything in there — it says what is worth reading and what is superseded.
 
-If a change _should_ alter pixels, regenerate the hashes deliberately from the Python and say so in
-the commit — do not adjust them to make a red test green.
+`src/` is nearly empty on purpose. Code from `legacy/` is carried over deliberately, file by file,
+with its tests — never by import.
 
-```bash
-.venv/bin/python -c "
-import hashlib, voxslice, voxrender
-size, voxels, pal = voxslice.read_vox('car.vox')
-ra, rn = voxrender.rotation_sheet(size, voxels, pal, 8, 2)
-print(hashlib.sha256(bytes(ra[2])).hexdigest()[:16])
-"
-```
+## The renderer
 
-**Fixed 2026-08-06 — axis-aligned striping.** The centring offset is now floored in both
-`voxrender.py` and `src/vox/render.ts`; a fractional offset used to collapse adjacent voxel columns
-at 0/90/180/270 and lose ~45 % of the visible model. The parity hashes were regenerated from the
-Python afterwards. `src/vox/render.test.ts` pins the property (every occupied column survives at
-every axis-aligned angle) so it cannot come back. Sprites exported before this date are wrong at
-four angles in every sixteen.
+One algorithm, two backends, and this is the decision everything else hangs on:
 
-## The document model
+- **TypeScript, on the CPU.** Renders every sprite the app exports, and runs inside `bun test`. A
+  128 × 128 sprite from a 128³ model takes 3.5 ms, so a golden-pixel test needs no browser.
+- **GLSL, on the GPU.** Renders the interactive viewport only, because at 512 × 512 the CPU drops to
+  18 fps.
 
-`src/doc/` is the editor's foundation and is deliberately independent of `src/vox/`.
+They are verified to agree exactly — see `docs/techstack.md` §2. That agreement is **conditional on
+two rules that are part of the renderer's contract, not test concessions**:
 
-- A `Volume` is copy-on-write over 8³ chunks. Cloning shares every chunk and revokes the write
-  claim, so the first write after a clone copies and later writes to that chunk do not. There is no
-  refcount and nothing to release — dropping a volume is safe.
-- A `Document` is immutable by convention. Every operation returns a new document sharing untouched
-  layers, cels and chunks; `editCel` is the only path to changed voxels.
-- Undo is whole-document snapshots (`History`), which is affordable only because of the above.
-  Measured: 100 snapshots of a full 32³ model cost 48 KB against 3.2 MB copied naively.
-- A palette operation that reorders or removes a colour **must** reindex the voxels and the ramps in
-  the same operation — see `applyPaletteOrder`. Forgetting that is silent corruption.
-- The project file is versioned JSON (`serialize.ts`). Bump `PROJECT_VERSION` and add a migration
-  when its shape changes; loading an unknown version throws rather than half-reading. It is at
-  **version 2** — v2 added `origin`, the prompt/seed/sampler behind a generated document, and a v1
-  file migrates by simply not having one.
+1. Camera basis components under `1e-6` snap to exactly `0`, and the basis goes through
+   `Math.fround`. `cos(π/2)` is `6.1e-17` in float64 and a different tiny number in float32, so an
+   "axis-aligned" camera is not axis-aligned and `1/dir` explodes differently on each side.
+2. A zero direction component uses a shared finite sentinel (`1e18`), never `Infinity` — in the slab
+   test, in `tDelta`, and in the initial `tMax`.
 
-## The editor
+Break either and axis-aligned views lose a fifth of the model without failing loudly. This is the
+same defect class that bit the old sprite-stacking renderer at 0/90/180/270°.
 
-`src/editor/` is split so that almost none of it needs a browser to test.
+## Testing — nothing waits
 
-- `state.ts` is pure. A gesture is replayed from the snapshot it started on every time the cursor
-  moves, so the preview and the committed result come from one code path and a drag is exactly one
-  undo entry. `canvas.ts` turns a document into pixels and maps clicks back to voxels.
-- `useEditor.ts` is the only React-aware part. Undo/redo are event handlers, not reducer actions —
-  React re-invokes reducers in development, which would move the history cursor twice per keypress.
-  Anything the UI renders comes from state, never from reading the mutable `History` mid-render.
-- Voxel y is depth, canvas y is down. `flipY` is the one place that knows.
-- `view3d.ts` / `brush3d.ts` / `select3d.ts` are the 3D mode, and they are pure too. A view is a
-  mapping from volume axes to screen axes plus a depth order; every question the mode asks is one
-  walk along a sorted ray.
-- **`editCel` returns a new document whether or not the edit wrote anything**, so identity is not a
-  test for "did something change". Use the operation's changed count — the 3D path and the tools
-  both do, and an undo stack full of empty entries is what happens when you forget.
-- `mutate` then `navigate` in `useEditor` is a trap: `navigate` spreads the snapshot captured when
-  the handler was built, so it puts the old document back. Anything that changes the document _and_
-  moves the cursor goes through `mutateAndGo`.
+**A test that contains a duration is a broken test.** No `sleep`, no `waitForTimeout`, no `waitFor`,
+no polling, no `@testing-library/user-event`, no animated scrolling, no screenshot diffing.
 
-The panels are one per mode, switched at the top of `Editor.tsx` (`MODE_LABELS` is the list):
-`PalettePanel`, `Viewport3D`, `GeneratePanel`, `ExportPanel`, `RigPanel`, `EffectsPanel`.
+- React updates flush synchronously inside `act()`. There is nothing to wait for.
+- Clicks are `element.click()` on a real happy-dom node — 1.3 ms with astryx components mounted.
+- The viewport exposes `renderNow()` and a frame counter, so a test awaits _a frame having landed_,
+  never milliseconds. The render loop must be drivable, not owned by `requestAnimationFrame`.
+- Golden pixel hashes come from the CPU raycaster. It is the oracle and it needs no GPU.
+- Playwright is roughly ten tests for what cannot exist outside a browser, and it does not gate
+  `bun run check`. Chromium needs
+  `--use-angle=vulkan --enable-features=Vulkan --use-gl=angle --ignore-gpu-blocklist` or it silently
+  falls back to SwiftShader and is 51× slower.
 
-## The rest of the source
-
-- `src/gen/` — generation. `ops.ts` is a port of `voxgen.py:rasterise` and is pinned byte-for-byte
-  against the Python (`ops.test.ts`); `llama.ts` talks to `localhost:8080` with the JSON schema in
-  `response_format`; `score.ts` is the deterministic candidate scoring; `clip.ts` is the client for
-  the optional `voxserve.py` scorer, since CLIP itself cannot run in a page. `evolve.ts` is the
-  op-list refinement loop — **deliberately not wired into the app**: it optimises reliably and the
-  only objectives available make the sprite worse (PRODUCTION_PLAN.md §9, "then").
-- `src/export/` — `atlas.ts` (sheet + normal sheet + sidecar), `godot.ts` (`.tres`, verified by
-  loading it in Godot 4.7.1 headless), `strip.ts` (the Aseprite round trip).
-- `src/vox/render-worker.ts` + `src/editor/bake.ts` — the atlas bake off the main thread. `runBake`
-  is the pure job so it can be tested without a Worker, and `bakeAtlas` falls back to the calling
-  thread wherever `Worker` is undefined. A `Document` cannot be posted to a Worker (it holds
-  `Volume` instances, and a class loses its methods to structured cloning) — post `VoxModel`s.
-- `src/vox/vox-scene.ts` — the `.vox` extension chunks. `writeVox` (single model, byte-identical to
-  `voxgen.py`) and `writeVoxScene` (one model per layer, with `LAYR` and the scene graph) are both
-  real exports; `readVox` merges every model into one volume, `readVoxScene` keeps them apart.
-- `src/anim/rig.ts` — grid-constrained bones. Offsets are interpolated **then rounded**; that
-  rounding is the feature, not a detail.
-- `src/fx/` — `passes.ts` (outline, dither, palette cycling, Lambert, normal occlusion) and
-  `expr.ts` / `voxelScript.ts` (the `voxel(x,y,z)` scripting surface). **`expr.ts` is hand-written
-  instead of `new Function` on purpose**: a script may come from the model, and `Function` would
-  hand it the whole page. Names resolve with `Object.hasOwn` so a prototype key cannot leak a real
-  function; there is a test for exactly that.
+`test/preload.ts` registers happy-dom for every test via `bunfig.toml`, so `document` is always
+available.
 
 ## Commands
 
 ```bash
-bun run check       # format:check + lint + typecheck + test — the gate
-bun run test        # bun test
-bun run build       # library bundle to dist/ plus .d.ts
-bun run dev         # playground on :1430 — the editor (six modes), plus a .vox viewer tab
+bun run check       # format:check + lint + typecheck + test — the gate, ~4 s, no browser
+bun run test        # bun test — scoped to src/ by bunfig.toml
+bun run build       # deployable app bundle to dist/ (not a package — no .d.ts, no lib entry)
+bun run test:browser # the Playwright suite — separate, does not gate `check`
+bun run dev         # playground on :1430
 bun run format      # prettier --write
 ```
-
-The Python side uses `.venv` (CPU torch, open_clip, pillow):
-
-```bash
-.venv/bin/python voxbatch.py "a red pickup truck" 10 out/truck
-.venv/bin/python voxserve.py            # optional CLIP scorer on :8765 for the generate panel
-```
-
-`voxserve.py` is optional by design: the editor scores candidates deterministically on its own and
-only asks the service for CLIP. Start it before generating if you want the candidate grid ranked by
-CLIP — measured, the deterministic score saturates at 1.000 for box-shaped subjects and ranks
-nothing (PRODUCTION_PLAN.md §14).
 
 ## Conventions
 
@@ -131,8 +82,7 @@ width 100), TypeScript 6 with `noUncheckedIndexedAccess` and `exactOptionalPrope
 That combination bans non-null assertions on indexed access. Use a `?? fallback`, a `DataView` read,
 or an early-return guard — not `!`.
 
-Imports are extensionless. Python files, `out/`, `experiments/`, `DESIGN_PROGRESS.md` and
-`results.html` are excluded from lint and format.
+Imports are extensionless. `legacy/` and `bunfig.toml` are excluded from lint and format.
 
 ## Environment
 
@@ -142,7 +92,8 @@ Imports are extensionless. Python files, `out/`, `experiments/`, `DESIGN_PROGRES
 - Both GPUs sit at ~95 % VRAM with that model loaded. Nothing else gets meaningful VRAM; CLIP runs
   on CPU by necessity.
 - WebGL2 under the Tauri webview here is **hardware**, measured 2026-08-06 with
-  `experiments/webgl_probe.py` — 735× SwiftShader. Do not detect this by reading the renderer
+  `legacy/experiments/webgl_probe.py` — 735× SwiftShader. Do not detect this by reading the renderer
   string: WebKit masks it and reports "Apple GPU" on an NVIDIA box. Time a draw instead.
-- Godot 4.7.1 is at `/usr/bin/godot`, and `godot --headless --path <dir> --script <file.gd>` is how
-  the exported `.tres` was verified.
+- Godot 4.7.1 is at `/usr/bin/godot`, and `godot --headless --path <dir> --script <file.gd>` runs a
+  script against it.
+- `.venv` holds the Python side (CPU torch, open_clip, pillow) used by `legacy/py/`.

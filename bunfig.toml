@@ -1,0 +1,4 @@
+[test]
+# `legacy/` is dead code kept for reference; it must never run or gate anything.
+root = "./src"
+preload = ["./test/preload.ts"]

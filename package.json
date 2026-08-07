@@ -3,25 +3,12 @@
     "private": true,
     "version": "0.1.0",
     "type": "module",
-    "main": "./dist/gofer-pixel.js",
-    "module": "./dist/gofer-pixel.js",
-    "types": "./dist/index.d.ts",
-    "exports": {
-        ".": {
-            "types": "./dist/index.d.ts",
-            "import": "./dist/gofer-pixel.js"
-        },
-        "./style.css": "./dist/gofer-pixel.css"
-    },
-    "files": [
-        "dist"
-    ],
     "engines": {
         "bun": ">=1.3.0"
     },
     "scripts": {
         "dev": "vite",
-        "build": "tsc --noEmit && vite build && tsc -p tsconfig.build.json",
+        "build": "tsc --noEmit && vite build",
         "typecheck": "tsc --noEmit --pretty false",
         "lint": "eslint . --quiet",
         "lint:fix": "eslint . --fix --quiet",
@@ -32,7 +19,7 @@
         "check": "bun run --silent format:check && bun run --silent lint && bun run --silent typecheck && bun run --silent test",
         "preview": "vite preview",
         "astryx": "bun node_modules/@astryxdesign/cli/bin/astryx.mjs",
-        "theme": "bun run astryx theme build src/theme/theme.ts --out src/theme/pixel-theme.css"
+        "test:browser": "bun test browser"
     },
     "dependencies": {
         "@astryxdesign/core": "0.2.0",
@@ -43,6 +30,7 @@
     "devDependencies": {
         "@astryxdesign/cli": "0.2.0",
         "@eslint/js": "10.0.1",
+        "@happy-dom/global-registrator": "^20.11.1",
         "@types/bun": "latest",
         "@types/react": "19.2.18",
         "@types/react-dom": "19.2.4",
@@ -52,6 +40,7 @@
         "eslint-plugin-react-hooks": "7.1.1",
         "eslint-plugin-react-refresh": "0.5.3",
         "globals": "17.8.0",
+        "playwright": "1.60.0",
         "prettier": "3.9.6",
         "typescript": "6.0.3",
         "typescript-eslint": "8.65.0",

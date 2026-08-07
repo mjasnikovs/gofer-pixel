@@ -1,4 +1,5 @@
 dist
+legacy
 node_modules
 bun.lock
 .venv
@@ -7,3 +8,4 @@ out
 experiments
 DESIGN_PROGRESS.md
 results.html
+bunfig.toml

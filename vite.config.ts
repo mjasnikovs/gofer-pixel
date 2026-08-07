@@ -1,10 +1,8 @@
 import {defineConfig, type UserConfig} from 'vite'
 import react from '@vitejs/plugin-react'
-import {resolve} from 'node:path'
 
-// Two builds share this config:
-//   `vite`        — dev playground served from index.html
-//   `vite build`  — library bundle, one ESM file plus one stylesheet
+// gofer-pixel is an application, not a package: `vite build` emits a deployable bundle
+// from index.html. There is no library entry and no .d.ts step.
 export default defineConfig((): UserConfig => ({
     plugins: [react()],
     clearScreen: false,
@@ -13,17 +11,6 @@ export default defineConfig((): UserConfig => ({
         strictPort: true
     },
     build: {
-        lib: {
-            entry: resolve(import.meta.dirname, 'src/index.ts'),
-            formats: ['es'],
-            fileName: () => 'gofer-pixel.js'
-        },
-        rollupOptions: {
-            external: ['react', 'react-dom', 'react/jsx-runtime'],
-            output: {
-                assetFileNames: 'gofer-pixel.[ext]'
-            }
-        },
         sourcemap: true
     }
 }))
