@@ -13,6 +13,8 @@ produce pixels.
 2. `docs/FEATURESET.md` — the product intent, 40 items. Treat it as a someday-list.
 3. `docs/editor.png` and `docs/featureset.png` — **these two mockups are the spec.** When the two
    disagree with FEATURESET.md, the mockups win.
+4. `docs/POC_PROMPT.md` — the current task. The next thing to build, in order, with a do-not-build
+   list and measurable done criteria.
 
 ## The rebuild
 

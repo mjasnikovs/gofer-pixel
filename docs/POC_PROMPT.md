@@ -1,8 +1,7 @@
-# Proof-of-concept prompt
+# Proof of concept — the brief
 
-Paste the block below into a fresh session.
-
----
+This file is the task. Read it and build what it says. It is also self-contained enough to paste
+verbatim into a fresh session.
 
 Build the gofer-pixel proof of concept.
 
