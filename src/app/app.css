@@ -1,15 +1,29 @@
 /*
- * The frame only: regions, their budgets, and the two things Astryx has no component for — a
- * canvas and a pixel-art image. Every colour is a token, never a hex, so the whole window moves
- * when `src/theme/theme.ts` does.
+ * The frame only: regions, their budgets, and the handful of things Astryx has no component for —
+ * a canvas, a pixel-art image, a swatch and a checkerboard. Colours are tokens, never hex, so the
+ * whole window moves when `src/theme/theme.ts` does. There are exactly three exceptions and they
+ * are marked where they occur: a hue strip, a saturation field and the axis gizmo are pictures of
+ * colour itself, and a theme has nothing to say about them.
  *
- * The shape comes from `docs/editor.png`, which is the spec: a thin header, a rail on each side and
- * the render in the middle. Each rail is *one* panel divided into sections by a hairline, not a
- * stack of boxes — boxing every section is what turns a tool into a settings page, and the mockup
- * does not do it.
+ * The shape is `docs/editor.png`'s, which is the spec, and it is a *seamless* chrome: regions butt
+ * against each other and are told apart by one hairline and a step in the surface ramp, not by
+ * gutters and rounded cards floating on a backdrop. Boxing every region is what turns a tool into a
+ * settings page.
  *
- * Responsive contract: this is a desktop tool with three fixed regions and a flexible middle. It
- * does not collapse; below about 1100 px the rails keep their width and the viewport shrinks.
+ * Region budget, left to right, at the mockup's own widths:
+ *
+ *     96  tool rail
+ *     216 brush and palette
+ *     rest viewport
+ *     384 cameras, renders and export
+ *
+ * and two rows, because the bottom-left block and the views strip do not break on the same line as
+ * the columns above them: GRID / SNAP runs to 193 px and the views strip starts there, 23 px inside
+ * the brush column. That is why the grid is declared in five tracks and spanned, rather than in
+ * four — 96 + 97 = 193, and 97 + 119 = 216.
+ *
+ * Responsive contract: this is a desktop tool with four fixed regions and a flexible middle. It
+ * does not collapse; below about 1200 px the rails keep their width and the viewport shrinks.
  */
 
 html,
@@ -26,27 +40,45 @@ body,
     overflow: hidden;
 }
 
+/* ---- header ---- */
+
 .app-header {
-    display: flex;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
     height: 44px;
     flex: 0 0 44px;
-    padding: 0 14px;
+    padding: 0 12px;
+    background: var(--color-background-surface);
     border-bottom: 1px solid var(--color-border);
+}
+
+.header-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.header-end {
+    justify-content: flex-end;
+    gap: 2px;
 }
 
 /* The one piece of decoration in the window, and it is the accent saying which app this is. */
 .app-mark {
-    width: 14px;
-    height: 14px;
-    border-radius: 4px;
+    width: 15px;
+    height: 15px;
+    flex: 0 0 15px;
+    border-radius: 50% 50% 50% 4px;
     background: var(--color-accent);
 }
 
 .app-divider {
     width: 1px;
     height: 18px;
+    flex: 0 0 1px;
     background: var(--color-border);
     margin: 0 4px;
 }
@@ -55,13 +87,60 @@ body,
     flex: 1 1 auto;
 }
 
+/* ---- the body grid ---- */
+
 .app-body {
     flex: 1 1 auto;
     min-height: 0;
     display: grid;
-    grid-template-columns: 232px minmax(0, 1fr) 340px;
-    gap: 8px;
-    padding: 8px;
+    grid-template-columns: 96px 97px 119px minmax(0, 1fr) 384px;
+    grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.rail-panel {
+    grid-column: 1;
+    grid-row: 1;
+    background: var(--color-background-body);
+    border-right: 1px solid var(--color-border);
+}
+
+.brush-column {
+    grid-column: 2 / 4;
+    grid-row: 1;
+    min-height: 0;
+    background: var(--color-background-surface);
+    border-right: 1px solid var(--color-border);
+}
+
+.stage {
+    position: relative;
+    grid-column: 4;
+    grid-row: 1;
+    min-height: 0;
+    background: var(--color-background-body);
+}
+
+.snap-column {
+    grid-column: 1 / 3;
+    grid-row: 2;
+    background: var(--color-background-body);
+    border-top: 1px solid var(--color-border);
+    border-right: 1px solid var(--color-border);
+}
+
+.views-panel {
+    grid-column: 3 / 5;
+    grid-row: 2;
+    background: var(--color-background-surface);
+    border-top: 1px solid var(--color-border);
+}
+
+.app-rail {
+    grid-column: 5;
+    grid-row: 1 / 3;
+    min-height: 0;
+    background: var(--color-background-surface);
+    border-left: 1px solid var(--color-border);
 }
 
 /* ---- panels and the sections inside them ---- */
@@ -70,9 +149,6 @@ body,
     display: flex;
     flex-direction: column;
     min-height: 0;
-    background: var(--color-background-surface);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-container);
     overflow: hidden;
 }
 
@@ -98,15 +174,11 @@ body,
     flex: 0 0 auto;
 }
 
-.section-pinned {
-    margin-top: auto;
-}
-
 .section-head {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 12px 12px 8px;
+    gap: 4px;
+    padding: 10px 12px 8px;
     min-height: 32px;
 }
 
@@ -121,33 +193,227 @@ body,
     padding: 0 12px 12px;
     display: flex;
     flex-direction: column;
-    gap: 6px;
-}
-
-/* Pinned to the bottom of whatever space the section got, so the action does not float in the
- * middle of an empty panel before anything has been rendered. */
-.section-foot {
-    margin-top: auto;
-    padding: 4px 12px 12px;
-}
-
-.model-row {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
     gap: 8px;
 }
 
-/* ---- viewport ---- */
+.field-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+/* ---- tool rail ---- */
+
+.tool-rail {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 8px;
+    overflow-y: auto;
+}
+
+.tool {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+    padding: 9px 4px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-element);
+    background: none;
+    color: var(--color-icon-secondary);
+    cursor: pointer;
+}
+
+.tool:hover {
+    background: var(--color-overlay-hover);
+    color: var(--color-icon-primary);
+}
+
+/*
+ * The armed tool is carried by a fill, a border and the accent all at once. One of the four
+ * failures this repo's UI skill records is a selected state carried by a single thin line, and a
+ * rail of nine near-identical glyphs is the worst place in the window to repeat it.
+ */
+.tool[data-armed] {
+    background: var(--color-accent-muted);
+    border-color: var(--color-accent);
+    color: var(--color-icon-accent);
+}
+
+.tool-label {
+    font-size: 11px;
+    color: var(--color-text-secondary);
+}
+
+.tool[data-armed] .tool-label {
+    color: var(--color-text-accent);
+}
+
+/* ---- grid / snap / voxel size ---- */
+
+.snap-panel {
+    gap: 10px;
+    padding: 14px 12px;
+}
+
+.snap-row {
+    display: flex;
+    gap: 6px;
+}
+
+.snap-toggle {
+    flex: 1 1 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+    padding: 2px;
+    border: none;
+    background: none;
+    cursor: pointer;
+}
+
+.snap-name {
+    font-size: 11px;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--color-text-disabled);
+}
+
+.snap-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: var(--radius-full);
+    background: var(--color-background-card);
+    color: var(--color-icon-secondary);
+}
+
+.snap-toggle[data-on] .snap-icon {
+    color: var(--color-icon-accent);
+}
+
+.snap-state {
+    font-size: 11px;
+    font-weight: var(--font-weight-semibold);
+    color: var(--color-text-disabled);
+}
+
+.snap-toggle[data-on] .snap-state {
+    color: var(--color-text-accent);
+}
+
+.snap-size {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding-top: 10px;
+    border-top: 1px solid var(--color-border);
+}
+
+/* ---- brush and palette ---- */
+
+.stepper-value {
+    min-width: 28px;
+    padding: 2px 6px;
+    text-align: center;
+    border-radius: var(--radius-inner);
+    background: var(--color-background-body);
+}
+
+.shape-row {
+    display: flex;
+    gap: 6px;
+}
+
+.shape {
+    flex: 1 1 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 32px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-element);
+    background: var(--color-background-body);
+    color: var(--color-icon-secondary);
+    cursor: pointer;
+}
+
+.shape:hover {
+    color: var(--color-icon-primary);
+}
+
+.shape[data-selected] {
+    border-color: var(--color-accent);
+    background: var(--color-accent-muted);
+    color: var(--color-icon-accent);
+}
+
+.swatches {
+    display: grid;
+    gap: 3px;
+}
+
+.swatch {
+    aspect-ratio: 1;
+    border: 1px solid transparent;
+    border-radius: var(--radius-inner);
+    cursor: pointer;
+    padding: 0;
+}
+
+.swatch:hover {
+    border-color: var(--color-border-emphasized);
+}
+
+/*
+ * The loaded swatch is ringed from the outside, not tinted: the whole point of the tile is the
+ * colour inside it, so the state cannot be carried by touching that colour.
+ */
+.swatch[data-selected] {
+    outline: 2px solid var(--color-text-primary);
+    outline-offset: 1px;
+}
+
+.palette-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.palette-actions > * {
+    flex: 1 1 0;
+}
+
+/*
+ * The two exceptions to "colours are tokens". A saturation field and a hue strip are pictures of
+ * the colour wheel; there is no theme in which the red end of a hue ramp is a different colour.
+ */
+.color-field {
+    position: relative;
+    height: 60px;
+    border-radius: var(--radius-element);
+    overflow: hidden;
+    background:
+        linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, transparent),
+        var(--swatch);
+}
+
+.color-hue {
+    position: absolute;
+    inset: auto 0 0 0;
+    height: 10px;
+    background: linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00);
+}
+
+/* ---- viewport and its overlays ---- */
 
 .viewport {
-    position: relative;
-    min-height: 0;
+    position: absolute;
+    inset: 0;
     overflow: hidden;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-container);
-    /* Darker than the panels on purpose: the render is the brightest thing in the window. */
-    background: var(--color-background-body);
     touch-action: none;
     cursor: grab;
 }
@@ -164,25 +430,74 @@ body,
 
 .viewport-failure {
     position: absolute;
-    inset: 12px;
+    inset: 16px;
     color: var(--color-text-secondary);
 }
 
-/* ---- cameras ---- */
-
-.app-rail {
-    display: flex;
-    flex-direction: column;
+.gizmo {
+    position: absolute;
+    top: 8px;
+    right: 12px;
+    pointer-events: none;
 }
+
+.view-cube {
+    position: absolute;
+    right: 20px;
+    bottom: 16px;
+    color: var(--color-border-emphasized);
+    pointer-events: none;
+}
+
+.hints {
+    position: absolute;
+    left: 50%;
+    bottom: 16px;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 6px 14px;
+    border-radius: var(--radius-full);
+    border: 1px solid var(--color-border);
+    background: var(--color-background-card);
+    color: var(--color-icon-secondary);
+}
+
+.hint {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.hint-divider {
+    width: 1px;
+    align-self: stretch;
+    background: var(--color-border);
+}
+
+.hint-action {
+    border: none;
+    background: none;
+    padding: 0;
+    color: inherit;
+    cursor: pointer;
+}
+
+.hint-action:hover {
+    color: var(--color-icon-accent);
+}
+
+/* ---- cameras ---- */
 
 .camera-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 6px;
-    padding: 0 12px 8px;
-    /* Three rows of tiles at the rail's width. Past that the grid scrolls rather than pushing the
-     * sheet below it out of the window; eight cameras and an add tile fit exactly. */
-    max-height: 42vh;
+    padding: 0 12px 12px;
+    /* Past three rows the grid scrolls rather than pushing the renders and the export panel out of
+     * the window; eight cameras and an add tile fit exactly. */
+    max-height: 34vh;
     overflow-y: auto;
 }
 
@@ -194,26 +509,52 @@ body,
 .camera-tile {
     position: relative;
     display: block;
+    padding: 0;
+    border: 1px solid var(--color-border);
     border-radius: var(--radius-element);
     overflow: hidden;
     background: var(--color-background-body);
+    cursor: pointer;
+}
+
+.camera-tile:hover {
+    border-color: var(--color-border-emphasized);
+}
+
+.camera-tile[data-selected] {
+    border-color: var(--color-accent);
+    box-shadow: var(--shadow-inset-selected);
 }
 
 .camera-name {
     position: absolute;
     inset: auto 0 0 0;
-    padding: 12px 6px 4px;
-    font-size: 11px;
-    background: linear-gradient(to top, var(--color-background-body) 30%, transparent);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 14px 6px 4px;
+    text-align: left;
+    background: linear-gradient(to top, var(--color-background-body) 40%, transparent);
 }
 
-.camera-add {
+.camera-badge {
+    margin-left: auto;
+    display: flex;
+    color: var(--color-icon-disabled);
+}
+
+.camera-tile[data-selected] .camera-badge {
+    color: var(--color-icon-accent);
+}
+
+.camera-add,
+.view-add,
+.frame-add {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     gap: 4px;
-    min-height: 72px;
     padding: 6px;
     border: 1px dashed var(--color-border-emphasized);
     border-radius: var(--radius-element);
@@ -222,15 +563,26 @@ body,
     cursor: pointer;
 }
 
-.camera-add:hover {
+.camera-add {
+    min-height: 72px;
+}
+
+.camera-add:hover,
+.view-add:hover {
     background: var(--color-overlay-hover);
     border-color: var(--color-accent);
     color: var(--color-icon-accent);
 }
 
+.frame-add:disabled {
+    cursor: default;
+    color: var(--color-icon-disabled);
+}
+
 /* Nearest-neighbour all the way out: a preview that resamples is a lie about the exported file. */
 .thumbnail,
-.sheet-canvas {
+.render-canvas,
+.export-sprite {
     image-rendering: pixelated;
     display: block;
 }
@@ -241,35 +593,94 @@ body,
     aspect-ratio: 1;
 }
 
-/* ---- sheet ---- */
+/* ---- views strip ---- */
 
-.sheet-body {
+.views-panel {
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    padding: 0 12px 8px;
-    overflow-y: auto;
+    min-height: 0;
 }
 
-.sheet-preview {
+.views-strip {
+    display: flex;
+    gap: 8px;
+    padding: 0 12px 12px;
+    overflow-x: auto;
+}
+
+.view-tile {
+    flex: 0 0 96px;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 4px;
+    padding: 5px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-container);
+    background: var(--color-background-card);
+    cursor: pointer;
 }
 
-.sheet-preview-head {
+.view-tile:hover {
+    border-color: var(--color-border-emphasized);
+}
+
+.view-tile[data-selected] {
+    border-color: var(--color-accent);
+    box-shadow: var(--shadow-inset-selected);
+}
+
+.view-shot {
+    position: relative;
+    display: block;
+    border-radius: var(--radius-element);
+    overflow: hidden;
+    background: var(--color-background-body);
+}
+
+.view-badge {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    display: flex;
+    padding: 3px;
+    border-radius: var(--radius-inner);
+    background: var(--color-accent);
+    color: var(--color-on-accent);
+}
+
+.view-add {
+    flex: 0 0 96px;
+}
+
+/* ---- renders ---- */
+
+.render-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 0 12px 12px;
+}
+
+.render-preview {
     display: flex;
     align-items: center;
-    gap: 6px;
-    min-height: 28px;
+    justify-content: center;
+    min-height: 148px;
+    padding: 8px;
+    text-align: center;
+}
+
+.render-canvas {
+    max-height: 132px;
+    width: auto;
+    height: auto;
 }
 
 /*
- * The checkerboard is not decoration: a sprite sheet is mostly transparent, and a preview on a
- * flat panel cannot tell an empty pixel from one the model happens to have painted panel-coloured.
+ * The checkerboard is not decoration: a sprite sheet is mostly transparent, and a preview on a flat
+ * panel cannot tell an empty pixel from one the model happens to have painted panel-coloured.
  */
-.sheet-frame {
-    padding: 6px;
+.checker {
     border-radius: var(--radius-element);
     border: 1px solid var(--color-border);
     background-color: var(--color-background-body);
@@ -286,20 +697,157 @@ body,
         -6px 0;
 }
 
-/*
- * Big enough to judge, small enough that the colour sheet and the normal sheet both fit above the
- * fold — seeing them together is the point, since the claim being made is that they are aligned.
- * Never upscaled past its own pixels: at 32 px cells the sheet is 128 px wide and stays there.
- */
-.sheet-canvas {
-    margin: 0 auto;
-    width: auto;
-    height: auto;
-    max-width: 100%;
-    max-height: 130px;
+/* ---- export ---- */
+
+.export-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 0 12px 8px;
+    overflow-y: auto;
 }
 
-.sheet-empty {
-    padding: 20px 14px 24px;
-    text-align: center;
+.export-grid {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 2px;
+    padding: 4px;
+}
+
+.export-sprite {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 1;
+}
+
+.export-foot {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: auto;
+    padding: 4px 12px 12px;
+}
+
+.export-foot > *:first-child {
+    flex: 1 1 auto;
+}
+
+/* ---- animation ---- */
+
+.timeline {
+    display: flex;
+    align-items: stretch;
+    gap: 16px;
+    height: 104px;
+    flex: 0 0 96px;
+    padding: 8px 12px;
+    background: var(--color-background-body);
+    border-top: 1px solid var(--color-border);
+}
+
+.timeline-transport {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 0 0 auto;
+}
+
+.timeline-transport > span:first-child {
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    font-size: 11px;
+    margin-right: 6px;
+}
+
+.timeline-track {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.timeline-ruler {
+    position: relative;
+    height: 18px;
+    flex: 0 0 18px;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.tick {
+    position: absolute;
+    top: 0;
+    font-size: 11px;
+    line-height: 16px;
+    color: var(--color-text-disabled);
+}
+
+/* The playhead: the one number that is where you are rather than where you could go. */
+.tick[data-now] {
+    padding: 0 6px;
+    border-radius: var(--radius-inner);
+    background: var(--color-accent);
+    color: var(--color-on-accent);
+}
+
+.timeline-frames {
+    display: flex;
+    align-items: stretch;
+    gap: 6px;
+    min-height: 0;
+    flex: 1 1 auto;
+}
+
+.frame-tile {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-element);
+    background: var(--color-background-card);
+    cursor: pointer;
+}
+
+.frame-tile[data-selected] {
+    border-color: var(--color-accent);
+}
+
+.frame-tile .thumbnail {
+    width: auto;
+    height: 100%;
+}
+
+.frame-blank {
+    display: block;
+    width: 44px;
+    height: 44px;
+}
+
+.frame-number {
+    position: absolute;
+    top: 2px;
+    left: 4px;
+    font-size: 10px;
+    color: var(--color-text-disabled);
+}
+
+.frame-add {
+    flex-direction: row;
+    padding: 0 14px;
+}
+
+/*
+ * The ground grid sits over the canvas rather than in the render — see `ViewportOverlay.tsx` for
+ * why. Faint enough to read as a floor and never as content.
+ */
+.ground-grid {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    color: var(--color-border-emphasized);
+    opacity: 0.35;
+    pointer-events: none;
 }

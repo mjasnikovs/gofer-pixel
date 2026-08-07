@@ -90,17 +90,19 @@ available.
 ## Commands
 
 ```bash
-bun run check        # format:check + lint + typecheck + test — the gate, 3.8 s, no browser
+bun run check        # format:check + lint + typecheck + test — the gate, 5.8 s, no browser
 bun run test         # bun test — scoped to src/ by bunfig.toml
 bun run build        # deployable app bundle to dist/ (not a package — no .d.ts, no lib entry)
-bun run test:browser # the Playwright suite — separate, does not gate `check`, 9 s
+bun run test:browser # the Playwright suite — separate, does not gate `check`, 15 s
 bun run dev          # the app on :1430
 bun run theme        # rebuild src/theme/gofer-pixel-theme.css from src/theme/theme.ts
 bun run format       # prettier --write
 ```
 
-`lint` and `format` are cached (`.eslintcache`, prettier's own). A cold `check` is about 7 s; the
-number above is the one that matters, because it is the one the inner loop pays.
+`lint` and `format` are cached (`.eslintcache`, prettier's own). A cold `check` is about 9 s; the
+number above is the one that matters, because it is the one the inner loop pays. Two and a half of
+those seconds are `App.test.tsx` mounting the whole window seven times — the mount is what costs
+under happy-dom, not the assertions, so a new test that needs a fresh window costs ~300 ms.
 
 ## Conventions
 

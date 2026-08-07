@@ -1,7 +1,7 @@
 import {expect, test} from 'bun:test'
 import {MODE_NORMAL} from '../render/raycast.glsl'
 import {readVox} from '../vox/vox-file'
-import {initialState, reduce, type AppState} from './state'
+import {initialState, MAX_BRUSH, reduce, type AppState} from './state'
 
 const volume = readVox(
     new Uint8Array(await Bun.file(new URL('../assets/car.vox', import.meta.url)).arrayBuffer())
@@ -84,4 +84,52 @@ test('create-eight-directions replaces the list rather than appending to it', ()
     const state = reduce(reduce(fresh(), {type: 'capture'}), {type: 'eight-directions'})
     expect(state.cameras).toHaveLength(8)
     expect(state.selected).toBe('dir-1')
+})
+
+test('duplicating copies the selected camera rather than referring to it', () => {
+    const state = reduce(reduce(fresh(), {type: 'select', id: 'dir-4'}), {type: 'duplicate'})
+    expect(state.cameras).toHaveLength(9)
+    expect(state.cameras[8]?.name).toBe('Back copy')
+    expect(state.cameras[8]?.camera).toEqual(state.cameras[4]?.camera as never)
+    expect(state.selected).toBe(state.cameras[8]?.id)
+
+    // Nothing selected is not "duplicate whatever was last selected"; it is nothing to duplicate.
+    const orbited = reduce(state, {
+        type: 'orbit',
+        event: {type: 'pointerdown', x: 0, y: 0, secondary: false},
+        height: 400
+    })
+    const dragged = reduce(orbited, {
+        type: 'orbit',
+        event: {type: 'pointermove', x: 40, y: 0},
+        height: 400
+    })
+    expect(reduce(dragged, {type: 'duplicate'})).toBe(dragged)
+})
+
+test('the document opens loaded with a colour the model actually uses', () => {
+    const state = fresh()
+    expect(state.color).toBeGreaterThan(0)
+    expect([...state.volume.data]).toContain(state.color)
+})
+
+test('the brush size is bounded by the document, not by the stepper', () => {
+    const state = fresh()
+    expect(reduce(state, {type: 'brush', brush: {size: 99}}).brush.size).toBe(MAX_BRUSH)
+    expect(reduce(state, {type: 'brush', brush: {size: 0}}).brush.size).toBe(1)
+    // A partial update leaves the rest of the brush alone.
+    expect(reduce(state, {type: 'brush', brush: {shape: 'cube'}}).brush.size).toBe(state.brush.size)
+})
+
+test('the chrome settings move without touching the render or the sheet', () => {
+    const baked = reduce(fresh(), {type: 'bake'})
+    const after = reduce(
+        reduce(reduce(baked, {type: 'tool', tool: 'move'}), {type: 'grid', on: false}),
+        {type: 'workspace', workspace: 'render'}
+    )
+    expect(after.tool).toBe('move')
+    expect(after.grid).toBe(false)
+    expect(after.workspace).toBe('render')
+    expect(after.sheet).toBe(baked.sheet)
+    expect(after.orbit).toBe(baked.orbit)
 })

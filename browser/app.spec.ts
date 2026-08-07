@@ -11,7 +11,11 @@ import {expect, test, type Page} from '@playwright/test'
 
 interface Handle {
     raycaster: {frames: number; renderNow: (basis: unknown, mode?: number) => Promise<number>}
-    state: {cameras: unknown[]; selected: string | undefined; sheet: unknown}
+    state: {
+        cameras: unknown[]
+        selected: string | undefined
+        sheet: {width: number; height: number} | undefined
+    }
     dispatch: (action: unknown) => void
     firstFrame: Promise<void>
 }
@@ -126,7 +130,15 @@ test('the depth view is a grey ramp and the voxel view is flat palette colour', 
     expect(depth.greys).toBeGreaterThan(20)
     expect(depth.greys).toBeLessThan(200)
 
-    await page.getByRole('radio', {name: 'Voxel'}).click()
+    /*
+     * The voxel-id view has no control in the window. `docs/editor.png`'s render row is Color /
+     * Normal / Depth / AO / Emission, and an extra tab for a mode that is a debugging aid rather
+     * than an output map would be chrome the spec does not have — so it is driven through the
+     * handle, which is what the handle is for.
+     */
+    await page.evaluate(() => {
+        window.goferPixel.dispatch({type: 'map', map: 5})
+    })
     const ids = await viewportSummary(page)
     // car.vox has a handful of materials, and no face lighting means one colour per material.
     expect(ids.colours).toBeGreaterThan(1)
@@ -161,20 +173,22 @@ test('nothing overlaps, nothing is clipped, and nothing overflows the window', a
     expect(viewport.height).toBeGreaterThan(200)
 })
 
-test('one click produces both sheets, and the canvases carry the exported pixels', async ({
-    page
-}) => {
+test('one click bakes the sheet and the export grid carries its pixels', async ({page}) => {
     await ready(page)
-    await page.getByRole('button', {name: 'Render sprite sheet'}).click()
+    await page.getByRole('button', {name: 'Export sprite sheet'}).click()
+
+    const sheet = await page.evaluate(() => window.goferPixel.state.sheet)
+    expect(sheet?.width).toBe(256)
+    expect(sheet?.height).toBe(128)
 
     const sizes = await page
-        .locator('canvas.sheet-canvas')
+        .locator('canvas.export-sprite')
         .evaluateAll(nodes => nodes.map(node => node.getAttribute('data-pixels')))
-    expect(sizes).toEqual(['256x128', '256x128'])
+    expect(sizes).toEqual(Array.from({length: 8}, () => '64x64'))
 
-    // The preview really holds the sheet, rather than an empty canvas of the right size.
+    // The grid really holds sprites, rather than eight empty canvases of the right size.
     const drawn = await page.evaluate(() => {
-        const canvas = document.querySelector('canvas.sheet-canvas')
+        const canvas = document.querySelector('canvas.export-sprite')
         if (!(canvas instanceof HTMLCanvasElement)) return -1
         const context = canvas.getContext('2d')
         if (!context) return -1
@@ -183,16 +197,25 @@ test('one click produces both sheets, and the canvases carry the exported pixels
         for (let i = 3; i < data.length; i += 4) if (data[i] === 255) count += 1
         return count
     })
-    expect(drawn).toBeGreaterThan(2000)
+    expect(drawn).toBeGreaterThan(200)
 })
 
-test('the sheet PNG actually downloads', async ({page}) => {
+test('exporting writes both PNGs, not just the colour one', async ({page}) => {
     await ready(page)
-    await page.getByRole('button', {name: 'Render sprite sheet'}).click()
 
-    const [download] = await Promise.all([
-        page.waitForEvent('download'),
-        page.getByRole('button', {name: 'Download sprites.png'}).click()
-    ])
-    expect(download.suggestedFilename()).toBe('sprites.png')
+    /*
+     * One listener counting to two, not two `waitForEvent`s — both of those resolve on the *same*
+     * first event, so the pair reports the colour sheet twice and the test passes without the
+     * normal map ever being written. Subscribed before the click, so nothing can be missed.
+     */
+    const both = new Promise<string[]>(resolve => {
+        const names: string[] = []
+        page.on('download', download => {
+            names.push(download.suggestedFilename())
+            if (names.length === 2) resolve(names)
+        })
+    })
+
+    await page.getByRole('button', {name: 'Export sprite sheet'}).click()
+    expect((await both).sort()).toEqual(['sprites-normal.png', 'sprites.png'])
 })

@@ -1,50 +1,28 @@
-import {Button} from '@astryxdesign/core/Button'
 import {IconButton} from '@astryxdesign/core/IconButton'
-import {SelectableCard} from '@astryxdesign/core/SelectableCard'
 import {Text} from '@astryxdesign/core/Text'
-import {useMemo} from 'react'
 import type {NamedCamera} from '../doc/cameras'
-import {basisFor} from '../render/camera'
-import {render} from '../render/raycast'
 import type {Volume} from '../render/volume'
-import {CameraIcon, TrashIcon} from './icons'
-import {PixelCanvas} from './PixelCanvas'
+import {CameraIcon, CopyIcon, PlusIcon, TrashIcon} from './icons'
 import {SectionHead} from './SectionHead'
+import {Thumbnail} from './Thumbnail'
 
 /**
  * The camera list from `docs/editor.png`: a three-wide grid of live thumbnails with the name laid
  * over the bottom of each tile, the selected one ringed in the accent, and a dashed tile at the end
  * that captures whatever the viewport is showing.
  *
- * The thumbnails come off the CPU raycaster — the same code that writes the exported sheet — so
- * what the artist picks from is what they get, rather than a preview drawn by a second renderer
- * that agrees with the first only most of the time. A 72 px thumbnail is a fraction of a
- * millisecond, so eight of them re-render whenever the list changes and nothing is cached.
+ * Laid out as a radio group rather than as a set of cards, because that is what it is — one camera
+ * is being looked at, and choosing another is a selection, not nine independent buttons. The
+ * shutter glyph in each tile's corner is the mockup's way of saying the tile is a stored view, and
+ * it is the same glyph the add tile carries.
  */
-const THUMBNAIL = 72
-
-const Thumbnail = ({volume, camera}: {volume: Volume; camera: NamedCamera['camera']}) => {
-    const pixels = useMemo(
-        () => render(volume, basisFor(camera, volume, THUMBNAIL), THUMBNAIL, THUMBNAIL).color,
-        [volume, camera]
-    )
-    return (
-        <PixelCanvas
-            width={THUMBNAIL}
-            height={THUMBNAIL}
-            data={pixels}
-            className='thumbnail'
-        />
-    )
-}
-
 export const CamerasPanel = ({
     volume,
     cameras,
     selected,
     onSelect,
     onCapture,
-    onEightDirections,
+    onDuplicate,
     onDelete
 }: {
     volume: Volume
@@ -52,11 +30,28 @@ export const CamerasPanel = ({
     selected: string | undefined
     onSelect: (id: string) => void
     onCapture: () => void
-    onEightDirections: () => void
+    onDuplicate: () => void
     onDelete: (id: string) => void
 }) => (
     <section className='section section-holds'>
         <SectionHead title='Cameras'>
+            <IconButton
+                label='Capture view as a camera'
+                tooltip='Capture the current view'
+                icon={<PlusIcon />}
+                size='sm'
+                variant='ghost'
+                onClick={onCapture}
+            />
+            <IconButton
+                label='Duplicate camera'
+                tooltip='Duplicate the selected camera'
+                icon={<CopyIcon />}
+                size='sm'
+                variant='ghost'
+                isDisabled={selected === undefined}
+                onClick={onDuplicate}
+            />
             <IconButton
                 label='Delete camera'
                 tooltip='Delete the selected camera'
@@ -70,32 +65,39 @@ export const CamerasPanel = ({
             />
         </SectionHead>
 
-        <div className='camera-grid'>
+        <div
+            className='camera-grid'
+            role='radiogroup'
+            aria-label='Cameras'
+        >
             {cameras.map(entry => (
-                <SelectableCard
+                <button
                     key={entry.id}
-                    label={entry.name}
-                    isSelected={entry.id === selected}
-                    onChange={() => {
+                    type='button'
+                    role='radio'
+                    aria-checked={entry.id === selected}
+                    className='camera-tile'
+                    data-selected={entry.id === selected || undefined}
+                    onClick={() => {
                         onSelect(entry.id)
                     }}
-                    padding={0}
                 >
-                    <div className='camera-tile'>
-                        <Thumbnail
-                            volume={volume}
-                            camera={entry.camera}
-                        />
-                        <span className='camera-name'>
-                            <Text
-                                type='supporting'
-                                maxLines={1}
-                            >
-                                {entry.name}
-                            </Text>
+                    <Thumbnail
+                        volume={volume}
+                        camera={entry.camera}
+                    />
+                    <span className='camera-name'>
+                        <Text
+                            type='supporting'
+                            maxLines={1}
+                        >
+                            {entry.name}
+                        </Text>
+                        <span className='camera-badge'>
+                            <CameraIcon />
                         </span>
-                    </div>
-                </SelectableCard>
+                    </span>
+                </button>
             ))}
 
             <button
@@ -103,24 +105,14 @@ export const CamerasPanel = ({
                 className='camera-add'
                 onClick={onCapture}
             >
-                <CameraIcon />
+                <PlusIcon />
                 <Text
                     type='supporting'
                     color='disabled'
                 >
-                    Capture view
+                    Add camera
                 </Text>
             </button>
-        </div>
-
-        <div className='section-foot'>
-            <Button
-                label='Create 8 directions'
-                size='sm'
-                variant='ghost'
-                width='100%'
-                onClick={onEightDirections}
-            />
         </div>
     </section>
 )
