@@ -32,7 +32,8 @@ const report = (
         height: host.clientHeight,
         button: event.button,
         shift: event.shiftKey,
-        alt: event.altKey
+        alt: event.altKey,
+        clicks: event.detail
     }
 }
 

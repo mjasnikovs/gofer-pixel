@@ -11,8 +11,19 @@ import {captureCamera, eightDirections, ISOMETRIC_PITCH, type NamedCamera} from 
 import {beginEdit, commitEdit, fillRegion, stampBrush, strokeBrush, type Draft} from '../doc/edits'
 import {EMPTY_HISTORY, record, redo, undo, type History} from '../doc/history'
 import {firstColor} from '../doc/palette'
+import {
+    EMPTY_SELECTION,
+    grow,
+    selectColor,
+    selectConnectedColor,
+    selectObject,
+    selectRect,
+    selectVoxel,
+    shrink,
+    type Selection
+} from '../doc/selection'
 import {basisFor, createCamera, type Camera} from '../render/camera'
-import {pick, pickPlane} from '../render/pick'
+import {pick, pickPlane, pickRay} from '../render/pick'
 import {MODE_COLOR} from '../render/raycast.glsl'
 import type {Volume} from '../render/volume'
 import {renderSheet, type Sheet} from '../sheet/sheet'
@@ -59,6 +70,23 @@ export type {Brush, BrushKind, Shape}
 const WRITES: ReadonlySet<Tool> = new Set<Tool>(['draw', 'erase', 'fill', 'pick'])
 
 /**
+ * The tools that work on a selection. Move is where selecting happens, because a selection with no
+ * tool that consumes it is a highlight — `docs/editor.png` has no separate select tool, and
+ * `FEATURESET.md` §39 is explicit that the rail should not grow one.
+ */
+const SELECTS: ReadonlySet<Tool> = new Set<Tool>(['move', 'rotate', 'scale', 'clone'])
+
+/** A rubber band while the pointer is down, in the viewport's own pixels. */
+export interface Band {
+    readonly x0: number
+    readonly y0: number
+    readonly x1: number
+    readonly y1: number
+    readonly width: number
+    readonly height: number
+}
+
+/**
  * A stroke in progress: one draft, and the layer it is pinned to.
  *
  * The layer is decided by the first click and never re-picked, which is what stops a drag climbing
@@ -98,6 +126,10 @@ export interface AppState {
     readonly history: History
     /** Non-`undefined` for exactly as long as the pointer is down on a writing tool. */
     readonly stroke: Stroke | undefined
+    /** Which voxels the next transform will move — see `doc/selection.ts`. */
+    readonly selection: Selection
+    /** Non-`undefined` while a rubber band is being dragged over the picture. */
+    readonly band: Band | undefined
 
     readonly tool: Tool
     readonly brush: Brush
@@ -116,6 +148,10 @@ export type AppAction =
     | {type: 'pointer'; event: ViewportPointer}
     | {type: 'undo'}
     | {type: 'redo'}
+    | {type: 'select-color'; color?: number}
+    | {type: 'grow-selection'}
+    | {type: 'shrink-selection'}
+    | {type: 'clear-selection'}
     | {type: 'select'; id: string}
     | {type: 'eight-directions'}
     | {type: 'capture'}
@@ -166,6 +202,8 @@ export const initialState = (volume: Volume): AppState => {
         serial: 0,
         history: EMPTY_HISTORY,
         stroke: undefined,
+        selection: EMPTY_SELECTION,
+        band: undefined,
         tool: 'draw',
         brush: {kind: 'voxel', size: 2, shape: 'square'},
         color: firstColor(volume),
@@ -262,6 +300,51 @@ const continueStroke = (state: AppState, event: ViewportPointer): AppState => {
     return {...state, volume: live(stroke.draft), stroke: {...stroke, at: cell}}
 }
 
+/**
+ * `FEATURESET.md` §31's four gestures, on one click.
+ *
+ * Click a voxel takes the voxel; double-click takes its connected colour; Alt-click takes the whole
+ * connected solid. A click on air starts a rubber band instead — the only reading of a drag over
+ * nothing that does not throw the current selection away by accident.
+ */
+const beginSelect = (state: AppState, event: ViewportPointer): AppState => {
+    if (event.height <= 0 || event.width <= 0) return state
+    const basis = basisFor(state.orbit.camera, state.volume, event.height)
+    const hit = pickRay(state.volume, basis, event.x, event.y, event.width, event.height)
+    if (!hit) {
+        return {
+            ...state,
+            band: {
+                x0: event.x,
+                y0: event.y,
+                x1: event.x,
+                y1: event.y,
+                width: event.width,
+                height: event.height
+            }
+        }
+    }
+    const selection =
+        event.clicks >= 2 ? selectConnectedColor(state.volume, hit.x, hit.y, hit.z)
+        : event.alt ? selectObject(state.volume, hit.x, hit.y, hit.z)
+        : selectVoxel(state.volume, hit.x, hit.y, hit.z)
+    return {...state, selection, band: undefined}
+}
+
+const endBand = (state: AppState): AppState => {
+    const {band} = state
+    if (!band) return state
+    const basis = basisFor(state.orbit.camera, state.volume, band.height)
+    // A band that never moved is a click on air, and a click on air deselects.
+    const moved = Math.abs(band.x1 - band.x0) > 1 || Math.abs(band.y1 - band.y0) > 1
+    return {
+        ...state,
+        band: undefined,
+        selection:
+            moved ? selectRect(state.volume, basis, band, band.width, band.height) : EMPTY_SELECTION
+    }
+}
+
 const endStroke = (state: AppState): AppState => {
     const {stroke} = state
     if (!stroke) return state
@@ -293,8 +376,9 @@ export const reduce = (state: AppState, action: AppAction): AppState => {
         case 'pointer': {
             const {event} = action
             if (event.type === 'down') {
-                if (event.button === 0 && !event.shift && WRITES.has(state.tool)) {
-                    return beginStroke(state, event)
+                if (event.button === 0 && !event.shift) {
+                    if (WRITES.has(state.tool)) return beginStroke(state, event)
+                    if (SELECTS.has(state.tool)) return beginSelect(state, event)
                 }
                 return reduce(state, {
                     type: 'orbit',
@@ -309,6 +393,11 @@ export const reduce = (state: AppState, action: AppAction): AppState => {
             }
             if (state.stroke) {
                 return event.type === 'move' ? continueStroke(state, event) : endStroke(state)
+            }
+            if (state.band) {
+                return event.type === 'move' ?
+                        {...state, band: {...state.band, x1: event.x, y1: event.y}}
+                    :   endBand(state)
             }
             return reduce(state, {
                 type: 'orbit',
@@ -332,6 +421,18 @@ export const reduce = (state: AppState, action: AppAction): AppState => {
             const forward = redo(state.volume, state.history)
             return forward ? {...state, ...forward, sheet: undefined} : state
         }
+
+        case 'select-color':
+            return {...state, selection: selectColor(state.volume, action.color ?? state.color)}
+
+        case 'grow-selection':
+            return {...state, selection: grow(state.volume, state.selection)}
+
+        case 'shrink-selection':
+            return {...state, selection: shrink(state.volume, state.selection)}
+
+        case 'clear-selection':
+            return state.selection.size === 0 ? state : {...state, selection: EMPTY_SELECTION}
 
         case 'select': {
             const found = state.cameras.find(({id}) => id === action.id)

@@ -1,4 +1,5 @@
 import {useCallback, useEffect, useMemo, useReducer} from 'react'
+import {selectionBounds} from '../doc/selection'
 import type {Raycaster} from '../render/gl'
 import type {Volume} from '../render/volume'
 import {Viewport} from '../viewport/Viewport'
@@ -11,7 +12,7 @@ import {Header} from './Header'
 import {RendersPanel} from './RendersPanel'
 import {Timeline} from './Timeline'
 import {GridPanel, ToolRail} from './ToolRail'
-import {AxisGizmo, GroundGrid, HintBar, ViewCube} from './ViewportOverlay'
+import {AxisGizmo, GroundGrid, HintBar, SelectionBox, ViewCube} from './ViewportOverlay'
 import {ViewsStrip} from './ViewsStrip'
 import {initialState, reduce, TOOLS} from './state'
 import {handle} from './handle'
@@ -86,6 +87,10 @@ export const App = ({volume: source, name}: {volume: Volume; name: string}) => {
             }
             if (event.altKey) return
             if (event.key === 'c' || event.key === 'C') capture()
+            if (event.key === 'Escape') dispatch({type: 'clear-selection'})
+            // The two brackets that every editor uses for "more of this" and "less of this".
+            if (event.key === ']') dispatch({type: 'grow-selection'})
+            if (event.key === '[') dispatch({type: 'shrink-selection'})
         }
         document.addEventListener('keydown', onKey)
         return () => {
@@ -103,6 +108,11 @@ export const App = ({volume: source, name}: {volume: Volume; name: string}) => {
     const current = useMemo(
         () => state.cameras.find(({id}) => id === state.selected),
         [state.cameras, state.selected]
+    )
+
+    const bounds = useMemo(
+        () => selectionBounds(volume, state.selection),
+        [volume, state.selection]
     )
 
     return (
@@ -157,6 +167,12 @@ export const App = ({volume: source, name}: {volume: Volume; name: string}) => {
                             camera={state.orbit.camera}
                         />
                     :   undefined}
+                    <SelectionBox
+                        volume={volume}
+                        camera={state.orbit.camera}
+                        bounds={bounds}
+                        band={state.band}
+                    />
                     <AxisGizmo
                         volume={volume}
                         camera={state.orbit.camera}

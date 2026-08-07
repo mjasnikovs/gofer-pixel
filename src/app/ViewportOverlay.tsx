@@ -122,6 +122,98 @@ export const GroundGrid = ({volume, camera}: {volume: Volume; camera: Camera}) =
     )
 }
 
+/**
+ * The box around what is selected, and the rubber band that is choosing it.
+ *
+ * The box is the selection's own integer bounds projected with the live basis — the same trick as
+ * `ViewCube`, for the same reason: it turns with the model instead of being a decal of one angle.
+ * Bounds rather than a per-voxel outline because a selection can be thousands of cells, and twelve
+ * lines say where it is without asking the browser to lay out ten thousand paths.
+ */
+export const SelectionBox = ({
+    volume,
+    camera,
+    bounds,
+    band
+}: {
+    volume: Volume
+    camera: Camera
+    bounds: {min: Vec3; max: Vec3} | undefined
+    band: {x0: number; y0: number; x1: number; y1: number} | undefined
+}) => {
+    const {right, up, center} = basisFor(camera, volume, 1)
+    const project = (p: Vec3): {x: number; y: number} => {
+        const d: Vec3 = [p[0] - center[0], p[1] - center[1], p[2] - center[2]]
+        return {x: dot(d, right), y: -dot(d, up)}
+    }
+    const half = camera.zoom / 2
+
+    const corners: Vec3[] = []
+    if (bounds) {
+        const {min, max} = bounds
+        for (let i = 0; i < 8; i += 1) {
+            corners.push([
+                (i & 1) === 0 ? min[0] : max[0] + 1,
+                ((i >> 1) & 1) === 0 ? min[1] : max[1] + 1,
+                ((i >> 2) & 1) === 0 ? min[2] : max[2] + 1
+            ])
+        }
+    }
+    const flat = corners.map(project)
+
+    return (
+        <>
+            {flat.length === 8 ?
+                <svg
+                    className='selection-box'
+                    viewBox={`${String(-half)} ${String(-half)} ${String(camera.zoom)} ${String(camera.zoom)}`}
+                    preserveAspectRatio='xMidYMid slice'
+                    aria-hidden='true'
+                >
+                    {BOX_EDGES.map(([from, to]) => (
+                        <line
+                            key={`${String(from)}-${String(to)}`}
+                            x1={flat[from]?.x ?? 0}
+                            y1={flat[from]?.y ?? 0}
+                            x2={flat[to]?.x ?? 0}
+                            y2={flat[to]?.y ?? 0}
+                            stroke='currentColor'
+                            strokeWidth='1.5'
+                            vectorEffect='non-scaling-stroke'
+                        />
+                    ))}
+                </svg>
+            :   undefined}
+            {band ?
+                <div
+                    className='rubber-band'
+                    style={{
+                        left: Math.min(band.x0, band.x1),
+                        top: Math.min(band.y0, band.y1),
+                        width: Math.abs(band.x1 - band.x0),
+                        height: Math.abs(band.y1 - band.y0)
+                    }}
+                />
+            :   undefined}
+        </>
+    )
+}
+
+const BOX_EDGES: readonly [number, number][] = [
+    [0, 1],
+    [2, 3],
+    [4, 5],
+    [6, 7],
+    [0, 2],
+    [1, 3],
+    [4, 6],
+    [5, 7],
+    [0, 4],
+    [1, 5],
+    [2, 6],
+    [3, 7]
+]
+
 export const AxisGizmo = ({volume, camera}: {volume: Volume; camera: Camera}) => {
     const {right, up, forward} = basisFor(camera, volume, 1)
     // Painter's order: an axis pointing away from the viewer is drawn first, so the near one wins

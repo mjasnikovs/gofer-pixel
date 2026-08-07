@@ -48,6 +48,14 @@ export interface ViewportPointer {
     readonly button: number
     readonly shift: boolean
     readonly alt: boolean
+    /**
+     * The browser's own click count, straight off `MouseEvent.detail`.
+     *
+     * A double-click is therefore a fact the platform reports, not something this app times. That
+     * matters twice over: the testing law forbids waiting for a duration, and a hand-rolled
+     * double-click threshold would disagree with the one the artist set in their desktop.
+     */
+    readonly clicks: number
 }
 
 /** A 100 px drag is one radian, which is about as fast as an orbit can be and stay controllable. */

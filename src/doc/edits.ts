@@ -106,7 +106,17 @@ export const strokeBrush = (
  * Face-connected, not corner-connected: two voxels touching at an edge are two objects to a voxel
  * artist, and a diagonal leak fills a whole model through a one-voxel gap.
  */
-export const connected = (volume: Volume, x: number, y: number, z: number): Set<number> => {
+export const connected = (
+    volume: Volume,
+    x: number,
+    y: number,
+    z: number,
+    /**
+     * What counts as "the same". The default is the same palette index, which is what a fill and
+     * "select connected colour" both mean; "select the whole object" passes `value !== 0` instead.
+     */
+    match: (value: number, seed: number) => boolean = (value, seed) => value === seed
+): Set<number> => {
     const {sx, sy, sz} = volume
     const seen = new Set<number>()
     if (x < 0 || y < 0 || z < 0 || x >= sx || y >= sy || z >= sz) return seen
@@ -122,7 +132,7 @@ export const connected = (volume: Volume, x: number, y: number, z: number): Set<
             const ny = cy + dy
             const nz = cz + dz
             if (nx < 0 || ny < 0 || nz < 0 || nx >= sx || ny >= sy || nz >= sz) continue
-            if (voxelAt(volume, nx, ny, nz) !== target) continue
+            if (!match(voxelAt(volume, nx, ny, nz), target)) continue
             const index = voxelIndex(volume, nx, ny, nz)
             if (seen.has(index)) continue
             seen.add(index)

@@ -31,6 +31,7 @@ const at = (
         button: 0,
         shift: false,
         alt: false,
+        clicks: 1,
         ...over
     }
 })
@@ -345,6 +346,62 @@ test('an edit is visible to the picker on the very next event', () => {
     const down = reduce(state, at('down', column, row))
     const cell = down.stroke?.at ?? [0, 0, 0]
     expect(voxelAt(down.volume, cell[0], cell[1], cell[2])).toBe(down.color)
+})
+
+test('with move armed a click selects, a double-click takes the colour, alt takes the solid', () => {
+    const state = armed('move')
+    const {column, row} = onModel(state)
+
+    const one = reduce(state, at('down', column, row))
+    expect(one.selection.size).toBe(1)
+    expect(one.volume).toBe(state.volume)
+    expect(one.history.past).toHaveLength(0)
+
+    const twice = reduce(state, at('down', column, row, {clicks: 2}))
+    expect(twice.selection.size).toBeGreaterThan(1)
+
+    const solid = reduce(state, at('down', column, row, {alt: true}))
+    expect(solid.selection.size).toBeGreaterThanOrEqual(twice.selection.size)
+
+    // Grow reaches into the solid; shrink erodes anything touching air, so on a surface voxel the
+    // pair is not a round trip and should not pretend to be.
+    const grown = reduce(one, {type: 'grow-selection'})
+    expect(grown.selection.size).toBeGreaterThan(1)
+    for (const index of one.selection) expect(grown.selection.has(index)).toBe(true)
+    expect(reduce(one, {type: 'shrink-selection'}).selection.size).toBe(0)
+    expect(reduce(grown, {type: 'clear-selection'}).selection.size).toBe(0)
+})
+
+test('a rubber band over air selects the surface under it, and a click on air deselects', () => {
+    const state = armed('move')
+    const seeded = reduce(state, at('down', onModel(state).column, onModel(state).row))
+    expect(seeded.selection.size).toBe(1)
+
+    // Starting on air begins a band rather than throwing the selection away on the way past.
+    const down = reduce(seeded, at('down', 0, 0))
+    expect(down.band).toBeDefined()
+    expect(down.selection).toBe(seeded.selection)
+
+    const dragged = reduce(down, at('move', SIZE - 1, SIZE - 1))
+    expect(dragged.band?.x1).toBe(SIZE - 1)
+
+    const released = reduce(dragged, at('up', SIZE - 1, SIZE - 1))
+    expect(released.band).toBeUndefined()
+    // A band over the whole picture takes every visible voxel, which is more than one.
+    expect(released.selection.size).toBeGreaterThan(50)
+
+    // A band that never moved is a click on air, and that means "nothing selected".
+    const tapped = reduce(reduce(released, at('down', 0, 0)), at('up', 0, 0))
+    expect(tapped.selection.size).toBe(0)
+})
+
+test('selecting by colour takes the loaded colour unless told another', () => {
+    const state = armed('move')
+    const mine = reduce(state, {type: 'select-color'})
+    expect(mine.selection.size).toBeGreaterThan(0)
+    for (const index of mine.selection) expect(state.volume.data[index]).toBe(state.color)
+
+    expect(reduce(state, {type: 'select-color', color: 0}).selection.size).toBe(0)
 })
 
 test('the chrome settings move without touching the render or the sheet', () => {
