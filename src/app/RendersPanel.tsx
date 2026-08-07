@@ -9,6 +9,7 @@ import {
     MODE_NORMAL
 } from '../render/raycast.glsl'
 import type {Volume} from '../render/volume'
+import {NormalCheck} from './NormalCheck'
 import {SectionHead} from './SectionHead'
 import {Thumbnail} from './Thumbnail'
 
@@ -125,6 +126,14 @@ export const RendersPanel = ({
                     </Text>
                 }
             </div>
+
+            {map === MODE_NORMAL && camera ?
+                <NormalCheck
+                    volume={volume}
+                    camera={camera}
+                    size={size}
+                />
+            :   undefined}
         </div>
     </section>
 )

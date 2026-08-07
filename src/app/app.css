@@ -488,6 +488,17 @@ body,
     color: var(--color-icon-accent);
 }
 
+/*
+ * The normal-map diagnostic, under the Normal tab. Same preview box as the tab above it, so the
+ * two read as one thing being looked at two ways rather than as two panels.
+ */
+.normal-check {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 0 12px 12px;
+}
+
 /* ---- objects ---- */
 
 .object-body {
