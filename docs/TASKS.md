@@ -11,24 +11,31 @@ palette (29), the radial menu (30), the stamp library (35) and the project brows
 
 Each item ends with `bun run check` green. Nothing waits — see `CLAUDE.md`.
 
-| #   | Task                                           | FEATURESET     |
-| --- | ---------------------------------------------- | -------------- |
-| 1   | Voxel edits + undo history                     | 3, 32          |
-| 2   | Screen → voxel picking                         | 4              |
-| 3   | Draw / erase / paint / fill / pick, wired      | 3, 4           |
-| 4   | Selection model                                | 31, 3          |
-| 5   | Voxel-safe transforms and symmetry             | 9, 10          |
-| 6   | Move, extrude and mirror tools                 | 3, 4           |
-| 7   | 2D drawing inside 3D                           | 5              |
-| 8   | Objects instead of one volume, focus/isolate   | 8, 28, 1       |
-| 9   | Slice mode                                     | 6              |
-| 10  | Palette-first workflow                         | 7              |
-| 11  | The remaining output maps, emissive            | 18, 20         |
-| 12  | Normal-map diagnostic preview                  | 19             |
-| 13  | Camera generators, pixel-perfect, live preview | 13, 14, 15     |
-| 14  | Sheet workspace and export                     | 16, 17, 37, 38 |
-| 15  | Reference images and PNG import                | 33, 34         |
-| 16  | Autosave, crash recovery, snapshots            | 32             |
+| #   | Task                                           | FEATURESET     | State |
+| --- | ---------------------------------------------- | -------------- | ----- |
+| 1   | Voxel edits + undo history                     | 3, 32          | done  |
+| 2   | Screen → voxel picking                         | 4              | done  |
+| 3   | Draw / erase / paint / fill / pick, wired      | 3, 4           | done  |
+| 4   | Selection model                                | 31, 3          | done  |
+| 5   | Voxel-safe transforms and symmetry             | 9, 10          | done  |
+| 6   | Move, extrude and mirror tools                 | 3, 4           | done  |
+| 7   | 2D drawing inside 3D                           | 5              | done  |
+| 8   | Objects instead of one volume, focus/isolate   | 8, 28, 1       |       |
+| 9   | Slice mode                                     | 6              |       |
+| 10  | Palette-first workflow                         | 7              |       |
+| 11  | The remaining output maps, emissive            | 18, 20         | done  |
+| 12  | Normal-map diagnostic preview                  | 19             |       |
+| 13  | Camera generators, pixel-perfect, live preview | 13, 14, 15     |       |
+| 14  | Sheet workspace and export                     | 16, 17, 37, 38 |       |
+| 15  | Reference images and PNG import                | 33, 34         |       |
+| 16  | Autosave, crash recovery, snapshots            | 32             |       |
+
+Item 11 was taken out of order: items 12, 13 and 14 all read the maps it adds, and it is the one
+that touches the two-backend parity contract, so it was better closed early than late.
+
+Item 8 is the one left that reshapes the renderer — a list of objects means compositing several
+volumes per ray, and the CPU and GPU raycasters have to keep agreeing byte for byte while it
+happens. Nothing after it depends on it, so it is not blocking the rest.
 
 Items 2, 39 and 40 are not tasks. They are the rules the other sixteen are judged by: everything on
 integer coordinates, nearest everywhere, the preview is the export, and the beginner sees six

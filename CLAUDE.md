@@ -13,9 +13,12 @@ produce pixels.
 2. `docs/FEATURESET.md` — the product intent, 40 items. Treat it as a someday-list.
 3. `docs/editor.png` and `docs/featureset.png` — **these two mockups are the spec.** When the two
    disagree with FEATURESET.md, the mockups win.
-4. `docs/POC_PROMPT.md` — the brief the current `src/` was built against, with its do-not-build list
-   and its measurable done criteria. All six steps are built; the list of things it says not to
-   build is still the list of things not to build.
+4. `docs/TASKS.md` — the list being worked through now: every unpostponed item of `FEATURESET.md`,
+   in dependency order, with what is done and what is left.
+5. `docs/POC_PROMPT.md` — the brief the current `src/` was built against. All six steps are built.
+   **Its do-not-build list has been superseded by `docs/TASKS.md`**: editing, selection, transforms
+   and the remaining output maps were on it because they proved nothing about the architecture, and
+   they are now the product.
 
 ## The rebuild
 
@@ -34,8 +37,8 @@ What is there now, and roughly in dependency order:
 | --------------- | -------------------------------------------------------------------------------- |
 | `src/render/`   | the CPU raycaster, the shader it is mirrored by, the camera, the WebGL2 renderer |
 | `src/vox/`      | `.vox` → `Volume`                                                                |
-| `src/doc/`      | what a camera is, and the eight-direction generator                              |
-| `src/sheet/`    | packing cameras into a colour sheet and a normal sheet                           |
+| `src/doc/`      | cameras, the brush, edits, undo, selection, transforms, symmetry, figures        |
+| `src/sheet/`    | packing cameras into the six output sheets                                       |
 | `src/image/`    | PNG encoding                                                                     |
 | `src/viewport/` | orbit/pan/zoom as a pure function, and the React canvas                          |
 | `src/app/`      | the whole app as one value and one `reduce`, plus the panels that show it        |
