@@ -1,5 +1,6 @@
 dist
 legacy
+docs/spikes
 node_modules
 bun.lock
 .venv
