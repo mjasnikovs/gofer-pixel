@@ -7,10 +7,10 @@ import type {Axis, Offset} from './brush'
  * it is over now. Every one of them returns cells rather than writing, so the caller can stamp the
  * brush on each and mirror the lot through symmetry, exactly as a freehand stroke does.
  *
- * They are outlines, not fills. A filled rectangle is an outline and the fill tool, and offering
- * both doubles a control row for something the artist already has two ways to do.
+ * The rectangle comes in both outline and solid; the ellipse is outline only, because a solid disc
+ * is the round brush at the size you want it and the ellipse is not.
  */
-export const FIGURES = ['free', 'line', 'rect', 'ellipse'] as const
+export const FIGURES = ['free', 'line', 'rect', 'rectFill', 'ellipse'] as const
 export type Figure = (typeof FIGURES)[number]
 
 /** A 3D Bresenham, so a line works whether or not the two ends share a plane. */
@@ -74,6 +74,17 @@ export const rectFigure = (from: Offset, to: Offset, axis: Axis): readonly Offse
     return cells
 }
 
+/** Every cell of the dragged box, not just its border. */
+export const rectFillFigure = (from: Offset, to: Offset, axis: Axis): readonly Offset[] => {
+    const {u, v, u0, u1, v0, v1} = box(from, to, axis)
+    const layer = from[axis]
+    const cells: Offset[] = []
+    for (let b = v0; b <= v1; b += 1) {
+        for (let a = u0; a <= u1; a += 1) cells.push(at(axis, layer, u, a, v, b))
+    }
+    return cells
+}
+
 /**
  * The boundary of the ellipse inscribed in the dragged box.
  *
@@ -119,6 +130,8 @@ export const figureCells = (
             return lineFigure(from, to)
         case 'rect':
             return rectFigure(from, to, axis)
+        case 'rectFill':
+            return rectFillFigure(from, to, axis)
         case 'ellipse':
             return ellipseFigure(from, to, axis)
         case 'free':

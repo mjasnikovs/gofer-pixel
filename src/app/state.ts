@@ -1,11 +1,9 @@
 import {
-    BRUSH_KINDS,
     faceAxis,
     MAX_BRUSH,
     SHAPES,
     type Axis,
     type Brush,
-    type BrushKind,
     type Offset,
     type Shape
 } from '../doc/brush'
@@ -115,8 +113,8 @@ export type Tool = (typeof TOOLS)[number]
  * here is a projection of it. Re-exported so the panels keep importing their types from the state
  * they are drawn from.
  */
-export {BRUSH_KINDS, MAX_BRUSH, SHAPES}
-export type {Brush, BrushKind, Shape}
+export {MAX_BRUSH, SHAPES}
+export type {Brush, Shape}
 
 /**
  * The tools that take the left button in the viewport. The rest still orbit with it, because a tool
@@ -535,7 +533,7 @@ export const initialState = (source: Volume, opened?: OpenedDocument): AppState 
         clipboard: undefined,
         slice: undefined,
         tool: 'draw',
-        brush: {kind: 'voxel', size: 2, shape: 'square', figure: 'free'},
+        brush: {size: 2, shape: 'square', figure: 'free'},
         color: firstColor(volume),
         recent: [firstColor(volume)],
         paletteLocked: false,

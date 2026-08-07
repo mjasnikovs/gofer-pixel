@@ -99,7 +99,7 @@ export const CubeIcon = () => (
 /* ---- what a drag draws between its two ends ---- */
 
 /**
- * The four figures, each drawn as the shape it produces with its two ends marked.
+ * The five figures, each drawn as the shape it produces with its two ends marked.
  *
  * The dots are the whole idea. A line, a rectangle and an ellipse are all "press here, release
  * there", and what distinguishes them is only what gets filled in between — so every one of these is
@@ -168,6 +168,29 @@ export const RectIcon = () => (
     </Svg>
 )
 
+export const RectFillIcon = () => (
+    <Svg>
+        <path
+            d='M3.5 3.5h9v9h-9z'
+            fill='currentColor'
+        />
+        <circle
+            cx='3.5'
+            cy='12.5'
+            r='1.5'
+            fill='currentColor'
+            stroke='none'
+        />
+        <circle
+            cx='12.5'
+            cy='3.5'
+            r='1.5'
+            fill='currentColor'
+            stroke='none'
+        />
+    </Svg>
+)
+
 export const EllipseIcon = () => (
     <Svg>
         <ellipse
@@ -189,44 +212,6 @@ export const EllipseIcon = () => (
             r='1.5'
             fill='currentColor'
             stroke='none'
-        />
-    </Svg>
-)
-
-/* ---- what a click writes: one cell, the face it lands on, or the whole layer ---- */
-
-/**
- * The three brush kinds, drawn as the same grid with a different part of it lit.
- *
- * They share a frame on purpose: the difference between them is not what shape the brush is — that
- * is the Shape row — but how far the same stamp spreads. One cell, the run of cells across the face
- * the ray struck, or every cell of the layer.
- */
-export const VoxelIcon = () => (
-    <Svg>
-        <path d='M2.5 2.5h11v11h-11z' />
-        <path
-            d='M6.5 6.5h3v3h-3z'
-            fill='currentColor'
-        />
-    </Svg>
-)
-
-export const FaceIcon = () => (
-    <Svg>
-        <path d='M2.5 2.5h11v11h-11z' />
-        <path
-            d='M2.5 6.5h11v3h-11z'
-            fill='currentColor'
-        />
-    </Svg>
-)
-
-export const PlaneIcon = () => (
-    <Svg>
-        <path
-            d='M2.5 2.5h11v11h-11z'
-            fill='currentColor'
         />
     </Svg>
 )

@@ -9,22 +9,20 @@ import {
     CubeIcon,
     DownloadIcon,
     EllipseIcon,
-    FaceIcon,
     FreeIcon,
     LineIcon,
     MinusIcon,
     PickIcon,
-    PlaneIcon,
     PlusIcon,
+    RectFillIcon,
     RectIcon,
     RingIcon,
     SquareIcon,
-    UploadIcon,
-    VoxelIcon
+    UploadIcon
 } from './icons'
 import {SectionHead} from './SectionHead'
 import {FIGURES, type Figure} from '../doc/figures'
-import {BRUSH_KINDS, MAX_BRUSH, SHAPES, type Brush, type Shape} from './state'
+import {MAX_BRUSH, SHAPES, type Brush, type Shape} from './state'
 
 /**
  * The second column of `docs/editor.png`: what the brush is, and what colour is loaded into it.
@@ -55,6 +53,7 @@ const FIGURE_ICONS: Record<Figure, ReactNode> = {
     free: <FreeIcon />,
     line: <LineIcon />,
     rect: <RectIcon />,
+    rectFill: <RectFillIcon />,
     ellipse: <EllipseIcon />
 }
 
@@ -62,19 +61,8 @@ const FIGURE_LABELS: Record<Figure, string> = {
     free: 'Freehand — the stroke follows the cursor',
     line: 'Line between the two ends of the drag',
     rect: 'Rectangle between the two ends of the drag',
+    rectFill: 'Filled rectangle between the two ends of the drag',
     ellipse: 'Ellipse inscribed in the drag'
-}
-
-const KIND_ICONS: Record<(typeof BRUSH_KINDS)[number], ReactNode> = {
-    voxel: <VoxelIcon />,
-    face: <FaceIcon />,
-    plane: <PlaneIcon />
-}
-
-const KIND_LABELS: Record<(typeof BRUSH_KINDS)[number], string> = {
-    voxel: 'Voxel — write the one cell under the cursor',
-    face: 'Face — write across the face the ray struck',
-    plane: 'Plane — write the whole layer'
 }
 
 /**
@@ -177,42 +165,6 @@ export const BrushPanel = ({
         <section className='section'>
             <SectionHead title='Brush' />
             <div className='section-body'>
-                {/*
-                 * How far one click spreads — one cell, a face, a whole layer. It was a dropdown,
-                 * which cost two clicks and a popup to change a setting that sits next to two rows
-                 * of one-click buttons doing the same kind of job. Three options never needed a
-                 * menu; the menu was hiding two of them behind the one that happened to be current.
-                 */}
-                <Text
-                    type='supporting'
-                    color='disabled'
-                >
-                    Reach
-                </Text>
-                <div
-                    className='shape-row'
-                    role='radiogroup'
-                    aria-label='Brush kind'
-                >
-                    {BRUSH_KINDS.map(kind => (
-                        <button
-                            key={kind}
-                            type='button'
-                            role='radio'
-                            aria-checked={kind === brush.kind}
-                            aria-label={KIND_LABELS[kind]}
-                            title={KIND_LABELS[kind]}
-                            className='shape'
-                            data-selected={kind === brush.kind || undefined}
-                            onClick={() => {
-                                onBrush({kind})
-                            }}
-                        >
-                            {KIND_ICONS[kind]}
-                        </button>
-                    ))}
-                </div>
-
                 <div className='field-row'>
                     <Text
                         type='supporting'

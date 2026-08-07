@@ -2,7 +2,7 @@ import {FACE_Z_POS} from '../render/faces'
 import type {Figure} from './figures'
 
 /**
- * The brush of `docs/editor.png`: a kind, a size and one of four footprints.
+ * The brush of `docs/editor.png`: a size and one of four footprints.
  *
  * It lives in `doc/` rather than in the app because the footprint is document arithmetic — which
  * cells a click writes — and a `bun test` of it needs no window. The panel that sets it is a
@@ -11,14 +11,10 @@ import type {Figure} from './figures'
 export const SHAPES = ['square', 'circle', 'ring', 'cube'] as const
 export type Shape = (typeof SHAPES)[number]
 
-export const BRUSH_KINDS = ['voxel', 'face', 'plane'] as const
-export type BrushKind = (typeof BRUSH_KINDS)[number]
-
 /** A brush wider than eight voxels is a fill, and there is a fill tool two rows down. */
 export const MAX_BRUSH = 8
 
 export interface Brush {
-    readonly kind: BrushKind
     readonly size: number
     readonly shape: Shape
     /**

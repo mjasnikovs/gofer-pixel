@@ -16,7 +16,6 @@ import {
 import {EMPTY_HISTORY, HISTORY_LIMIT, canRedo, canUndo, record, redo, undo} from './history'
 
 const brush = (over: Partial<Brush> = {}): Brush => ({
-    kind: 'voxel',
     size: 1,
     shape: 'square',
     figure: 'free',
