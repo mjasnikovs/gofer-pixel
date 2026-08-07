@@ -15,6 +15,8 @@ interface Handle {
         cameras: unknown[]
         selected: string | undefined
         sheet: {width: number; height: number} | undefined
+        volume: {data: Uint8Array}
+        history: {past: unknown[]}
     }
     dispatch: (action: unknown) => void
     firstFrame: Promise<void>
@@ -81,15 +83,47 @@ test('a real pointer drag with capture reaches the state machine and lands a fra
     const box = await page.locator('[data-testid="viewport"]').boundingBox()
     if (!box) throw new Error('the viewport has no box')
 
+    // The right button orbits, because the left one belongs to whichever tool is armed.
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
-    await page.mouse.down()
+    await page.mouse.down({button: 'right'})
     await page.mouse.move(box.x + box.width / 2 + 120, box.y + box.height / 2 + 40)
-    await page.mouse.up()
+    await page.mouse.up({button: 'right'})
 
     // Dragging away from a stored camera is what clears the selection, so this proves the whole
     // path: browser pointer → orbit gesture → reducer → a new frame on the GPU.
     expect(await page.evaluate(() => window.goferPixel.state.selected)).toBeUndefined()
     expect(await frames(page)).toBeGreaterThan(before)
+})
+
+test('a left drag with Draw armed writes voxels and lands them on the GPU', async ({page}) => {
+    await ready(page)
+    const box = await page.locator('[data-testid="viewport"]').boundingBox()
+    if (!box) throw new Error('the viewport has no box')
+    const before = await page.evaluate(() => window.goferPixel.state.volume.data.length)
+    const filled = (): Promise<number> =>
+        page.evaluate(() =>
+            window.goferPixel.state.volume.data.reduce(
+                (count: number, value: number) => (value === 0 ? count : count + 1),
+                0
+            )
+        )
+    const was = await filled()
+    const frame = await frames(page)
+
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(box.x + box.width / 2 + 30, box.y + box.height / 2 + 10)
+    await page.mouse.up()
+
+    // The grid keeps its shape — a stroke writes cells, it does not resize the document.
+    expect(await page.evaluate(() => window.goferPixel.state.volume.data.length)).toBe(before)
+    expect(await filled()).toBeGreaterThan(was)
+    expect(await page.evaluate(() => window.goferPixel.state.history.past.length)).toBe(1)
+    // Real proof it reached the GPU: the texture went up again and a frame landed after it.
+    expect(await frames(page)).toBeGreaterThan(frame)
+
+    await page.keyboard.press('Control+z')
+    expect(await filled()).toBe(was)
 })
 
 /**

@@ -2,7 +2,7 @@ import {useCallback, useEffect, useMemo, useReducer} from 'react'
 import type {Raycaster} from '../render/gl'
 import type {Volume} from '../render/volume'
 import {Viewport} from '../viewport/Viewport'
-import type {OrbitEvent} from '../viewport/orbit'
+import type {OrbitEvent, ViewportPointer} from '../viewport/orbit'
 import {BrushPanel} from './BrushPanel'
 import {CamerasPanel} from './CamerasPanel'
 import {writeSheet} from './download'
@@ -26,11 +26,18 @@ import {handle} from './handle'
  * There is no state here. Everything is `reduce` in `state.ts`, which is why the interesting tests
  * are 1 ms functions rather than a browser driving a UI.
  */
-export const App = ({volume, name}: {volume: Volume; name: string}) => {
-    const [state, dispatch] = useReducer(reduce, volume, initialState)
+export const App = ({volume: source, name}: {volume: Volume; name: string}) => {
+    const [state, dispatch] = useReducer(reduce, source, initialState)
+    // Everything below reads the *document's* volume, not the one the file was opened with. They
+    // are the same object until the first stroke, and after it the difference is the whole point.
+    const {volume} = state
 
     const onOrbit = useCallback((event: OrbitEvent, height: number) => {
         dispatch({type: 'orbit', event, height})
+    }, [])
+
+    const onPointer = useCallback((event: ViewportPointer) => {
+        dispatch({type: 'pointer', event})
     }, [])
 
     const onReady = useCallback((raycaster: Raycaster) => {
@@ -62,14 +69,22 @@ export const App = ({volume, name}: {volume: Volume; name: string}) => {
         }
     }, [state.sheet, state.exporting])
 
-    // The mockup's `C`. A shortcut that only exists in the hint bar's caption is a caption.
+    // The mockup's `C`, and the two shortcuts nobody looks up. A shortcut that only exists in the
+    // hint bar's caption is a caption.
     useEffect(() => {
         const onKey = (event: KeyboardEvent): void => {
             const target = event.target
             const isTyping =
                 target instanceof HTMLElement
                 && (target.isContentEditable || ['INPUT', 'TEXTAREA'].includes(target.tagName))
-            if (isTyping || event.metaKey || event.ctrlKey || event.altKey) return
+            if (isTyping) return
+            if (event.metaKey || event.ctrlKey) {
+                if (event.key.toLowerCase() !== 'z') return
+                event.preventDefault()
+                dispatch({type: event.shiftKey ? 'redo' : 'undo'})
+                return
+            }
+            if (event.altKey) return
             if (event.key === 'c' || event.key === 'C') capture()
         }
         document.addEventListener('keydown', onKey)
@@ -132,6 +147,7 @@ export const App = ({volume, name}: {volume: Volume; name: string}) => {
                         camera={state.orbit.camera}
                         map={state.map}
                         onOrbit={onOrbit}
+                        onPointer={onPointer}
                         onReady={onReady}
                         onFrame={onFrame}
                     />
@@ -149,7 +165,10 @@ export const App = ({volume, name}: {volume: Volume; name: string}) => {
                         volume={volume}
                         camera={state.orbit.camera}
                     />
-                    <HintBar onCapture={capture} />
+                    <HintBar
+                        tool={`${(state.tool[0] ?? '').toUpperCase()}${state.tool.slice(1)}`}
+                        onCapture={capture}
+                    />
                 </div>
 
                 <div className='snap-column'>

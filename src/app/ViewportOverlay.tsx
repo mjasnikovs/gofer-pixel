@@ -221,13 +221,26 @@ export const ViewCube = ({volume, camera}: {volume: Volume; camera: Camera}) => 
 }
 
 /**
- * The gesture bar. It names what this viewport does — drag, shift-drag, wheel — rather than the
- * mockup's Alt-to-zoom, because a hint that is not the binding is worse than no hint.
+ * The gesture bar. It names what this viewport does rather than what the mockup's caption says,
+ * because a hint that is not the binding is worse than no hint.
+ *
+ * The left button belongs to the armed tool now that tools write voxels, so orbiting moved to the
+ * right button — the arrangement every voxel editor already uses, and the only one where arming
+ * Draw does not cost the artist the ability to look at what they are drawing.
  */
-export const HintBar = ({onCapture}: {onCapture: () => void}) => (
+export const HintBar = ({tool, onCapture}: {tool: string; onCapture: () => void}) => (
     <div className='hints'>
         <span className='hint'>
             <MouseIcon />
+            <Text type='supporting'>{tool}</Text>
+        </span>
+        <span className='hint'>
+            <Text
+                type='supporting'
+                color='disabled'
+            >
+                Right
+            </Text>
             <Text type='supporting'>Rotate</Text>
         </span>
         <span className='hint'>

@@ -31,6 +31,25 @@ export type OrbitEvent =
     | {type: 'wheel'; delta: number}
     | {type: 'camera'; camera: Camera}
 
+/**
+ * What the viewport reports about a drag, before anything has decided what it means.
+ *
+ * Deliberately not an `OrbitEvent`: once there are tools, a drag might move the camera or it might
+ * write voxels, and that choice belongs to the reducer that knows which tool is armed. The viewport
+ * reports a position and which buttons were held, and nothing more.
+ */
+export interface ViewportPointer {
+    readonly type: 'down' | 'move' | 'up'
+    /** CSS pixels within the viewport element — the unit the basis must be built at to match. */
+    readonly x: number
+    readonly y: number
+    readonly width: number
+    readonly height: number
+    readonly button: number
+    readonly shift: boolean
+    readonly alt: boolean
+}
+
 /** A 100 px drag is one radian, which is about as fast as an orbit can be and stay controllable. */
 const RADIANS_PER_PIXEL = 0.01
 

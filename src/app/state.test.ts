@@ -1,12 +1,57 @@
 import {expect, test} from 'bun:test'
+import {basisFor} from '../render/camera'
+import {render} from '../render/raycast'
 import {MODE_NORMAL} from '../render/raycast.glsl'
+import {voxelAt, type Volume} from '../render/volume'
+import type {ViewportPointer} from '../viewport/orbit'
 import {readVox} from '../vox/vox-file'
-import {initialState, MAX_BRUSH, reduce, type AppState} from './state'
+import {initialState, MAX_BRUSH, reduce, type AppState, type Tool} from './state'
 
 const volume = readVox(
     new Uint8Array(await Bun.file(new URL('../assets/car.vox', import.meta.url)).arrayBuffer())
 )
 const fresh = (): AppState => initialState(volume)
+
+/** The viewport is square here so a pixel is a pixel; nothing in the maths cares which size. */
+const SIZE = 64
+
+const at = (
+    type: ViewportPointer['type'],
+    x: number,
+    y: number,
+    over: Partial<ViewportPointer> = {}
+): {type: 'pointer'; event: ViewportPointer} => ({
+    type: 'pointer',
+    event: {
+        type,
+        x,
+        y,
+        width: SIZE,
+        height: SIZE,
+        button: 0,
+        shift: false,
+        alt: false,
+        ...over
+    }
+})
+
+/**
+ * A pixel the model is definitely under, found from the renderer's own id map rather than from the
+ * picker — so a test of the tools cannot pass by agreeing with the bug it is meant to catch.
+ */
+const onModel = (state: AppState): {column: number; row: number} => {
+    const basis = basisFor(state.orbit.camera, state.volume, SIZE)
+    const {id} = render(state.volume, basis, SIZE, SIZE)
+    const hits: number[] = []
+    for (let i = 0; i < id.length; i += 1) if ((id[i] ?? 0) !== 0) hits.push(i)
+    const index = hits[Math.floor(hits.length / 2)] ?? 0
+    return {column: index % SIZE, row: Math.floor(index / SIZE)}
+}
+
+const occupied = ({data}: Volume): number =>
+    data.reduce((count, value) => (value === 0 ? count : count + 1), 0)
+
+const armed = (tool: Tool): AppState => reduce(fresh(), {type: 'tool', tool})
 
 test('a new document opens on eight directions, showing the three-quarter one', () => {
     const state = fresh()
@@ -119,6 +164,187 @@ test('the brush size is bounded by the document, not by the stepper', () => {
     expect(reduce(state, {type: 'brush', brush: {size: 0}}).brush.size).toBe(1)
     // A partial update leaves the rest of the brush alone.
     expect(reduce(state, {type: 'brush', brush: {shape: 'cube'}}).brush.size).toBe(state.brush.size)
+})
+
+test('drawing adds voxels, and one stroke is one undo step', () => {
+    const state = armed('draw')
+    const {column, row} = onModel(state)
+
+    const down = reduce(state, at('down', column, row))
+    expect(down.stroke).toBeDefined()
+    // A size-2 square brush is four cells, and none of them was occupied before.
+    expect(occupied(down.volume)).toBe(occupied(state.volume) + 4)
+    expect(down.history.past).toHaveLength(0)
+
+    const up = reduce(down, at('up', column, row))
+    expect(up.stroke).toBeUndefined()
+    expect(up.history.past).toHaveLength(1)
+
+    const undone = reduce(up, {type: 'undo'})
+    expect(undone.volume.data).toEqual(state.volume.data)
+    expect(reduce(undone, {type: 'redo'}).volume.data).toEqual(up.volume.data)
+})
+
+test('a drag stays on the layer it started on instead of climbing towards the camera', () => {
+    const state = armed('draw')
+    const {column, row} = onModel(state)
+
+    let live = reduce(state, at('down', column, row))
+    const layer = live.stroke?.layer
+    const axis = live.stroke?.axis ?? 0
+    for (let step = 1; step <= 6; step += 1) {
+        live = reduce(live, at('move', column + step, row + step))
+    }
+    expect(live.stroke?.layer).toBe(layer as never)
+
+    const done = reduce(live, at('up', column + 6, row + 6))
+    const edit = done.history.past[0]
+    if (!edit) throw new Error('the drag wrote something')
+
+    // Every cell the drag wrote sits on the one plane, which is the whole claim.
+    const {sx, sy} = state.volume
+    for (const index of edit.at) {
+        const z = Math.floor(index / (sx * sy))
+        const rest = index - z * sx * sy
+        expect([rest % sx, Math.floor(rest / sx), z][axis]).toBe(layer as never)
+    }
+    expect(edit.at.length).toBeGreaterThan(4)
+})
+
+test('erase takes the voxel under the cursor, and draw puts one in front of it', () => {
+    const start = armed('erase')
+    const {column, row} = onModel(start)
+
+    const rubbed = reduce(reduce(start, at('down', column, row)), at('up', column, row))
+    expect(occupied(rubbed.volume)).toBeLessThan(occupied(start.volume))
+
+    // Same pixel, the other tool: the count goes the other way.
+    const drawn = reduce(reduce(armed('draw'), at('down', column, row)), at('up', column, row))
+    expect(occupied(drawn.volume)).toBeGreaterThan(occupied(start.volume))
+})
+
+test('alt turns draw into paint: the same cell, a different colour', () => {
+    const state = reduce(armed('draw'), {type: 'color', color: 200})
+    const {column, row} = onModel(state)
+
+    const painted = reduce(
+        reduce(state, at('down', column, row, {alt: true})),
+        at('up', column, row, {alt: true})
+    )
+    expect(occupied(painted.volume)).toBe(occupied(state.volume))
+    const edit = painted.history.past[0]
+    expect([...(edit?.to ?? [])]).toEqual([200, 200, 200, 200])
+    expect([...(edit?.from ?? [])].every(value => value !== 0)).toBe(true)
+})
+
+test('pick loads the colour under the cursor and writes nothing', () => {
+    const state = reduce(armed('pick'), {type: 'color', color: 1})
+    const {column, row} = onModel(state)
+
+    const picked = reduce(state, at('down', column, row))
+    expect(picked.color).not.toBe(1)
+    expect(picked.stroke).toBeUndefined()
+    expect(picked.history.past).toHaveLength(0)
+    expect(picked.volume).toBe(state.volume)
+})
+
+test('fill recolours the region it was clicked on, in one step', () => {
+    const state = reduce(armed('fill'), {type: 'color', color: 199})
+    const {column, row} = onModel(state)
+
+    const filled = reduce(state, at('down', column, row))
+    expect(filled.history.past).toHaveLength(1)
+    expect(filled.stroke).toBeUndefined()
+    expect(occupied(filled.volume)).toBe(occupied(state.volume))
+
+    const edit = filled.history.past[0]
+    expect(edit?.at.length).toBeGreaterThan(10)
+    expect([...(edit?.to ?? [])].every(value => value === 199)).toBe(true)
+})
+
+test('the camera is still reachable with a writing tool armed', () => {
+    const state = armed('draw')
+    const {column, row} = onModel(state)
+
+    // Right button orbits.
+    const right = reduce(state, at('down', column, row, {button: 2}))
+    expect(right.stroke).toBeUndefined()
+    expect(right.orbit.gesture?.mode).toBe('orbit')
+    const turned = reduce(right, at('move', column + 40, row))
+    expect(turned.orbit.camera.yaw).toBeCloseTo(state.orbit.camera.yaw + 0.4, 10)
+    expect(turned.volume).toBe(state.volume)
+
+    // Shift-drag pans, on either button.
+    const panned = reduce(state, at('down', column, row, {shift: true}))
+    expect(panned.orbit.gesture?.mode).toBe('pan')
+
+    // A tool with no pointer behaviour yet leaves the left button to the camera.
+    const measuring = reduce(armed('measure'), at('down', column, row))
+    expect(measuring.orbit.gesture?.mode).toBe('orbit')
+})
+
+test('drawing on empty space lands on the floor of the grid, not nowhere', () => {
+    const state = armed('draw')
+    const {sx, sy, sz} = state.volume
+    const basis = basisFor(state.orbit.camera, state.volume, SIZE)
+
+    // A floor cell the camera can see: projected with the basis directly, so the pixel is chosen
+    // without asking the picker, and confirmed empty against the renderer's own id map.
+    const {right, up, center, scale} = basis
+    const {id} = render(state.volume, basis, SIZE, SIZE)
+    const project = (x: number, y: number): {column: number; row: number} => {
+        const dx = x + 0.5 - center[0]
+        const dy = y + 0.5 - center[1]
+        const dz = 0 - center[2]
+        const along = right[0] * dx + right[1] * dy + right[2] * dz
+        const over = up[0] * dx + up[1] * dy + up[2] * dz
+        return {
+            column: Math.round(along / scale + SIZE * 0.5 - 0.5),
+            row: SIZE - 1 - Math.round(over / scale + SIZE * 0.5 - 0.5)
+        }
+    }
+
+    let floor: {x: number; y: number; column: number; row: number} | undefined
+    for (let y = 0; y < sy && !floor; y += 1) {
+        for (let x = 0; x < sx && !floor; x += 1) {
+            if (voxelAt(state.volume, x, y, 0) !== 0) continue
+            const {column, row} = project(x, y)
+            if (column < 0 || row < 0 || column >= SIZE || row >= SIZE) continue
+            if ((id[row * SIZE + column] ?? 0) === 0) floor = {x, y, column, row}
+        }
+    }
+    if (!floor) throw new Error('some of the floor is visible from a three-quarter view')
+    expect(sz).toBeGreaterThan(0)
+
+    const {column, row} = floor
+    const drawn = reduce(reduce(state, at('down', column, row)), at('up', column, row))
+    const edit = drawn.history.past[0]
+    if (!edit) throw new Error('the click wrote something')
+    for (const index of edit.at) expect(Math.floor(index / (sx * sy))).toBe(0)
+    expect(voxelAt(drawn.volume, floor.x, floor.y, 0)).toBe(drawn.color)
+})
+
+test('undo mid-stroke is ignored rather than tearing the draft in half', () => {
+    const state = armed('draw')
+    const {column, row} = onModel(state)
+    const down = reduce(state, at('down', column, row))
+    expect(reduce(down, {type: 'undo'})).toBe(down)
+    expect(reduce(down, {type: 'redo'})).toBe(down)
+})
+
+test('a stroke throws the baked sheet away, because the model it was baked from has changed', () => {
+    const baked = reduce(armed('draw'), {type: 'bake'})
+    expect(baked.sheet).toBeDefined()
+    const {column, row} = onModel(baked)
+    expect(reduce(baked, at('down', column, row)).sheet).toBeUndefined()
+})
+
+test('an edit is visible to the picker on the very next event', () => {
+    const state = armed('draw')
+    const {column, row} = onModel(state)
+    const down = reduce(state, at('down', column, row))
+    const cell = down.stroke?.at ?? [0, 0, 0]
+    expect(voxelAt(down.volume, cell[0], cell[1], cell[2])).toBe(down.color)
 })
 
 test('the chrome settings move without touching the render or the sheet', () => {

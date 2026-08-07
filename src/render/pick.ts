@@ -1,4 +1,4 @@
-import type {Basis} from './camera'
+import type {Basis, Vec3} from './camera'
 import {
     FACE_STEP,
     FACE_X_NEG,
@@ -41,9 +41,35 @@ const step = (face: number, x: number, y: number, z: number): readonly [number, 
 }
 
 /**
+ * Where the ray for one pixel starts, in voxel space.
+ *
  * `column` and `row` are in image coordinates — row 0 is the top, which is where a pointer event's
- * `y` starts and which is the row the renderer writes first.
+ * `y` starts and which is the row the renderer writes first. `width` and `height` are in whatever
+ * unit the basis was built at; a CSS-pixel pointer position needs a basis built at the element's
+ * CSS height, because `scale` is `zoom / height` and only the ratio has to match.
  */
+const originAt = (
+    basis: Basis,
+    column: number,
+    row: number,
+    width: number,
+    height: number
+): Vec3 => {
+    const [fx, fy, fz] = basis.forward
+    const [rx, ry, rz] = basis.right
+    const [ux, uy, uz] = basis.up
+    const [cx, cy, cz] = basis.center
+    const {scale, dist} = basis
+    const a = (column - width * 0.5 + 0.5) * scale
+    const b = (height - 1 - row - height * 0.5 + 0.5) * scale
+    return [
+        cx + rx * a + ux * b - fx * dist,
+        cy + ry * a + uy * b - fy * dist,
+        cz + rz * a + uz * b - fz * dist
+    ]
+}
+
+/** What voxel the cursor is over, and which of its faces the ray came in through. */
 export const pickRay = (
     volume: Volume,
     basis: Basis,
@@ -54,16 +80,7 @@ export const pickRay = (
 ): Hit | undefined => {
     const {sx, sy, sz, data} = volume
     const [fx, fy, fz] = basis.forward
-    const [rx, ry, rz] = basis.right
-    const [ux, uy, uz] = basis.up
-    const [cx0, cy0, cz0] = basis.center
-    const {scale, dist} = basis
-
-    const a = (column - width * 0.5 + 0.5) * scale
-    const b = (height - 1 - row - height * 0.5 + 0.5) * scale
-    const ox = cx0 + rx * a + ux * b - fx * dist
-    const oy = cy0 + ry * a + uy * b - fy * dist
-    const oz = cz0 + rz * a + uz * b - fz * dist
+    const [ox, oy, oz] = originAt(basis, column, row, width, height)
 
     const ax = fx === 0 ? -BIG : (0 - ox) / fx
     const bx = fx === 0 ? BIG : (sx - ox) / fx
@@ -163,16 +180,7 @@ export const pickGround = (
     // Only from above. A ray travelling up sees the underside of the floor, and a voxel dropped on
     // the far side of a plane the artist is looking at edge-on is a voxel they did not ask for.
     if (fz >= 0) return undefined
-    const [rx, ry, rz] = basis.right
-    const [ux, uy, uz] = basis.up
-    const [cx0, cy0, cz0] = basis.center
-    const {scale, dist} = basis
-
-    const a = (column - width * 0.5 + 0.5) * scale
-    const b = (height - 1 - row - height * 0.5 + 0.5) * scale
-    const ox = cx0 + rx * a + ux * b - fx * dist
-    const oy = cy0 + ry * a + uy * b - fy * dist
-    const oz = cz0 + rz * a + uz * b - fz * dist
+    const [ox, oy, oz] = originAt(basis, column, row, width, height)
 
     const t = (0 - oz) / fz
     if (t < 0) return undefined
@@ -181,6 +189,39 @@ export const pickGround = (
     if (x < 0 || y < 0 || x >= volume.sx || y >= volume.sy) return undefined
     // The floor is a surface, not a voxel: the cell to write is the one sitting on it.
     return {x, y, z: -1, value: 0, face: FACE_Z_POS, place: [x, y, 0], t}
+}
+
+/**
+ * The cell under the cursor on one fixed layer, whatever is in the way.
+ *
+ * This is what makes a drag draw a line instead of a staircase. If a stroke re-picked the model on
+ * every move it would land on the voxels it just added, and each one would sit a layer nearer the
+ * camera than the last — so a stroke locks to the layer its first click landed on and stays there.
+ * It is also `FEATURESET.md` §5's "click a face to temporarily make it your canvas", arrived at
+ * from the other direction.
+ *
+ * Unbounded on purpose: a stroke may run off the edge of the grid and come back, and clipping is
+ * `writeVoxel`'s job.
+ */
+export const pickPlane = (
+    basis: Basis,
+    column: number,
+    row: number,
+    width: number,
+    height: number,
+    axis: number,
+    layer: number
+): readonly [number, number, number] | undefined => {
+    const forward = basis.forward
+    const f = forward[axis] ?? 0
+    // Edge-on to the drawing plane there is no cell under the cursor, only a line of them.
+    if (f === 0) return undefined
+    const origin = originAt(basis, column, row, width, height)
+    const t = (layer + 0.5 - (origin[axis] ?? 0)) / f
+    const cell: [number, number, number] = [0, 0, 0]
+    for (let i = 0; i < 3; i += 1) cell[i] = Math.floor((origin[i] ?? 0) + (forward[i] ?? 0) * t)
+    cell[axis] = layer
+    return cell
 }
 
 /** What the cursor is over: the model if it is there, the floor if it is not. */

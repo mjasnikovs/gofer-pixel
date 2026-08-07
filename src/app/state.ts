@@ -1,11 +1,27 @@
-import {BRUSH_KINDS, MAX_BRUSH, SHAPES, type Brush, type BrushKind, type Shape} from '../doc/brush'
+import {
+    BRUSH_KINDS,
+    faceAxis,
+    MAX_BRUSH,
+    SHAPES,
+    type Brush,
+    type BrushKind,
+    type Shape
+} from '../doc/brush'
 import {captureCamera, eightDirections, ISOMETRIC_PITCH, type NamedCamera} from '../doc/cameras'
+import {beginEdit, commitEdit, fillRegion, stampBrush, strokeBrush, type Draft} from '../doc/edits'
+import {EMPTY_HISTORY, record, redo, undo, type History} from '../doc/history'
 import {firstColor} from '../doc/palette'
-import {createCamera, type Camera} from '../render/camera'
+import {basisFor, createCamera, type Camera} from '../render/camera'
+import {pick, pickPlane} from '../render/pick'
 import {MODE_COLOR} from '../render/raycast.glsl'
 import type {Volume} from '../render/volume'
 import {renderSheet, type Sheet} from '../sheet/sheet'
-import {apply as applyOrbit, type OrbitEvent, type OrbitState} from '../viewport/orbit'
+import {
+    apply as applyOrbit,
+    type OrbitEvent,
+    type OrbitState,
+    type ViewportPointer
+} from '../viewport/orbit'
 
 /**
  * The whole application as a value, and one pure function that moves it.
@@ -36,6 +52,29 @@ export type Tool = (typeof TOOLS)[number]
 export {BRUSH_KINDS, MAX_BRUSH, SHAPES}
 export type {Brush, BrushKind, Shape}
 
+/**
+ * The tools that take the left button in the viewport. The rest still orbit with it, because a tool
+ * that has not been built yet must not silently swallow the gesture that moves the camera.
+ */
+const WRITES: ReadonlySet<Tool> = new Set<Tool>(['draw', 'erase', 'fill', 'pick'])
+
+/**
+ * A stroke in progress: one draft, and the layer it is pinned to.
+ *
+ * The layer is decided by the first click and never re-picked, which is what stops a drag climbing
+ * towards the camera over the voxels it is laying down. See `pickPlane`.
+ */
+export interface Stroke {
+    readonly draft: Draft
+    /** `0` = x, `1` = y, `2` = z — the axis the drawing plane is perpendicular to. */
+    readonly axis: number
+    readonly layer: number
+    /** The face the first click struck, which is what orients a flat brush. */
+    readonly face: number
+    readonly value: number
+    readonly at: readonly [number, number, number]
+}
+
 export interface AppState {
     readonly volume: Volume
     readonly cameras: readonly NamedCamera[]
@@ -55,13 +94,11 @@ export interface AppState {
     readonly exporting: boolean
     readonly serial: number
 
-    /*
-     * From here down is the editing chrome of `docs/editor.png`. It is state the window shows and
-     * remembers — which tool is armed, how big the brush is, which colour is loaded — and nothing
-     * downstream of it writes voxels, because editing is on the proof of concept's do-not-build
-     * list. It lives in the same value as everything else so that when a tool does start writing
-     * voxels there is no second store to reconcile.
-     */
+    /** Diffs, not volumes — see `doc/history.ts`. */
+    readonly history: History
+    /** Non-`undefined` for exactly as long as the pointer is down on a writing tool. */
+    readonly stroke: Stroke | undefined
+
     readonly tool: Tool
     readonly brush: Brush
     /** 1-based index into `volume.palette`, the `.vox` format's own convention. */
@@ -76,6 +113,9 @@ export interface AppState {
 
 export type AppAction =
     | {type: 'orbit'; event: OrbitEvent; height: number}
+    | {type: 'pointer'; event: ViewportPointer}
+    | {type: 'undo'}
+    | {type: 'redo'}
     | {type: 'select'; id: string}
     | {type: 'eight-directions'}
     | {type: 'capture'}
@@ -124,6 +164,8 @@ export const initialState = (volume: Volume): AppState => {
         sheet: undefined,
         exporting: false,
         serial: 0,
+        history: EMPTY_HISTORY,
+        stroke: undefined,
         tool: 'draw',
         brush: {kind: 'voxel', size: 2, shape: 'square'},
         color: firstColor(volume),
@@ -142,6 +184,95 @@ const withCamera = (state: AppState, camera: Camera, selected: string | undefine
     orbit: {camera, gesture: undefined}
 })
 
+/**
+ * The volume as it now stands mid-stroke: a fresh identity over the draft's own buffer.
+ *
+ * React and the GL uploader both watch identity, and the draft's buffer is mutated in place, so
+ * without the new wrapper a stroke would be invisible until the pointer came up. Copying the bytes
+ * instead would be a megabyte a mouse-move on a large model, for a copy nothing reads.
+ */
+const live = (draft: Draft): Volume => ({...draft.volume})
+
+const beginStroke = (state: AppState, event: ViewportPointer): AppState => {
+    const {volume, tool, color, brush} = state
+    // A viewport with no size has no pixels to cast a ray through, and `zoom / 0` would send one
+    // off to infinity. happy-dom reports exactly this, so it is a real case and not a guard.
+    if (event.height <= 0 || event.width <= 0) return state
+    const basis = basisFor(state.orbit.camera, volume, event.height)
+    const hit = pick(volume, basis, event.x, event.y, event.width, event.height)
+    if (!hit) return state
+
+    // Pick is not an edit and does not open a stroke; it loads the colour and gets out of the way.
+    if (tool === 'pick') return hit.value === 0 ? state : {...state, color: hit.value}
+
+    if (tool === 'fill') {
+        const draft = beginEdit(volume)
+        fillRegion(draft, hit.x, hit.y, hit.z, color)
+        const edit = commitEdit(draft)
+        if (!edit) return state
+        return {
+            ...state,
+            volume: draft.volume,
+            history: record(state.history, edit),
+            sheet: undefined
+        }
+    }
+
+    /*
+     * `FEATURESET.md` §4, decided one way rather than guessed at every click: Draw writes into the
+     * empty cell in front of the face — the cell the artist is pointing at across the surface —
+     * and Alt writes into the voxel itself, which is Paint. Erase always means the voxel itself.
+     * Nothing here inspects what colour is already there, because a tool whose meaning depends on
+     * the model under the cursor is a tool the artist cannot aim.
+     */
+    const outward = tool === 'draw' && !event.alt
+    const cell = outward ? hit.place : ([hit.x, hit.y, hit.z] as const)
+    // The floor is a surface to draw on, not a voxel to recolour or rub out.
+    if (!outward && hit.value === 0) return state
+
+    const value = tool === 'erase' ? 0 : color
+    const draft = beginEdit(volume)
+    const axis = faceAxis(hit.face)
+    stampBrush(draft, brush, hit.face, cell[0], cell[1], cell[2], value)
+    return {
+        ...state,
+        volume: live(draft),
+        stroke: {draft, axis, layer: cell[axis] ?? 0, face: hit.face, value, at: cell},
+        sheet: undefined
+    }
+}
+
+const continueStroke = (state: AppState, event: ViewportPointer): AppState => {
+    const {stroke} = state
+    if (!stroke) return state
+    const basis = basisFor(state.orbit.camera, state.volume, event.height)
+    const cell = pickPlane(
+        basis,
+        event.x,
+        event.y,
+        event.width,
+        event.height,
+        stroke.axis,
+        stroke.layer
+    )
+    if (!cell) return state
+    const [x, y, z] = cell
+    if (x === stroke.at[0] && y === stroke.at[1] && z === stroke.at[2]) return state
+    strokeBrush(stroke.draft, state.brush, stroke.face, stroke.at, cell, stroke.value)
+    return {...state, volume: live(stroke.draft), stroke: {...stroke, at: cell}}
+}
+
+const endStroke = (state: AppState): AppState => {
+    const {stroke} = state
+    if (!stroke) return state
+    const edit = commitEdit(stroke.draft)
+    return {
+        ...state,
+        stroke: undefined,
+        history: edit ? record(state.history, edit) : state.history
+    }
+}
+
 export const reduce = (state: AppState, action: AppAction): AppState => {
     switch (action.type) {
         case 'orbit': {
@@ -151,6 +282,55 @@ export const reduce = (state: AppState, action: AppAction): AppState => {
             // difference between a list of cameras and a list of bookmarks that quietly lie.
             const moved = orbit.camera !== state.orbit.camera
             return {...state, orbit, selected: moved ? undefined : state.selected}
+        }
+
+        /*
+         * One entry point for the viewport, so the choice between moving the camera and writing
+         * voxels is made in the tested pure function rather than in a JSX handler. The right and
+         * middle buttons and Shift always move the camera, whatever is armed — otherwise arming
+         * Draw would cost the artist the ability to look at what they are drawing.
+         */
+        case 'pointer': {
+            const {event} = action
+            if (event.type === 'down') {
+                if (event.button === 0 && !event.shift && WRITES.has(state.tool)) {
+                    return beginStroke(state, event)
+                }
+                return reduce(state, {
+                    type: 'orbit',
+                    event: {
+                        type: 'pointerdown',
+                        x: event.x,
+                        y: event.y,
+                        secondary: event.shift || event.button === 1
+                    },
+                    height: event.height
+                })
+            }
+            if (state.stroke) {
+                return event.type === 'move' ? continueStroke(state, event) : endStroke(state)
+            }
+            return reduce(state, {
+                type: 'orbit',
+                event:
+                    event.type === 'move' ?
+                        {type: 'pointermove', x: event.x, y: event.y}
+                    :   {type: 'pointerup'},
+                height: event.height
+            })
+        }
+
+        case 'undo': {
+            // Mid-stroke there is nothing coherent to undo *to*: the draft is not an edit yet.
+            if (state.stroke) return state
+            const back = undo(state.volume, state.history)
+            return back ? {...state, ...back, sheet: undefined} : state
+        }
+
+        case 'redo': {
+            if (state.stroke) return state
+            const forward = redo(state.volume, state.history)
+            return forward ? {...state, ...forward, sheet: undefined} : state
         }
 
         case 'select': {

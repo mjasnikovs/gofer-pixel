@@ -1,9 +1,9 @@
-import {useEffect, useRef, useState} from 'react'
+import {useEffect, useRef, useState, type PointerEvent as ReactPointerEvent} from 'react'
 import type {Camera} from '../render/camera'
 import {basisFor} from '../render/camera'
 import {createRaycaster, type Raycaster} from '../render/gl'
 import type {Volume} from '../render/volume'
-import type {OrbitEvent} from './orbit'
+import type {OrbitEvent, ViewportPointer} from './orbit'
 
 /**
  * The interactive view: the raycast shader, one canvas, and no render loop of its own.
@@ -13,18 +13,44 @@ import type {OrbitEvent} from './orbit'
  * `requestAnimationFrame` owning it, and `onReady` hands the drivable renderer out so a test can
  * ask for a frame and know when it landed.
  */
+/**
+ * Element-relative, because a pick is a ray through a pixel of *this* canvas and `clientX` is a
+ * position on the page. The size comes from the same element in the same unit, so the basis the
+ * reducer builds at `height` describes the picture the pointer is over.
+ */
+const report = (
+    type: ViewportPointer['type'],
+    event: ReactPointerEvent<HTMLDivElement>
+): ViewportPointer => {
+    const host = event.currentTarget
+    const box = host.getBoundingClientRect()
+    return {
+        type,
+        x: event.clientX - box.left,
+        y: event.clientY - box.top,
+        width: host.clientWidth,
+        height: host.clientHeight,
+        button: event.button,
+        shift: event.shiftKey,
+        alt: event.altKey
+    }
+}
+
 export const Viewport = ({
     volume,
     camera,
     map,
     onOrbit,
+    onPointer,
     onReady,
     onFrame
 }: {
     volume: Volume
     camera: Camera
     map: number
+    /** The wheel only. Where a *drag* goes is decided in `reduce`, not here. */
     onOrbit: (event: OrbitEvent, height: number) => void
+    onPointer: (event: ViewportPointer) => void
     onReady?: (raycaster: Raycaster) => void
     /** Fired after a frame has landed, not after a draw was issued. */
     onFrame?: (frames: number) => void
@@ -90,6 +116,14 @@ export const Viewport = ({
         }
     }, [volume, onReady])
 
+    // A stroke hands down a new volume object over the same buffer, so identity is the signal that
+    // the grid changed and the 3D texture has to go up again. `texImage3D` of a 128³ grid is 2 MB;
+    // at pointer-move rates that is well inside what the bus does, and it keeps the viewport
+    // showing the document rather than the document as it was when the canvas was created.
+    useEffect(() => {
+        glRef.current?.raycaster.setVolume(volume)
+    }, [volume])
+
     useEffect(() => {
         const raycaster = glRef.current?.raycaster
         if (!raycaster || size.width === 0) return
@@ -116,28 +150,20 @@ export const Viewport = ({
             ref={hostRef}
             className='viewport'
             data-testid='viewport'
+            onContextMenu={event => {
+                // The right button orbits, so it must not also open a menu over the model.
+                event.preventDefault()
+            }}
             onPointerDown={event => {
                 event.currentTarget.setPointerCapture(event.pointerId)
-                onOrbit(
-                    {
-                        type: 'pointerdown',
-                        x: event.clientX,
-                        y: event.clientY,
-                        // Middle button or shift is a pan, which is what the mockup's hint bar says.
-                        secondary: event.button === 1 || event.shiftKey
-                    },
-                    event.currentTarget.clientHeight
-                )
+                onPointer(report('down', event))
             }}
             onPointerMove={event => {
-                onOrbit(
-                    {type: 'pointermove', x: event.clientX, y: event.clientY},
-                    event.currentTarget.clientHeight
-                )
+                onPointer(report('move', event))
             }}
             onPointerUp={event => {
                 event.currentTarget.releasePointerCapture(event.pointerId)
-                onOrbit({type: 'pointerup'}, event.currentTarget.clientHeight)
+                onPointer(report('up', event))
             }}
         >
             <canvas

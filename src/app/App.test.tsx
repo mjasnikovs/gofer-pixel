@@ -150,7 +150,7 @@ test('the C shortcut in the hint bar is the shortcut, not a caption', async () =
     await unmount(mounted)
 })
 
-test('arming a tool and loading a colour are real, even though neither writes a voxel', async () => {
+test('arming a tool and loading a colour reach the document, not just the panel', async () => {
     const mounted = await mount()
     expect(handle.state?.tool).toBe('draw')
 
