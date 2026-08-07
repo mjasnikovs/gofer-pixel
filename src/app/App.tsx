@@ -1,5 +1,7 @@
 import {useCallback, useEffect, useMemo, useReducer} from 'react'
 import {canRemove, shownVolume} from '../doc/objects'
+import type {Axis} from '../doc/brush'
+import {voxelsFromImage} from '../doc/import'
 import {toHexPalette} from '../doc/palette'
 import {sheetMetadata} from '../sheet/metadata'
 import {selectionBounds} from '../doc/selection'
@@ -14,6 +16,7 @@ import {writeMetadata, writePalette, writeSheet, writeSprite} from './download'
 import {ExportPanel} from './ExportPanel'
 import {Header} from './Header'
 import {ObjectsPanel} from './ObjectsPanel'
+import {ReferenceLayer} from './ReferenceLayer'
 import {RendersPanel} from './RendersPanel'
 import {SelectionBar} from './SelectionBar'
 import {Timeline} from './Timeline'
@@ -35,6 +38,14 @@ import {handle} from './handle'
  *
  * Arrow keys move the selection by one voxel along a grid axis; see the key handler for Shift.
  */
+/**
+ * How thick a PNG comes in — `FEATURESET.md` §34's "choose extrusion depth".
+ *
+ * Four, because one voxel deep is a sheet of paper that looks wrong from every angle but the one
+ * it was drawn at, and the point of importing is to have something to sculpt.
+ */
+const DEFAULT_EXTRUSION = 4
+
 const NUDGES: Record<string, readonly [number, number, number] | undefined> = {
     ArrowRight: [1, 0, 0],
     ArrowLeft: [-1, 0, 0],
@@ -81,6 +92,44 @@ export const App = ({volume: source, name}: {volume: Volume; name: string}) => {
      * and dropped rather than kept in the tree, because a hidden input that lives in the layout is
      * one more thing for the bounding-box test to trip over.
      */
+    /*
+     * A PNG dropped on the viewport. Which of the two things `FEATURESET.md` asks for it becomes is
+     * decided by the modifier: plain is §33's reference to build against, Shift is §34's import,
+     * where every opaque pixel becomes a voxel. Both need the browser's own decoder, which is what
+     * `createImageBitmap` and a scratch canvas are.
+     */
+    const dropImage = useCallback((file: File | undefined, asVoxels: boolean, onto: Axis) => {
+        if (!file?.type.startsWith('image/')) return
+        void (async () => {
+            const blob = new Blob([await file.arrayBuffer()], {type: file.type})
+            let bitmap: ImageBitmap
+            try {
+                bitmap = await createImageBitmap(blob)
+            } catch {
+                // A file the browser cannot decode is not a picture, whatever it was named.
+                return
+            }
+            if (!asVoxels) {
+                dispatch({type: 'reference', plane: onto, url: URL.createObjectURL(blob)})
+                return
+            }
+            const canvas = document.createElement('canvas')
+            canvas.width = bitmap.width
+            canvas.height = bitmap.height
+            const context = canvas.getContext('2d')
+            if (!context) return
+            context.drawImage(bitmap, 0, 0)
+            const {data} = context.getImageData(0, 0, bitmap.width, bitmap.height)
+            const {volume: built} = voxelsFromImage(
+                new Uint8Array(data),
+                bitmap.width,
+                bitmap.height,
+                DEFAULT_EXTRUSION
+            )
+            dispatch({type: 'import-image', volume: built, name: file.name})
+        })()
+    }, [])
+
     const loadPalette = useCallback(() => {
         const input = document.createElement('input')
         input.type = 'file'
@@ -242,7 +291,23 @@ export const App = ({volume: source, name}: {volume: Volume; name: string}) => {
                     />
                 </div>
 
-                <div className='stage'>
+                <div
+                    className='stage'
+                    onDragOver={event => {
+                        event.preventDefault()
+                    }}
+                    onDrop={event => {
+                        event.preventDefault()
+                        // Onto the locked drawing plane if there is one, and Front otherwise —
+                        // the artist who locked a plane is working on it.
+                        dropImage(event.dataTransfer.files[0], event.shiftKey, state.plane ?? 1)
+                    }}
+                >
+                    <ReferenceLayer
+                        volume={shown}
+                        camera={state.orbit.camera}
+                        references={state.references}
+                    />
                     <Viewport
                         volume={shown}
                         camera={state.orbit.camera}
@@ -306,6 +371,22 @@ export const App = ({volume: source, name}: {volume: Volume; name: string}) => {
                         }}
                         onPlane={axis => {
                             dispatch({type: 'plane', axis})
+                        }}
+                        references={state.references}
+                        onReference={(plane, op) => {
+                            const found = state.references.find(entry => entry.plane === plane)
+                            if (!found) return
+                            if (op === 'lock') {
+                                dispatch({type: 'reference-lock', plane, on: !found.locked})
+                            } else if (op === 'drop') {
+                                dispatch({type: 'reference-drop', plane})
+                            } else {
+                                dispatch({
+                                    type: 'reference-opacity',
+                                    plane,
+                                    opacity: found.opacity + (op === 'brighter' ? 0.15 : -0.15)
+                                })
+                            }
                         }}
                     />
                 </div>

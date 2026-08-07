@@ -489,6 +489,20 @@ body,
 }
 
 /*
+ * Reference art sits under the render, not over it: the model is what the artist sees and the
+ * reference is what they see through the gaps. Over the model is a tracing overlay; under it is a
+ * thing to build against, and `FEATURESET.md` §33 asks for the second.
+ */
+.reference-layer {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    image-rendering: pixelated;
+}
+
+/*
  * The normal-map diagnostic, under the Normal tab. Same preview box as the tab above it, so the
  * two read as one thing being looked at two ways rather than as two panels.
  */

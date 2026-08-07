@@ -185,10 +185,12 @@ export const GridPanel = ({
     symmetry,
     canRadial,
     plane,
+    references,
     onGrid,
     onSnap,
     onSymmetry,
-    onPlane
+    onPlane,
+    onReference
 }: {
     grid: boolean
     snap: boolean
@@ -196,10 +198,12 @@ export const GridPanel = ({
     symmetry: {x: boolean; y: boolean; z: boolean; radial: boolean}
     canRadial: boolean
     plane: Axis | undefined
+    references: readonly {plane: Axis; opacity: number; locked: boolean}[]
     onGrid: (on: boolean) => void
     onSnap: (on: boolean) => void
     onSymmetry: (axis: 'x' | 'y' | 'z' | 'radial', on: boolean) => void
     onPlane: (axis: Axis | undefined) => void
+    onReference: (plane: Axis, op: 'fainter' | 'brighter' | 'lock' | 'drop') => void
 }) => (
     <div className='panel snap-panel'>
         <div className='snap-row'>
@@ -288,6 +292,75 @@ export const GridPanel = ({
                 ))}
             </span>
         </div>
+        {/*
+         * Reference art — `FEATURESET.md` §33. It appears only once something has been dropped on
+         * the viewport, because a row of controls for a picture that is not there is a row of
+         * controls for nothing. Opacity steps rather than slides: this is a 97 px column, and the
+         * artist wants fainter or brighter, not a number.
+         */}
+        {references.map(entry => (
+            <div
+                className='snap-size'
+                key={entry.plane}
+            >
+                <Text
+                    type='supporting'
+                    color='disabled'
+                >
+                    {PLANES.find(({axis}) => axis === entry.plane)?.label ?? 'Ref'} ref
+                </Text>
+                <span className='spacer' />
+                <span className='symmetry-row'>
+                    <button
+                        type='button'
+                        className='symmetry-axis'
+                        aria-label='Fainter reference'
+                        aria-disabled={entry.locked}
+                        onClick={() => {
+                            onReference(entry.plane, 'fainter')
+                        }}
+                    >
+                        −
+                    </button>
+                    <button
+                        type='button'
+                        className='symmetry-axis'
+                        aria-label='Brighter reference'
+                        aria-disabled={entry.locked}
+                        onClick={() => {
+                            onReference(entry.plane, 'brighter')
+                        }}
+                    >
+                        +
+                    </button>
+                    <button
+                        type='button'
+                        role='switch'
+                        aria-checked={entry.locked}
+                        aria-label='Lock the reference'
+                        className='symmetry-axis'
+                        data-on={entry.locked || undefined}
+                        onClick={() => {
+                            onReference(entry.plane, 'lock')
+                        }}
+                    >
+                        <MagnetIcon />
+                    </button>
+                    <button
+                        type='button'
+                        className='symmetry-axis'
+                        aria-label='Remove the reference'
+                        aria-disabled={entry.locked}
+                        onClick={() => {
+                            onReference(entry.plane, 'drop')
+                        }}
+                    >
+                        ×
+                    </button>
+                </span>
+            </div>
+        ))}
+
         <div className='snap-size'>
             <Text
                 type='supporting'

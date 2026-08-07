@@ -196,6 +196,22 @@ export interface Clipboard {
     readonly cells: readonly {offset: Cell; value: number}[]
 }
 
+/**
+ * A picture to build against — `FEATURESET.md` §33.
+ *
+ * One per plane, stretched to the grid's own box in that plane, so an artist who drew a 32×32 front
+ * view gets it lined up with a 32-wide model without doing arithmetic. It is a `data:` URL rather
+ * than a path, because a document that referred to a file on disk would open blank on the next
+ * machine, and it is not part of the model: nothing here is ever rendered into a sprite.
+ */
+export interface Reference {
+    readonly plane: Axis
+    readonly url: string
+    readonly opacity: number
+    /** Locked means the panel will not change or drop it — `FEATURESET.md` §33's "lock it". */
+    readonly locked: boolean
+}
+
 /** A rubber band while the pointer is down, in the viewport's own pixels. */
 export interface Band {
     readonly x0: number
@@ -248,6 +264,8 @@ export interface AppState {
     readonly bounds: boolean
     /** Presets the artist saved, on top of the built-in ones — `FEATURESET.md` §38. */
     readonly presets: readonly {name: string; maps: readonly SheetMap[]}[]
+    /** Pixel art to build against, one image per plane — `FEATURESET.md` §33. */
+    readonly references: readonly Reference[]
     /**
      * Edge of the sprite the Renders panel previews, in pixels — `FEATURESET.md` §15.
      *
@@ -344,6 +362,11 @@ export type AppAction =
     | {type: 'drop-preset'; name: string}
     | {type: 'reorder-camera'; id: string; to: number}
     | {type: 'drag-camera'; id: string | undefined}
+    | {type: 'reference'; plane: Axis; url: string}
+    | {type: 'reference-opacity'; plane: Axis; opacity: number}
+    | {type: 'reference-lock'; plane: Axis; on: boolean}
+    | {type: 'reference-drop'; plane: Axis}
+    | {type: 'import-image'; volume: Volume; name: string}
     | {type: 'bake'}
     | {type: 'written'}
     | {type: 'tool'; tool: Tool}
@@ -409,6 +432,7 @@ export const initialState = (volume: Volume): AppState => {
         padding: 0,
         bounds: false,
         presets: [],
+        references: [],
         preview: 64,
         sheet: undefined,
         exporting: false,
@@ -1150,6 +1174,59 @@ export const reduce = (state: AppState, action: AppAction): AppState => {
          */
         case 'drag-camera':
             return {...state, dragging: action.id}
+
+        /*
+         * One reference per plane. Dropping a second front view replaces the first, because two
+         * pictures of the front stacked on each other is not something anyone asked for and the
+         * artist plainly meant the new one.
+         */
+        case 'reference': {
+            const kept = state.references.filter(entry => entry.plane !== action.plane)
+            return {
+                ...state,
+                references: [
+                    ...kept,
+                    {plane: action.plane, url: action.url, opacity: 0.5, locked: false}
+                ]
+            }
+        }
+
+        case 'reference-opacity':
+            return {
+                ...state,
+                references: state.references.map(entry =>
+                    entry.plane === action.plane && !entry.locked ?
+                        {...entry, opacity: Math.min(1, Math.max(0, action.opacity))}
+                    :   entry
+                )
+            }
+
+        case 'reference-lock':
+            return {
+                ...state,
+                references: state.references.map(entry =>
+                    entry.plane === action.plane ? {...entry, locked: action.on} : entry
+                )
+            }
+
+        case 'reference-drop':
+            return {
+                ...state,
+                references: state.references.filter(
+                    entry => entry.plane !== action.plane || entry.locked
+                )
+            }
+
+        /*
+         * A PNG imported as voxels is a *new document* — `FEATURESET.md` §34 calls it a starting
+         * point, and it brings its own grid size and its own palette. Merging it into the open one
+         * would need a resize and a palette remap, and neither is what "instantly gives artists
+         * something to sculpt from" means.
+         */
+        case 'import-image': {
+            const opened = initialState(action.volume)
+            return {...opened, references: state.references, presets: state.presets}
+        }
 
         case 'reorder-camera': {
             const from = state.cameras.findIndex(({id}) => id === action.id)

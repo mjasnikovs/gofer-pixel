@@ -1,4 +1,5 @@
 import {expect, test} from 'bun:test'
+import {voxelsFromImage} from '../doc/import'
 import {objectCells, shownVolume} from '../doc/objects'
 import {SHEET_MAPS} from '../sheet/sheet'
 import {basisFor} from '../render/camera'
@@ -922,6 +923,59 @@ test('a saved preset joins the list and can be taken back out of it', () => {
     expect(dropped.presets).toHaveLength(0)
     expect(dropped.preset).toBe('Sprite Sheet (Auto)')
     expect(reduce(dropped, {type: 'drop-preset', name: 'My rig'})).toBe(dropped)
+})
+
+test('one reference per plane, and a locked one refuses to be dimmed or dropped', () => {
+    const state = fresh()
+    const front = reduce(state, {type: 'reference', plane: 1, url: 'data:image/png;base64,AA'})
+    expect(front.references).toHaveLength(1)
+    expect(front.references[0]?.opacity).toBe(0.5)
+
+    // A second front view replaces the first rather than stacking on it.
+    const again = reduce(front, {type: 'reference', plane: 1, url: 'data:image/png;base64,BB'})
+    expect(again.references).toHaveLength(1)
+    expect(again.references[0]?.url).toBe('data:image/png;base64,BB')
+
+    const both = reduce(again, {type: 'reference', plane: 2, url: 'data:image/png;base64,CC'})
+    expect(both.references).toHaveLength(2)
+
+    const dimmer = reduce(both, {type: 'reference-opacity', plane: 1, opacity: 0.2})
+    expect(dimmer.references.find(entry => entry.plane === 1)?.opacity).toBe(0.2)
+    // Opacity is a fraction, whatever the stepper asks for.
+    expect(
+        reduce(both, {type: 'reference-opacity', plane: 1, opacity: 9}).references[0]?.opacity
+    ).toBe(1)
+
+    const locked = reduce(both, {type: 'reference-lock', plane: 1, on: true})
+    expect(
+        reduce(locked, {type: 'reference-opacity', plane: 1, opacity: 0.1}).references[0]?.opacity
+    ).toBe(0.5)
+    expect(reduce(locked, {type: 'reference-drop', plane: 1}).references).toHaveLength(2)
+    expect(reduce(both, {type: 'reference-drop', plane: 1}).references).toHaveLength(1)
+})
+
+test('importing a PNG opens it as a document and keeps the references and presets', () => {
+    const saved = reduce(
+        reduce(fresh(), {type: 'reference', plane: 1, url: 'data:image/png;base64,AA'}),
+        {type: 'save-preset', name: 'Mine', maps: ['color']}
+    )
+    const {volume: built} = voxelsFromImage(
+        Uint8Array.from([255, 0, 0, 255, 0, 0, 255, 255]),
+        2,
+        1,
+        3
+    )
+
+    const opened = reduce(saved, {type: 'import-image', volume: built, name: 'hero.png'})
+    expect(opened.volume).toBe(built)
+    expect([opened.volume.sx, opened.volume.sy, opened.volume.sz]).toEqual([2, 3, 1])
+    // A new document: its own cameras, its own history, its own objects.
+    expect(opened.history.past).toHaveLength(0)
+    expect(opened.objects.list).toHaveLength(1)
+    expect(opened.cameras).toHaveLength(8)
+    // But the artist's own settings are theirs, not the file's.
+    expect(opened.references).toHaveLength(1)
+    expect(opened.presets).toHaveLength(1)
 })
 
 test('the chrome settings move without touching the render or the sheet', () => {
