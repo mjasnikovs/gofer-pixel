@@ -23,6 +23,24 @@ test('a drag orbits, and the same drag replayed lands in the same place', () => 
     expect(jumped.camera).toEqual(end.camera)
 })
 
+test('inverting turns the drag the other way, and leaves panning alone', () => {
+    const down = apply(idle, {type: 'pointerdown', x: 100, y: 100, secondary: false}, HEIGHT)
+    const plain = apply(down, {type: 'pointermove', x: 200, y: 60}, HEIGHT, false, false)
+    const inverted = apply(down, {type: 'pointermove', x: 200, y: 60}, HEIGHT, false, true)
+
+    // Both axes flip together — an inversion that only reversed yaw would be a diagonal drag
+    // curving the wrong way, which is worse than either convention on its own.
+    expect(inverted.camera.yaw - start.yaw).toBeCloseTo(-(plain.camera.yaw - start.yaw), 10)
+    expect(inverted.camera.pitch - start.pitch).toBeCloseTo(-(plain.camera.pitch - start.pitch), 10)
+
+    // Panning drags the picture under a fixed frame, which is the gesture nobody argues about.
+    const grabbed = apply(idle, {type: 'pointerdown', x: 0, y: 0, secondary: true}, HEIGHT)
+    const move = {type: 'pointermove', x: 100, y: 50} as const
+    expect(apply(grabbed, move, HEIGHT, false, true).camera).toEqual(
+        apply(grabbed, move, HEIGHT, false, false).camera
+    )
+})
+
 test('pitch stops at the poles instead of tumbling past them', () => {
     const down = apply(idle, {type: 'pointerdown', x: 0, y: 0, secondary: false}, HEIGHT)
     expect(apply(down, {type: 'pointermove', x: 0, y: -1000}, HEIGHT).camera.pitch).toBe(

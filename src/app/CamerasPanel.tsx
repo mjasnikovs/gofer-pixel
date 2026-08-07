@@ -108,6 +108,7 @@ export const CamerasPanel = ({
                     type='button'
                     role='radio'
                     aria-checked={entry.id === selected}
+                    title={`Look through ${entry.name}`}
                     className='camera-tile'
                     data-selected={entry.id === selected || undefined}
                     onClick={() => {
@@ -135,6 +136,7 @@ export const CamerasPanel = ({
             <button
                 type='button'
                 className='camera-add'
+                title='Store the current view as a new camera'
                 onClick={onCapture}
             >
                 <PlusIcon />

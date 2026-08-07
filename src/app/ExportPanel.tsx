@@ -3,6 +3,7 @@ import {IconButton} from '@astryxdesign/core/IconButton'
 import {MoreMenu} from '@astryxdesign/core/MoreMenu'
 import {SegmentedControl, SegmentedControlItem} from '@astryxdesign/core/SegmentedControl'
 import {Selector} from '@astryxdesign/core/Selector'
+import {Switch} from '@astryxdesign/core/Switch'
 import {Text} from '@astryxdesign/core/Text'
 import type {NamedCamera} from '../doc/cameras'
 import {SHEET_MAPS, type Sheet, type SheetMap} from '../sheet/sheet'
@@ -77,35 +78,43 @@ export const ExportPanel = ({
 }) => (
     <section className='section section-grows'>
         <SectionHead title='Export preset'>
-            <SegmentedControl
-                label='Sprite size'
-                size='sm'
-                value={String(cell)}
-                onChange={value => {
-                    onCell(Number(value))
-                }}
-            >
-                {CELL_SIZES.map(size => (
-                    <SegmentedControlItem
-                        key={size}
-                        value={String(size)}
-                        label={`${String(size)} px`}
-                    />
-                ))}
-            </SegmentedControl>
+            {/* Astryx's controls take no `title`, so the hover text hangs off a wrapper. */}
+            <span title='Edge of one sprite in the sheet, in pixels'>
+                <SegmentedControl
+                    label='Sprite size'
+                    size='sm'
+                    value={String(cell)}
+                    onChange={value => {
+                        onCell(Number(value))
+                    }}
+                >
+                    {CELL_SIZES.map(size => (
+                        <SegmentedControlItem
+                            key={size}
+                            value={String(size)}
+                            label={`${String(size)} px`}
+                        />
+                    ))}
+                </SegmentedControl>
+            </span>
         </SectionHead>
 
         <div className='export-body'>
             <div className='field-row'>
-                <Selector
-                    label='Export preset'
-                    isLabelHidden
-                    size='sm'
-                    width='100%'
-                    value={preset}
-                    options={presets.map(entry => ({value: entry.name, label: entry.name}))}
-                    onChange={onPreset}
-                />
+                <span
+                    className='grows'
+                    title='Which set of maps an export writes'
+                >
+                    <Selector
+                        label='Export preset'
+                        isLabelHidden
+                        size='sm'
+                        width='100%'
+                        value={preset}
+                        options={presets.map(entry => ({value: entry.name, label: entry.name}))}
+                        onChange={onPreset}
+                    />
+                </span>
                 <IconButton
                     label='Save these maps as a preset'
                     tooltip='Save the maps this preset writes under a new name'
@@ -141,6 +150,11 @@ export const ExportPanel = ({
                             role='radio'
                             aria-checked={size === padding}
                             aria-label={`${String(size)} pixels of padding`}
+                            title={
+                                size === 0 ?
+                                    'Pack the sprites edge to edge'
+                                :   `Leave ${String(size)} transparent pixels around each sprite`
+                            }
                             className='symmetry-axis'
                             data-on={size === padding || undefined}
                             onClick={() => {
@@ -151,19 +165,15 @@ export const ExportPanel = ({
                         </button>
                     ))}
                 </span>
-                <button
-                    type='button'
-                    role='switch'
-                    aria-checked={bounds}
-                    aria-label='Write collision bounds into the metadata'
-                    className='symmetry-axis'
-                    data-on={bounds || undefined}
-                    onClick={() => {
-                        onBounds(!bounds)
-                    }}
-                >
-                    BOX
-                </button>
+                <span title='Write each sprite’s collision box into the metadata JSON'>
+                    <Switch
+                        label='Box'
+                        size='sm'
+                        labelPosition='start'
+                        value={bounds}
+                        onChange={onBounds}
+                    />
+                </span>
             </div>
 
             <div className='checker export-grid'>
@@ -192,6 +202,7 @@ export const ExportPanel = ({
         <div className='export-foot'>
             <Button
                 label='Export sprite sheet'
+                tooltip='Render every camera and write the PNGs this preset asks for'
                 variant='primary'
                 width='100%'
                 onClick={onExport}

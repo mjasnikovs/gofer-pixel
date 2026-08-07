@@ -32,6 +32,7 @@ const Action = ({
         type='button'
         className='selection-action'
         aria-label={label}
+        title={label}
         onClick={onPress}
     >
         {children}

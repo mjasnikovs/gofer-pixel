@@ -59,23 +59,25 @@ export const RendersPanel = ({
     <section className='section section-holds'>
         <SectionHead title='Renders' />
         <div className='render-body'>
-            <SegmentedControl
-                label='Which map to preview'
-                size='sm'
-                layout='fill'
-                value={String(map)}
-                onChange={value => {
-                    onMap(Number(value))
-                }}
-            >
-                {MAPS.map(({value, label}) => (
-                    <SegmentedControlItem
-                        key={value}
-                        value={String(value)}
-                        label={label}
-                    />
-                ))}
-            </SegmentedControl>
+            <span title='All five come off the same ray, so they are aligned by construction'>
+                <SegmentedControl
+                    label='Which map to preview'
+                    size='sm'
+                    layout='fill'
+                    value={String(map)}
+                    onChange={value => {
+                        onMap(Number(value))
+                    }}
+                >
+                    {MAPS.map(({value, label}) => (
+                        <SegmentedControlItem
+                            key={value}
+                            value={String(value)}
+                            label={label}
+                        />
+                    ))}
+                </SegmentedControl>
+            </span>
 
             <div className='field-row'>
                 <Text
@@ -97,6 +99,7 @@ export const RendersPanel = ({
                             role='radio'
                             aria-checked={entry === size}
                             aria-label={`Preview at ${String(entry)} pixels`}
+                            title={`Redraw the preview at ${String(entry)} px, to see what survives`}
                             className='symmetry-axis'
                             data-on={entry === size || undefined}
                             onClick={() => {

@@ -3,8 +3,13 @@ import {createVolume, setVoxel, type Volume} from '../render/volume'
 /**
  * MagicaVoxel's built-in palette, generated procedurally, for files that carry no `RGBA` chunk.
  * Entry 1 is white; the rest walk a 6×6×3-ish RGB cube in the order the format defines.
+ *
+ * Exported because `doc/palette.ts` needs to *recognise* it. Almost every `.vox` file in the world
+ * carries this ramp in the slots its artist never touched, and a swatch grid full of `#030300`,
+ * `#270300`, `#4b0300` is a grid of nothing. Knowing exactly what the untouched ramp looks like is
+ * what lets those slots be replaced without ever overwriting a colour somebody chose.
  */
-const defaultPalette = (): Uint8Array => {
+export const magicaPalette = (): Uint8Array => {
     const palette = new Uint8Array(256 * 4)
     palette.set([255, 255, 255, 255], 4)
     for (let i = 0; i < 254; i += 1) {
@@ -43,7 +48,7 @@ export const readVox = (bytes: Uint8Array): Volume => {
     if (tagAt(view, 0) !== 'VOX ') throw new Error('not a .vox file')
 
     let size: [number, number, number] | undefined
-    let palette = defaultPalette()
+    let palette = magicaPalette()
     const voxels: [number, number, number, number][] = []
 
     let pos = 8 + 12 // magic and version, then the MAIN chunk header

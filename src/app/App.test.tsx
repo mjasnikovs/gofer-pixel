@@ -3,8 +3,9 @@ import {act} from 'react'
 import {createRoot, type Root} from 'react-dom/client'
 import {readVox} from '../vox/vox-file'
 import {App} from './App'
-import {loadDocument} from '../doc/save'
+import {loadDocument, saveDocument} from '../doc/save'
 import {latestSnapshot, memoryStore, snapshots, type Store} from '../doc/store'
+import {initialObjects} from '../doc/objects'
 import {handle} from './handle'
 
 const volume = readVox(
@@ -164,9 +165,10 @@ test('arming a tool and loading a colour reach the document, not just the panel'
     expect(control(mounted.host, 'Erase').getAttribute('aria-checked')).toBe('true')
     expect(control(mounted.host, 'Draw').getAttribute('aria-checked')).toBe('false')
 
-    // The palette is the model's own, so the first swatch is a colour the model is made of.
+    // The palette is the model's own first, then DB32 — the car's three colours and 31 more, with
+    // none of MagicaVoxel's ramp padding the grid out to its full 56.
     const swatches = [...mounted.host.querySelectorAll<HTMLElement>('.swatch')]
-    expect(swatches.length).toBe(56)
+    expect(swatches.length).toBe(34)
     expect(swatches[0]?.getAttribute('aria-label')).toContain('used by this model')
     await act(async () => {
         swatches[3]?.click()
@@ -185,6 +187,62 @@ test('arming a tool and loading a colour reach the document, not just the panel'
     }
     expect(handle.state?.brush.size).toBe(8)
     expect(control(mounted.host, 'Larger brush').getAttribute('aria-disabled')).toBe('true')
+
+    await unmount(mounted)
+})
+
+test('the undo button undoes, and greys itself out when there is nothing left', async () => {
+    const mounted = await mount()
+    // Nothing has happened yet, so both are off — and Astryx keeps a tooltipped control focusable
+    // and marks it `aria-disabled` rather than dropping it out of the tab order.
+    expect(control(mounted.host, 'Undo').getAttribute('aria-disabled')).toBe('true')
+    expect(control(mounted.host, 'Redo').getAttribute('aria-disabled')).toBe('true')
+
+    await act(async () => {
+        handle.dispatch?.({type: 'select-color'})
+        handle.dispatch?.({type: 'transform', op: {kind: 'delete'}})
+    })
+    const cut = handle.state?.volume.data.filter(value => value !== 0).length ?? 0
+    expect(handle.state?.history.past).toHaveLength(1)
+    expect(control(mounted.host, 'Undo').getAttribute('aria-disabled')).toBeNull()
+
+    await act(async () => {
+        control(mounted.host, 'Undo').click()
+    })
+    expect(handle.state?.history.past).toHaveLength(0)
+    expect(handle.state?.volume.data.filter(value => value !== 0).length).toBeGreaterThan(cut)
+
+    // And back the other way, which is the half the header never had at all.
+    expect(control(mounted.host, 'Redo').getAttribute('aria-disabled')).toBeNull()
+    await act(async () => {
+        control(mounted.host, 'Redo').click()
+    })
+    expect(handle.state?.volume.data.filter(value => value !== 0).length).toBe(cut)
+
+    await unmount(mounted)
+})
+
+test('two snapshots in the same second are two distinct entries in the menu', async () => {
+    // Autosave fires per committed edit, so this is the ordinary case, not a corner one: two strokes
+    // inside a second used to render two menu items with one React key and log a warning.
+    const backing = new Map<string, string>()
+    const store = memoryStore(backing)
+    const document_ = saveDocument(volume, initialObjects(volume), [], 'car.vox')
+    const at = Date.parse('2026-08-07T19:11:18.000Z')
+    backing.set('gofer-pixel/snapshot/' + String(at), JSON.stringify({...document_, at}))
+    backing.set('gofer-pixel/snapshot/' + String(at + 400), JSON.stringify({...document_, at}))
+
+    const mounted = await mount(store)
+    await act(async () => {
+        control(mounted.host, 'Main menu').click()
+    })
+
+    const labels = [...global.document.querySelectorAll('[role="menuitem"]')].map(node =>
+        node.textContent.trim()
+    )
+    const restores = labels.filter(label => label.startsWith('Restore'))
+    expect(restores).toHaveLength(2)
+    expect(new Set(restores).size).toBe(2)
 
     await unmount(mounted)
 })

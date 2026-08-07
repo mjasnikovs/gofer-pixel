@@ -1,3 +1,4 @@
+import {Switch} from '@astryxdesign/core/Switch'
 import {Text} from '@astryxdesign/core/Text'
 import type {ReactNode} from 'react'
 import {
@@ -8,6 +9,7 @@ import {
     FillIcon,
     MagnetIcon,
     MeasureIcon,
+    MouseIcon,
     MoveIcon,
     PickIcon,
     RotateIcon,
@@ -49,6 +51,27 @@ const LABELS: Record<Tool, string> = {
     measure: 'Measure'
 }
 
+/** What each tool does with the left button, said in the tooltip rather than left to be found. */
+const HINTS: Record<Tool, string> = {
+    draw: 'Write voxels in the loaded colour',
+    erase: 'Clear the voxels under the brush',
+    fill: 'Flood the connected region of one colour',
+    pick: 'Load the colour of the voxel under the cursor',
+    move: 'Drag out a selection, then drag it to move it',
+    rotate: 'Turn the selection a quarter at a time',
+    scale: 'Pull a face of the selection to extrude it',
+    clone: 'Drag a selection to leave a copy behind',
+    measure: 'Not built yet — the left button still turns the view'
+}
+
+/**
+ * Measure is in the rail because `docs/editor.png` draws nine tools, and it does nothing: arming it
+ * leaves the left button to the camera. So it is greyed, and its tooltip says which. It stays
+ * visible rather than being cut because the rail's nine-slot shape is the mockup's, and an artist who
+ * has read the feature set should be able to see that this one is coming.
+ */
+const DEAD: ReadonlySet<Tool> = new Set<Tool>(['measure'])
+
 const ToolButton = ({
     tool,
     isArmed,
@@ -62,10 +85,13 @@ const ToolButton = ({
         type='button'
         role='radio'
         aria-checked={isArmed}
+        aria-disabled={DEAD.has(tool) || undefined}
+        title={HINTS[tool]}
         className='tool'
         data-armed={isArmed || undefined}
+        data-dead={DEAD.has(tool) || undefined}
         onClick={() => {
-            onArm(tool)
+            if (!DEAD.has(tool)) onArm(tool)
         }}
     >
         <span className='tool-icon'>{TOOL_ICONS[tool]}</span>
@@ -99,38 +125,46 @@ export const ToolRail = ({
 )
 
 /**
- * The block under the rail: two switches and the one number that decides what a pixel means.
+ * The block under the rail: the switches, and the one number that decides what a pixel means.
  *
- * A switch whose state is a word — ON, in the accent — rather than a track, because at this size
- * the mockup is right that a two-letter word is read faster than a 20 px slider, and because these
- * two are read far more often than they are changed.
+ * These used to be buttons whose state was the word ON or OFF in the accent colour, on the argument
+ * that a two-letter word reads faster than a track. It does not — a word has to be read, and reading
+ * it only tells you the state if you already know which of the two words to expect. A track is a
+ * position, and a position is seen rather than read. It is also the shape every other application on
+ * the artist's machine uses for exactly this, which is worth more than any argument about pixels.
+ *
+ * The icon stays, in its circle, and still lights in the accent: it is what names the switch at a
+ * glance, and the label beside it is what names it exactly.
  */
 const Toggle = ({
     label,
+    hint,
     icon,
     isOn,
     onToggle
 }: {
     label: string
+    hint: string
     icon: ReactNode
     isOn: boolean
     onToggle: (on: boolean) => void
 }) => (
-    <button
-        type='button'
-        role='switch'
-        aria-checked={isOn}
-        aria-label={label}
+    <div
         className='snap-toggle'
         data-on={isOn || undefined}
-        onClick={() => {
-            onToggle(!isOn)
-        }}
+        title={hint}
     >
-        <span className='snap-name'>{label}</span>
         <span className='snap-icon'>{icon}</span>
-        <span className='snap-state'>{isOn ? 'ON' : 'OFF'}</span>
-    </button>
+        {/* Name first, then the track, so the three rows read down the column as a settings list. */}
+        <Switch
+            label={label}
+            size='sm'
+            labelPosition='start'
+            labelSpacing='spread'
+            value={isOn}
+            onChange={onToggle}
+        />
+    </div>
 )
 
 /**
@@ -160,6 +194,7 @@ const SymmetryButton = ({
         role='switch'
         aria-checked={isOn}
         aria-label={title}
+        title={title}
         aria-disabled={isDisabled}
         className='symmetry-axis'
         data-on={isOn || undefined}
@@ -181,6 +216,7 @@ const PLANES: readonly {axis: Axis | undefined; label: string; title: string}[] 
 export const GridPanel = ({
     grid,
     snap,
+    invert,
     voxelSize,
     symmetry,
     canRadial,
@@ -188,12 +224,14 @@ export const GridPanel = ({
     references,
     onGrid,
     onSnap,
+    onInvert,
     onSymmetry,
     onPlane,
     onReference
 }: {
     grid: boolean
     snap: boolean
+    invert: boolean
     voxelSize: number
     symmetry: {x: boolean; y: boolean; z: boolean; radial: boolean}
     canRadial: boolean
@@ -201,6 +239,7 @@ export const GridPanel = ({
     references: readonly {plane: Axis; opacity: number; locked: boolean}[]
     onGrid: (on: boolean) => void
     onSnap: (on: boolean) => void
+    onInvert: (on: boolean) => void
     onSymmetry: (axis: 'x' | 'y' | 'z' | 'radial', on: boolean) => void
     onPlane: (axis: Axis | undefined) => void
     onReference: (plane: Axis, op: 'fainter' | 'brighter' | 'lock' | 'drop') => void
@@ -209,15 +248,30 @@ export const GridPanel = ({
         <div className='snap-row'>
             <Toggle
                 label='Grid'
+                hint='Draw the ground grid under the model'
                 icon={<EyeIcon />}
                 isOn={grid}
                 onToggle={onGrid}
             />
             <Toggle
                 label='Snap'
+                hint='Hold zoom and pan to whole voxels, so a voxel edge lands on a pixel edge'
                 icon={<MagnetIcon />}
                 isOn={snap}
                 onToggle={onSnap}
+            />
+            {/*
+             * Which way a drag turns the model — an old argument with no right answer, which is why
+             * it is a setting. Off is "grab the model and turn it", on is "swing the camera around
+             * it", and an artist coming from a package that picked the other one wants this on the
+             * first day rather than to relearn their hands.
+             */}
+            <Toggle
+                label='Invert'
+                hint='Reverse the direction a drag turns the view'
+                icon={<MouseIcon />}
+                isOn={invert}
+                onToggle={onInvert}
             />
         </div>
         <div className='snap-size'>
@@ -281,6 +335,7 @@ export const GridPanel = ({
                         role='radio'
                         aria-checked={plane === entry.axis}
                         aria-label={entry.title}
+                        title={entry.title}
                         className='symmetry-axis'
                         data-on={plane === entry.axis || undefined}
                         onClick={() => {
@@ -315,6 +370,7 @@ export const GridPanel = ({
                         type='button'
                         className='symmetry-axis'
                         aria-label='Fainter reference'
+                        title='Fade the reference picture'
                         aria-disabled={entry.locked}
                         onClick={() => {
                             onReference(entry.plane, 'fainter')
@@ -326,6 +382,7 @@ export const GridPanel = ({
                         type='button'
                         className='symmetry-axis'
                         aria-label='Brighter reference'
+                        title='Bring the reference picture up'
                         aria-disabled={entry.locked}
                         onClick={() => {
                             onReference(entry.plane, 'brighter')
@@ -338,6 +395,11 @@ export const GridPanel = ({
                         role='switch'
                         aria-checked={entry.locked}
                         aria-label='Lock the reference'
+                        title={
+                            entry.locked ? 'Unlock the reference' : (
+                                'Lock it, so it cannot be faded or dropped by accident'
+                            )
+                        }
                         className='symmetry-axis'
                         data-on={entry.locked || undefined}
                         onClick={() => {
@@ -350,6 +412,7 @@ export const GridPanel = ({
                         type='button'
                         className='symmetry-axis'
                         aria-label='Remove the reference'
+                        title='Drop the reference picture'
                         aria-disabled={entry.locked}
                         onClick={() => {
                             onReference(entry.plane, 'drop')

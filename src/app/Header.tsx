@@ -2,6 +2,7 @@ import {Button} from '@astryxdesign/core/Button'
 import {IconButton} from '@astryxdesign/core/IconButton'
 import {SegmentedControl, SegmentedControlItem} from '@astryxdesign/core/SegmentedControl'
 import {Text} from '@astryxdesign/core/Text'
+import {canRedo, canUndo} from '../doc/history'
 import {countVoxels} from '../vox/vox-file'
 import {MoreMenu} from '@astryxdesign/core/MoreMenu'
 import {ChevronIcon, CubeIcon, RedoIcon, SlidersIcon, SunIcon, UndoIcon} from './icons'
@@ -11,15 +12,45 @@ import type {AppState} from './state'
  * The title bar of `docs/editor.png`: what is open on the left, which workspace on the centre line,
  * and the one coloured button in the window on the right.
  *
- * Undo and redo are drawn disabled rather than left out. The mockup has them, an editor is expected
- * to have them, and a greyed control that says "nothing to undo" is honest in a way that a missing
- * one is not — undo needs edits, and edits are on the proof of concept's do-not-build list.
+ * Undo and redo are wired to the history and greyed only when their half of it is empty. They were
+ * hardcoded disabled with a tooltip saying this build does not edit voxels, which stopped being true
+ * the moment the tools landed — `Ctrl+Z` has worked for some time and the button next to it claimed
+ * otherwise. A disabled control that lies is worse than no control: it teaches the artist that the
+ * feature is missing, and they stop looking for the shortcut that would have worked.
+ *
+ * The rest of this row genuinely does nothing yet and stays disabled, each saying so in its own
+ * tooltip. A greyed button that names what it would do is a promise; an enabled one that swallows
+ * the click is a bug report.
  */
+/**
+ * Restore-point labels, guaranteed distinct.
+ *
+ * Astryx derives a menu item's React key from its label (`renderDropdownItems.tsx`), and autosave
+ * fires on every committed edit — so two strokes inside one second produce two snapshots a second
+ * apart, one label, and a duplicate-key warning in the console. Rendering a *date* as well as a time
+ * is worth having anyway once snapshots span sessions; the counter is what settles the remaining
+ * same-second case, and it only appears when there is something to settle.
+ */
+const restoreLabels = (
+    restores: readonly {key: string; at: number; name: string}[]
+): readonly {key: string; label: string}[] => {
+    const seen = new Map<string, number>()
+    return restores.map(entry => {
+        const when = new Date(entry.at)
+        const base = `Restore ${entry.name} · ${when.toLocaleDateString()} ${when.toLocaleTimeString()}`
+        const count = seen.get(base) ?? 0
+        seen.set(base, count + 1)
+        return {key: entry.key, label: count === 0 ? base : `${base} (${String(count + 1)})`}
+    })
+}
+
 export const Header = ({
     name,
     state,
     onWorkspace,
     onExport,
+    onUndo,
+    onRedo,
     restores,
     onRestore,
     onForget
@@ -28,6 +59,8 @@ export const Header = ({
     state: AppState
     onWorkspace: (workspace: AppState['workspace']) => void
     onExport: () => void
+    onUndo: () => void
+    onRedo: () => void
     restores: readonly {key: string; at: number; name: string}[]
     onRestore: (key: string) => void
     onForget: () => void
@@ -48,9 +81,18 @@ export const Header = ({
             </Text>
         </div>
 
+        {/*
+         * The mockup's two workspaces. Switching them moved a flag in the state and changed nothing
+         * on screen, because there is no second layout to switch to — the render controls live in
+         * the rail on the right and are visible in both. So it is disabled rather than left working:
+         * a control that responds by highlighting itself and doing nothing is the most expensive
+         * kind of dead, because the artist assumes the layout they wanted is one they cannot find.
+         */}
         <SegmentedControl
             label='Workspace'
             value={state.workspace}
+            isDisabled
+            disabledMessage='One workspace for now — the render controls are in the right-hand rail'
             onChange={value => {
                 onWorkspace(value === 'render' ? 'render' : 'model')
             }}
@@ -76,19 +118,27 @@ export const Header = ({
             />
             <IconButton
                 label='Undo'
-                tooltip='Nothing to undo — this build does not edit voxels'
+                tooltip={
+                    !canUndo(state.history) ? 'Nothing to undo' : 'Undo the last edit — Ctrl+Z'
+                }
                 icon={<UndoIcon />}
                 size='sm'
                 variant='ghost'
-                isDisabled
+                isDisabled={!canUndo(state.history)}
+                onClick={onUndo}
             />
             <IconButton
                 label='Redo'
-                tooltip='Nothing to redo — this build does not edit voxels'
+                tooltip={
+                    !canRedo(state.history) ? 'Nothing to redo' : (
+                        'Redo the last undone edit — Ctrl+Shift+Z'
+                    )
+                }
                 icon={<RedoIcon />}
                 size='sm'
                 variant='ghost'
-                isDisabled
+                isDisabled={!canRedo(state.history)}
+                onClick={onRedo}
             />
             <span className='app-divider' />
             <IconButton
@@ -117,6 +167,7 @@ export const Header = ({
             />
             <Button
                 label='Export'
+                tooltip='Render every camera and write the sprite sheet'
                 variant='primary'
                 size='sm'
                 onClick={onExport}
@@ -130,8 +181,8 @@ export const Header = ({
                 label='Main menu'
                 size='sm'
                 items={[
-                    ...restores.map(entry => ({
-                        label: `Restore ${entry.name} · ${new Date(entry.at).toLocaleTimeString()}`,
+                    ...restoreLabels(restores).map(entry => ({
+                        label: entry.label,
                         onClick: () => {
                             onRestore(entry.key)
                         }

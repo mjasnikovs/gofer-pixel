@@ -5,6 +5,7 @@ import {beginEdit, commitEdit, revertEdit} from './edits'
 import {
     colorCss,
     freeSlot,
+    freshenPalette,
     fromHexPalette,
     projectPalette,
     RECENT_COLORS,
@@ -22,18 +23,51 @@ const volume = readVox(
     new Uint8Array(await Bun.file(new URL('../assets/car.vox', import.meta.url)).arrayBuffer())
 )
 
-test('the model’s own colours come first, and the grid is still full afterwards', () => {
-    const used = usedColors(volume)
+/** As the app opens it — see `freshenPalette`, which every document goes through in `initialState`. */
+const opened = {...volume, palette: freshenPalette(volume)}
+
+test('the model’s own colours come first, then the palette, then nothing', () => {
+    const used = usedColors(opened)
     expect(used.size).toBeGreaterThan(0)
     expect(used.has(0)).toBe(false)
 
-    const swatches = projectPalette(volume)
-    expect(swatches).toHaveLength(SWATCH_COLUMNS * SWATCH_ROWS)
+    const swatches = projectPalette(opened)
     expect(swatches.slice(0, used.size).every(({isUsed}) => isUsed)).toBe(true)
     expect(swatches.slice(used.size).some(({isUsed}) => isUsed)).toBe(false)
 
-    // Every entry is a distinct index, so clicking one swatch cannot select another.
+    // The model's three colours and DB32, and not one entry of MagicaVoxel's ramp behind them.
+    expect(swatches).toHaveLength(used.size + 31)
+    expect(swatches.length).toBeLessThan(SWATCH_COLUMNS * SWATCH_ROWS)
+
+    // Every entry is a distinct index, so clicking one swatch cannot select another. And a distinct
+    // colour, or the grid offers the same paint twice under two names.
     expect(new Set(swatches.map(({index}) => index)).size).toBe(swatches.length)
+    expect(new Set(swatches.map(({css}) => css)).size).toBe(swatches.length)
+})
+
+test('the default palette lands on the filler and on nothing else', () => {
+    // The model's own three entries survive the trip byte for byte. This is the whole guard: a
+    // default palette that recoloured the artwork it opened would be a data-loss bug, not a theme.
+    for (const index of usedColors(volume)) {
+        expect([...opened.palette.subarray(index * 4, index * 4 + 4)]).toEqual([
+            ...volume.palette.subarray(index * 4, index * 4 + 4)
+        ])
+    }
+
+    // A colour somebody chose is never overwritten either, used or not.
+    const authored = {...volume, palette: withColor(volume.palette, 7, '#123456')}
+    expect(colorCss({...authored, palette: freshenPalette(authored)}, 7)).toBe('#123456')
+
+    // Running it twice is running it once — a recovered autosave is freshened again on open.
+    expect([...freshenPalette(opened)]).toEqual([...opened.palette])
+})
+
+test('a document with no palette at all opens on the default one', () => {
+    const blank = createVolume(4, 4, 4)
+    const swatches = projectPalette({...blank, palette: freshenPalette(blank)})
+    expect(swatches).toHaveLength(32)
+    expect(swatches[0]?.css).toBe('#000000')
+    expect(swatches.some(({css}) => css === '#ffffff')).toBe(true)
 })
 
 test('a swatch carries the palette’s own bytes, not a re-derived colour', () => {

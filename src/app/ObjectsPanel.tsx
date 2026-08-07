@@ -37,6 +37,7 @@ const Row = ({
             role='radio'
             aria-checked={isActive}
             aria-label={`Draw into ${entry.name}`}
+            title={`Draw into ${entry.name}`}
             className='object-name'
             onClick={() => {
                 onOp({kind: 'active', id: entry.id})
@@ -50,6 +51,7 @@ const Row = ({
             role='switch'
             aria-checked={isSoloed}
             aria-label={`Show only ${entry.name}`}
+            title={isSoloed ? 'Let every object back' : `Show only ${entry.name}`}
             className='object-flag'
             data-on={isSoloed || undefined}
             onClick={() => {
@@ -63,6 +65,7 @@ const Row = ({
             role='switch'
             aria-checked={entry.locked}
             aria-label={`Lock ${entry.name}`}
+            title={entry.locked ? `Unlock ${entry.name}` : `Lock ${entry.name} against edits`}
             className='object-flag'
             data-on={entry.locked || undefined}
             onClick={() => {
@@ -76,6 +79,7 @@ const Row = ({
             role='switch'
             aria-checked={!entry.hidden}
             aria-label={`Show ${entry.name}`}
+            title={entry.hidden ? `Show ${entry.name}` : `Hide ${entry.name}`}
             className='object-flag'
             data-on={!entry.hidden || undefined}
             onClick={() => {

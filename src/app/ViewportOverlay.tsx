@@ -352,6 +352,7 @@ export const HintBar = ({tool, onCapture}: {tool: string; onCapture: () => void}
         <button
             type='button'
             className='hint hint-action'
+            title='Store the current view as a new camera'
             onClick={onCapture}
         >
             <CameraIcon />

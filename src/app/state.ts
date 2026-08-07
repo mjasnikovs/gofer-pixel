@@ -37,7 +37,14 @@ import {
     type Objects
 } from '../doc/objects'
 import {EMPTY_HISTORY, record, redo, undo, type History} from '../doc/history'
-import {firstColor, freeSlot, fromHexPalette, remember, withColor} from '../doc/palette'
+import {
+    firstColor,
+    freeSlot,
+    freshenPalette,
+    fromHexPalette,
+    remember,
+    withColor
+} from '../doc/palette'
 import {
     cellOf,
     EMPTY_SELECTION,
@@ -332,6 +339,13 @@ export interface AppState {
     readonly paletteLocked: boolean
     readonly grid: boolean
     readonly snap: boolean
+    /**
+     * Whether a drag turns the view the other way round — see `viewport/orbit.ts`.
+     *
+     * Chrome rather than document: it is a fact about the hands at this desk, not about the model,
+     * so it is deliberately not in the save file or the undo history.
+     */
+    readonly invert: boolean
     readonly workspace: 'model' | 'render'
     readonly preset: string
     readonly fps: number
@@ -391,6 +405,7 @@ export type AppAction =
     | {type: 'replace-color'; from: number; to: number}
     | {type: 'grid'; on: boolean}
     | {type: 'snap'; on: boolean}
+    | {type: 'invert'; on: boolean}
     | {type: 'workspace'; workspace: 'model' | 'render'}
     | {type: 'preset'; preset: string}
     | {type: 'fps'; fps: number}
@@ -436,7 +451,14 @@ export interface OpenedDocument {
     readonly cameras: readonly NamedCamera[]
 }
 
-export const initialState = (volume: Volume, opened?: OpenedDocument): AppState => {
+export const initialState = (source: Volume, opened?: OpenedDocument): AppState => {
+    /*
+     * Every document opens on a palette worth painting from — see `freshenPalette`. It runs here
+     * rather than in the `.vox` reader because it is an editor decision, not a format one: the
+     * reader's job is to say what the file holds, and a golden-hash test of the reader must keep
+     * getting the file's own bytes back.
+     */
+    const volume = {...source, palette: freshenPalette(source)}
     const cameras = opened?.cameras.length ? [...opened.cameras] : eightDirections(volume)
     const first = opening(cameras)
     return {
@@ -476,6 +498,7 @@ export const initialState = (volume: Volume, opened?: OpenedDocument): AppState 
         paletteLocked: false,
         grid: true,
         snap: true,
+        invert: false,
         workspace: 'model',
         preset: PRESETS[0].name,
         fps: 24,
@@ -871,7 +894,13 @@ export const reduce = (state: AppState, action: AppAction): AppState => {
                     delta: action.event.delta > 0 ? 1 : -1
                 })
             }
-            const orbit = applyOrbit(state.orbit, action.event, action.height, state.snap)
+            const orbit = applyOrbit(
+                state.orbit,
+                action.event,
+                action.height,
+                state.snap,
+                state.invert
+            )
             if (orbit === state.orbit) return state
             // Once the view has moved it is no longer the stored camera, and saying so is the
             // difference between a list of cameras and a list of bookmarks that quietly lie.
@@ -1411,6 +1440,9 @@ export const reduce = (state: AppState, action: AppAction): AppState => {
 
         case 'snap':
             return {...state, snap: action.on}
+
+        case 'invert':
+            return {...state, invert: action.on}
 
         case 'workspace':
             return {...state, workspace: action.workspace}

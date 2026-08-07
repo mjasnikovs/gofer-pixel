@@ -87,6 +87,16 @@ body,
     flex: 1 1 auto;
 }
 
+/*
+ * A wrapper that takes the width its child was going to take. Several of Astryx's controls accept no
+ * `title`, so hover text hangs off a `span` around them — and a bare `span` in a flex row is
+ * `flex: 0 1 auto`, which would shrink a `width: 100%` selector to its content.
+ */
+.grows {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
 /* ---- the body grid ---- */
 
 .app-body {
@@ -250,6 +260,20 @@ body,
     color: var(--color-text-accent);
 }
 
+/*
+ * A tool that is not built yet. It keeps its slot and its `aria-disabled`, so a keyboard can still
+ * reach it and hear why — which is the whole reason it is not simply `disabled`.
+ */
+.tool[data-dead] {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.tool[data-dead]:hover {
+    background: none;
+    color: var(--color-icon-secondary);
+}
+
 /* ---- grid / snap / voxel size ---- */
 
 .snap-panel {
@@ -257,36 +281,36 @@ body,
     padding: 14px 12px;
 }
 
+/*
+ * One switch to a row rather than two side by side. A track needs its own width, and three of them
+ * across a 193 px column would each get 60 px — enough for the track and nothing to say what it is
+ * for. Stacked, each row is icon, name, track, and the tracks line up down the right edge so the
+ * whole block can be read as one column of on-or-off.
+ */
 .snap-row {
     display: flex;
-    gap: 6px;
+    flex-direction: column;
+    gap: 4px;
 }
 
 .snap-toggle {
-    flex: 1 1 0;
     display: flex;
-    flex-direction: column;
     align-items: center;
-    gap: 5px;
-    padding: 2px;
-    border: none;
-    background: none;
-    cursor: pointer;
+    gap: 8px;
 }
 
-.snap-name {
-    font-size: 11px;
-    letter-spacing: 0.09em;
-    text-transform: uppercase;
-    color: var(--color-text-disabled);
+.snap-toggle > :last-child {
+    flex: 1 1 auto;
+    min-width: 0;
 }
 
 .snap-icon {
     display: flex;
+    flex: 0 0 auto;
     align-items: center;
     justify-content: center;
-    width: 28px;
-    height: 28px;
+    width: 24px;
+    height: 24px;
     border-radius: var(--radius-full);
     background: var(--color-background-card);
     color: var(--color-icon-secondary);
@@ -294,16 +318,6 @@ body,
 
 .snap-toggle[data-on] .snap-icon {
     color: var(--color-icon-accent);
-}
-
-.snap-state {
-    font-size: 11px;
-    font-weight: var(--font-weight-semibold);
-    color: var(--color-text-disabled);
-}
-
-.snap-toggle[data-on] .snap-state {
-    color: var(--color-text-accent);
 }
 
 .snap-size {
@@ -410,6 +424,12 @@ body,
 
 /* ---- viewport and its overlays ---- */
 
+/*
+ * The cursor is set inline, per armed tool — see `app/cursors.ts`. `grab` stays here as the value
+ * before React has had a say, and `grabbing` wins while the camera is being dragged, which is the one
+ * moment the artist is moving the view rather than using the tool. `!important` because the inline
+ * tool cursor would otherwise outrank it.
+ */
 .viewport {
     position: absolute;
     inset: 0;
@@ -418,8 +438,8 @@ body,
     cursor: grab;
 }
 
-.viewport:active {
-    cursor: grabbing;
+.viewport[data-moving] {
+    cursor: grabbing !important;
 }
 
 .viewport-canvas {
@@ -1048,31 +1068,6 @@ body,
 .color-input:disabled {
     cursor: not-allowed;
     opacity: 0.5;
-}
-
-/* ---- figures ---- */
-
-.figure-row {
-    display: flex;
-    gap: 4px;
-}
-
-.figure {
-    flex: 1;
-    height: 24px;
-    padding: 0;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-small);
-    background: var(--color-background-subtle);
-    color: var(--color-text-secondary);
-    font-size: var(--font-size-supporting);
-    cursor: pointer;
-}
-
-.figure[data-selected] {
-    border-color: var(--color-accent-default);
-    background: var(--color-accent-subtle);
-    color: var(--color-text-accent);
 }
 
 /* ---- symmetry ---- */

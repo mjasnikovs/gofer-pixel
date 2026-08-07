@@ -90,11 +90,21 @@ const snapCamera = (camera: Camera, snap: boolean): Camera =>
         }
     :   camera
 
+/**
+ * Which way a drag turns the model.
+ *
+ * Off, dragging right turns the model as if you had a hand on it. On, it swings the camera the other
+ * way round. Both conventions are in wide use and neither is more correct, so this is a setting
+ * rather than an opinion — and it flips orbit only. Pan is unaffected on purpose: panning drags the
+ * *picture* under a fixed frame, which is the one gesture everybody already agrees about, and
+ * inverting it would break the direct correspondence between the cursor and the thing under it.
+ */
 export const apply = (
     state: OrbitState,
     event: OrbitEvent,
     height: number,
-    snap = false
+    snap = false,
+    invert = false
 ): OrbitState => {
     switch (event.type) {
         case 'camera':
@@ -120,13 +130,14 @@ export const apply = (
             const dx = event.x - gesture.x
             const dy = event.y - gesture.y
             if (gesture.mode === 'orbit') {
+                const sense = invert ? -1 : 1
                 return {
                     ...state,
                     camera: {
                         ...gesture.from,
-                        yaw: gesture.from.yaw + dx * RADIANS_PER_PIXEL,
+                        yaw: gesture.from.yaw + sense * dx * RADIANS_PER_PIXEL,
                         pitch: clamp(
-                            gesture.from.pitch - dy * RADIANS_PER_PIXEL,
+                            gesture.from.pitch - sense * dy * RADIANS_PER_PIXEL,
                             -MAX_PITCH,
                             MAX_PITCH
                         )

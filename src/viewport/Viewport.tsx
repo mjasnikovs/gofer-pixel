@@ -41,6 +41,8 @@ export const Viewport = ({
     volume,
     camera,
     map,
+    cursor,
+    isMovingCamera = false,
     onOrbit,
     onPointer,
     onReady,
@@ -49,6 +51,14 @@ export const Viewport = ({
     volume: Volume
     camera: Camera
     map: number
+    /**
+     * The pointer, as a CSS `cursor` value — see `app/cursors.ts`. It comes in rather than being
+     * decided here because which tool is armed is application state, and this component deliberately
+     * knows nothing about tools.
+     */
+    cursor?: string | undefined
+    /** A camera drag is in progress, which outranks the tool: the hand is what the artist is doing. */
+    isMovingCamera?: boolean
     /** The wheel only. Where a *drag* goes is decided in `reduce`, not here. */
     onOrbit: (event: OrbitEvent, height: number) => void
     onPointer: (event: ViewportPointer) => void
@@ -151,6 +161,8 @@ export const Viewport = ({
             ref={hostRef}
             className='viewport'
             data-testid='viewport'
+            style={cursor === undefined ? undefined : {cursor}}
+            data-moving={isMovingCamera || undefined}
             onContextMenu={event => {
                 // The right button orbits, so it must not also open a menu over the model.
                 event.preventDefault()

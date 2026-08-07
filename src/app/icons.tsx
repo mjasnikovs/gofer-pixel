@@ -9,6 +9,8 @@
  * Every one is a 16-unit box on a 1.4 stroke of `currentColor`, so the button's variant still
  * decides the colour and the whole set reads as one hand.
  */
+import {TOOL_PATHS} from './tool-paths'
+
 const Svg = ({children, size = 16}: {children: React.ReactNode; size?: number}) => (
     <svg
         width={size}
@@ -27,66 +29,26 @@ const Svg = ({children, size = 16}: {children: React.ReactNode; size?: number}) 
 
 /* ---- the nine tools, in rail order ---- */
 
-export const DrawIcon = () => (
+const ToolGlyph = ({paths}: {paths: readonly string[]}) => (
     <Svg>
-        <path d='M11.4 2.6a1.6 1.6 0 0 1 2.2 2.2L5.6 12.8 2.5 13.5l.7-3.1z' />
-        <path d='M10 4l2 2' />
+        {paths.map(d => (
+            <path
+                key={d}
+                d={d}
+            />
+        ))}
     </Svg>
 )
 
-export const EraseIcon = () => (
-    <Svg>
-        <path d='M9.2 2.8 2.8 9.2a1.5 1.5 0 0 0 0 2.1l1.9 1.9h4l6.5-6.5a1.5 1.5 0 0 0 0-2.1l-2-2a1.5 1.5 0 0 0-2 0z' />
-        <path d='M6 6l4 4M4.7 13.2h8.6' />
-    </Svg>
-)
-
-export const FillIcon = () => (
-    <Svg>
-        <path d='M6.4 2.2 12.6 8.4a1 1 0 0 1 0 1.4l-3.9 3.9a1 1 0 0 1-1.4 0L2.6 8.9z' />
-        <path d='M4.5 4.1 3 2.6M14 11c.8 1.2 1.2 2 1.2 2.5a1.2 1.2 0 0 1-2.4 0c0-.5.4-1.3 1.2-2.5z' />
-    </Svg>
-)
-
-export const PickIcon = () => (
-    <Svg>
-        <path d='M11 2.4a1.8 1.8 0 0 1 2.6 2.6l-1 1 .8.8-1.3 1.3-.8-.8-5 5-2.6.6.6-2.6 5-5-.8-.8L9.8 3.2l.8.8z' />
-    </Svg>
-)
-
-export const MoveIcon = () => (
-    <Svg>
-        <path d='M8 1.8v12.4M1.8 8h12.4M8 1.8 6.2 3.8M8 1.8 9.8 3.8M8 14.2 6.2 12.2M8 14.2 9.8 12.2M1.8 8 3.8 6.2M1.8 8 3.8 9.8M14.2 8l-2-1.8M14.2 8l-2 1.8' />
-    </Svg>
-)
-
-export const RotateIcon = () => (
-    <Svg>
-        <path d='M13.4 8a5.4 5.4 0 1 1-1.9-4.1' />
-        <path d='M13.7 1.9v3h-3' />
-    </Svg>
-)
-
-export const ScaleIcon = () => (
-    <Svg>
-        <path d='M2.5 2.5h11v11h-11z' />
-        <path d='M5.5 10.5l5-5M10.5 5.5h-3M10.5 5.5v3' />
-    </Svg>
-)
-
-export const CloneIcon = () => (
-    <Svg>
-        <path d='M5.5 5.5h8v8h-8z' />
-        <path d='M10.5 5.5v-3h-8v8h3' />
-    </Svg>
-)
-
-export const MeasureIcon = () => (
-    <Svg>
-        <path d='M2 9.9 9.9 2l4.1 4.1L6.1 14z' />
-        <path d='M5 6.9l1.2 1.2M7 4.9l1.2 1.2M9 2.9l1.2 1.2M3 8.9l1.2 1.2' />
-    </Svg>
-)
+export const DrawIcon = () => <ToolGlyph paths={TOOL_PATHS.draw} />
+export const EraseIcon = () => <ToolGlyph paths={TOOL_PATHS.erase} />
+export const FillIcon = () => <ToolGlyph paths={TOOL_PATHS.fill} />
+export const PickIcon = () => <ToolGlyph paths={TOOL_PATHS.pick} />
+export const MoveIcon = () => <ToolGlyph paths={TOOL_PATHS.move} />
+export const RotateIcon = () => <ToolGlyph paths={TOOL_PATHS.rotate} />
+export const ScaleIcon = () => <ToolGlyph paths={TOOL_PATHS.scale} />
+export const CloneIcon = () => <ToolGlyph paths={TOOL_PATHS.clone} />
+export const MeasureIcon = () => <ToolGlyph paths={TOOL_PATHS.measure} />
 
 /* ---- brush shapes ---- */
 
@@ -131,6 +93,141 @@ export const CubeIcon = () => (
     <Svg>
         <path d='M8 1.8 14 5v6l-6 3.2L2 11V5z' />
         <path d='M2 5l6 3.2L14 5M8 8.2v6' />
+    </Svg>
+)
+
+/* ---- what a drag draws between its two ends ---- */
+
+/**
+ * The four figures, each drawn as the shape it produces with its two ends marked.
+ *
+ * The dots are the whole idea. A line, a rectangle and an ellipse are all "press here, release
+ * there", and what distinguishes them is only what gets filled in between — so every one of these is
+ * the same two endpoints with a different path joining them, and Free is the one where the path
+ * wanders. The panel used to spell the four out in words, on the argument that a rectangle has no
+ * icon better than its own name. It does: the rectangle.
+ */
+export const FreeIcon = () => (
+    <Svg>
+        <path d='M3 11.5c1.6-4.4 3-6.4 4.2-6 1.2.4.6 4 1.8 4.4 1.2.4 2.4-1.6 4-4.4' />
+        <circle
+            cx='3'
+            cy='11.5'
+            r='1.5'
+            fill='currentColor'
+            stroke='none'
+        />
+        <circle
+            cx='13'
+            cy='5.5'
+            r='1.5'
+            fill='currentColor'
+            stroke='none'
+        />
+    </Svg>
+)
+
+export const LineIcon = () => (
+    <Svg>
+        <path d='M4 12 12 4' />
+        <circle
+            cx='4'
+            cy='12'
+            r='1.5'
+            fill='currentColor'
+            stroke='none'
+        />
+        <circle
+            cx='12'
+            cy='4'
+            r='1.5'
+            fill='currentColor'
+            stroke='none'
+        />
+    </Svg>
+)
+
+export const RectIcon = () => (
+    <Svg>
+        <path d='M3.5 12.5v-9h9' />
+        <path d='M3.5 12.5h9v-9' />
+        <circle
+            cx='3.5'
+            cy='12.5'
+            r='1.5'
+            fill='currentColor'
+            stroke='none'
+        />
+        <circle
+            cx='12.5'
+            cy='3.5'
+            r='1.5'
+            fill='currentColor'
+            stroke='none'
+        />
+    </Svg>
+)
+
+export const EllipseIcon = () => (
+    <Svg>
+        <ellipse
+            cx='8'
+            cy='8'
+            rx='5.5'
+            ry='4'
+        />
+        <circle
+            cx='2.5'
+            cy='12'
+            r='1.5'
+            fill='currentColor'
+            stroke='none'
+        />
+        <circle
+            cx='13.5'
+            cy='4'
+            r='1.5'
+            fill='currentColor'
+            stroke='none'
+        />
+    </Svg>
+)
+
+/* ---- what a click writes: one cell, the face it lands on, or the whole layer ---- */
+
+/**
+ * The three brush kinds, drawn as the same grid with a different part of it lit.
+ *
+ * They share a frame on purpose: the difference between them is not what shape the brush is — that
+ * is the Shape row — but how far the same stamp spreads. One cell, the run of cells across the face
+ * the ray struck, or every cell of the layer.
+ */
+export const VoxelIcon = () => (
+    <Svg>
+        <path d='M2.5 2.5h11v11h-11z' />
+        <path
+            d='M6.5 6.5h3v3h-3z'
+            fill='currentColor'
+        />
+    </Svg>
+)
+
+export const FaceIcon = () => (
+    <Svg>
+        <path d='M2.5 2.5h11v11h-11z' />
+        <path
+            d='M2.5 6.5h11v3h-11z'
+            fill='currentColor'
+        />
+    </Svg>
+)
+
+export const PlaneIcon = () => (
+    <Svg>
+        <path
+            d='M2.5 2.5h11v11h-11z'
+            fill='currentColor'
+        />
     </Svg>
 )
 

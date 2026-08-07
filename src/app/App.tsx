@@ -14,6 +14,7 @@ import {Viewport} from '../viewport/Viewport'
 import type {OrbitEvent, ViewportPointer} from '../viewport/orbit'
 import {BrushPanel} from './BrushPanel'
 import {CamerasPanel} from './CamerasPanel'
+import {TOOL_CURSORS} from './cursors'
 import {writeMetadata, writePalette, writeSheet, writeSprite} from './download'
 import {ExportPanel} from './ExportPanel'
 import {Header} from './Header'
@@ -270,6 +271,12 @@ export const App = ({
                     dispatch({type: 'workspace', workspace})
                 }}
                 onExport={onExport}
+                onUndo={() => {
+                    dispatch({type: 'undo'})
+                }}
+                onRedo={() => {
+                    dispatch({type: 'redo'})
+                }}
                 restores={snapshots(store)}
                 onRestore={key => {
                     const text = store.get(key)
@@ -354,6 +361,8 @@ export const App = ({
                         volume={shown}
                         camera={state.orbit.camera}
                         map={state.map}
+                        cursor={TOOL_CURSORS[state.tool]}
+                        isMovingCamera={state.orbit.gesture !== undefined}
                         onOrbit={onOrbit}
                         onPointer={onPointer}
                         onReady={onReady}
@@ -398,6 +407,7 @@ export const App = ({
                     <GridPanel
                         grid={state.grid}
                         snap={state.snap}
+                        invert={state.invert}
                         voxelSize={Math.max(1, Math.round(state.cell / state.orbit.camera.zoom))}
                         symmetry={state.symmetry}
                         canRadial={canRadial(volume)}
@@ -407,6 +417,9 @@ export const App = ({
                         }}
                         onSnap={on => {
                             dispatch({type: 'snap', on})
+                        }}
+                        onInvert={on => {
+                            dispatch({type: 'invert', on})
                         }}
                         onSymmetry={(axis, on) => {
                             dispatch({type: 'symmetry', axis, on})

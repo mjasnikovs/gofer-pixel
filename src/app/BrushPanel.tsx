@@ -1,5 +1,5 @@
 import {IconButton} from '@astryxdesign/core/IconButton'
-import {Selector} from '@astryxdesign/core/Selector'
+import {Switch} from '@astryxdesign/core/Switch'
 import {Text} from '@astryxdesign/core/Text'
 import type {ReactNode} from 'react'
 import {colorCss, projectPalette, SWATCH_COLUMNS, type Swatch} from '../doc/palette'
@@ -8,12 +8,19 @@ import {
     CircleIcon,
     CubeIcon,
     DownloadIcon,
+    EllipseIcon,
+    FaceIcon,
+    FreeIcon,
+    LineIcon,
     MinusIcon,
     PickIcon,
+    PlaneIcon,
     PlusIcon,
+    RectIcon,
     RingIcon,
     SquareIcon,
-    UploadIcon
+    UploadIcon,
+    VoxelIcon
 } from './icons'
 import {SectionHead} from './SectionHead'
 import {FIGURES, type Figure} from '../doc/figures'
@@ -44,17 +51,30 @@ const SHAPE_LABELS: Record<Shape, string> = {
     cube: 'Cube brush'
 }
 
+const FIGURE_ICONS: Record<Figure, ReactNode> = {
+    free: <FreeIcon />,
+    line: <LineIcon />,
+    rect: <RectIcon />,
+    ellipse: <EllipseIcon />
+}
+
 const FIGURE_LABELS: Record<Figure, string> = {
-    free: 'Free',
-    line: 'Line',
-    rect: 'Rect',
-    ellipse: 'Ellipse'
+    free: 'Freehand — the stroke follows the cursor',
+    line: 'Line between the two ends of the drag',
+    rect: 'Rectangle between the two ends of the drag',
+    ellipse: 'Ellipse inscribed in the drag'
+}
+
+const KIND_ICONS: Record<(typeof BRUSH_KINDS)[number], ReactNode> = {
+    voxel: <VoxelIcon />,
+    face: <FaceIcon />,
+    plane: <PlaneIcon />
 }
 
 const KIND_LABELS: Record<(typeof BRUSH_KINDS)[number], string> = {
-    voxel: 'Voxel',
-    face: 'Face',
-    plane: 'Plane'
+    voxel: 'Voxel — write the one cell under the cursor',
+    face: 'Face — write across the face the ray struck',
+    plane: 'Plane — write the whole layer'
 }
 
 /**
@@ -99,6 +119,11 @@ const Swatches = ({
                     + (swatch.isUsed ? ', used by this model' : '')
                     + '. Shift-click to select every voxel of it, alt-click to replace the loaded'
                     + ' colour with it.'
+                }
+                title={
+                    `${swatch.css}${swatch.isUsed ? ' — used by this model' : ''}`
+                    + '\nShift-click: select every voxel of it'
+                    + '\nAlt-click: replace the loaded colour with it'
                 }
                 className='swatch'
                 data-selected={swatch.index === color || undefined}
@@ -152,17 +177,41 @@ export const BrushPanel = ({
         <section className='section'>
             <SectionHead title='Brush' />
             <div className='section-body'>
-                <Selector
-                    label='Brush kind'
-                    isLabelHidden
-                    size='sm'
-                    value={brush.kind}
-                    options={BRUSH_KINDS.map(kind => ({value: kind, label: KIND_LABELS[kind]}))}
-                    onChange={value => {
-                        const kind = BRUSH_KINDS.find(entry => entry === value)
-                        if (kind) onBrush({kind})
-                    }}
-                />
+                {/*
+                 * How far one click spreads — one cell, a face, a whole layer. It was a dropdown,
+                 * which cost two clicks and a popup to change a setting that sits next to two rows
+                 * of one-click buttons doing the same kind of job. Three options never needed a
+                 * menu; the menu was hiding two of them behind the one that happened to be current.
+                 */}
+                <Text
+                    type='supporting'
+                    color='disabled'
+                >
+                    Reach
+                </Text>
+                <div
+                    className='shape-row'
+                    role='radiogroup'
+                    aria-label='Brush kind'
+                >
+                    {BRUSH_KINDS.map(kind => (
+                        <button
+                            key={kind}
+                            type='button'
+                            role='radio'
+                            aria-checked={kind === brush.kind}
+                            aria-label={KIND_LABELS[kind]}
+                            title={KIND_LABELS[kind]}
+                            className='shape'
+                            data-selected={kind === brush.kind || undefined}
+                            onClick={() => {
+                                onBrush({kind})
+                            }}
+                        >
+                            {KIND_ICONS[kind]}
+                        </button>
+                    ))}
+                </div>
 
                 <div className='field-row'>
                     <Text
@@ -222,6 +271,7 @@ export const BrushPanel = ({
                             role='radio'
                             aria-checked={shape === brush.shape}
                             aria-label={SHAPE_LABELS[shape]}
+                            title={SHAPE_LABELS[shape]}
                             className='shape'
                             data-selected={shape === brush.shape || undefined}
                             onClick={() => {
@@ -234,9 +284,11 @@ export const BrushPanel = ({
                 </div>
 
                 {/*
-                 * What a drag draws between its two ends — `FEATURESET.md` §5. Words rather than
-                 * icons: a line, a rectangle and an ellipse have no icon that beats their own name
-                 * at this size, and the Shape row above already spends the icons it has.
+                 * What a drag draws between its two ends — `FEATURESET.md` §5. Icons, matching the
+                 * two rows above it: this is the third of three "which one" choices in one panel,
+                 * and one of them spelling itself out in words made the column read as two unrelated
+                 * halves. Each glyph is the shape it draws with its two endpoints marked, which is
+                 * the actual distinction between them.
                  */}
                 <Text
                     type='supporting'
@@ -245,7 +297,7 @@ export const BrushPanel = ({
                     Figure
                 </Text>
                 <div
-                    className='figure-row'
+                    className='shape-row'
                     role='radiogroup'
                     aria-label='Figure'
                 >
@@ -256,13 +308,14 @@ export const BrushPanel = ({
                             role='radio'
                             aria-checked={figure === brush.figure}
                             aria-label={FIGURE_LABELS[figure]}
-                            className='figure'
+                            title={FIGURE_LABELS[figure]}
+                            className='shape'
                             data-selected={figure === brush.figure || undefined}
                             onClick={() => {
                                 onBrush({figure})
                             }}
                         >
-                            {FIGURE_LABELS[figure]}
+                            {FIGURE_ICONS[figure]}
                         </button>
                     ))}
                 </div>
@@ -305,27 +358,21 @@ export const BrushPanel = ({
                  * than a strength slider: a strength is a lighting decision, and the engine on the
                  * other end of the map is the thing making those.
                  */}
-                <div className='field-row'>
-                    <Text
-                        type='supporting'
-                        color='disabled'
-                    >
-                        Emissive
-                    </Text>
-                    <span className='spacer' />
-                    <button
-                        type='button'
-                        role='switch'
-                        aria-checked={(volume.emissive[color] ?? 0) > 0}
-                        aria-label='This colour glows'
-                        className='symmetry-axis'
-                        data-on={(volume.emissive[color] ?? 0) > 0 || undefined}
-                        onClick={() => {
-                            onEmissive((volume.emissive[color] ?? 0) > 0 ? 0 : 255)
+                <div
+                    className='field-row grows'
+                    title='Whether the loaded colour glows in the emission map'
+                >
+                    <Switch
+                        label='Emissive'
+                        size='sm'
+                        width='100%'
+                        labelPosition='start'
+                        labelSpacing='spread'
+                        value={(volume.emissive[color] ?? 0) > 0}
+                        onChange={on => {
+                            onEmissive(on ? 255 : 0)
                         }}
-                    >
-                        {(volume.emissive[color] ?? 0) > 0 ? 'ON' : 'OFF'}
-                    </button>
+                    />
                 </div>
 
                 {/*
@@ -349,6 +396,7 @@ export const BrushPanel = ({
                                 role='radio'
                                 aria-checked={index === color}
                                 aria-label={`Recent colour ${String(index)}`}
+                                title={`${colorCss(volume, index)} — used recently`}
                                 className='swatch'
                                 data-selected={index === color || undefined}
                                 style={{background: colorCss(volume, index)}}
@@ -383,19 +431,15 @@ export const BrushPanel = ({
                         onClick={onEyedropper}
                     />
                     <span className='spacer' />
-                    <button
-                        type='button'
-                        role='switch'
-                        aria-checked={isLocked}
-                        aria-label='Lock the palette'
-                        className='symmetry-axis'
-                        data-on={isLocked || undefined}
-                        onClick={() => {
-                            onLock(!isLocked)
-                        }}
-                    >
-                        {isLocked ? 'LOCKED' : 'OPEN'}
-                    </button>
+                    <span title='A locked palette still draws and fills; its entries stop changing'>
+                        <Switch
+                            label='Lock'
+                            size='sm'
+                            labelPosition='start'
+                            value={isLocked}
+                            onChange={onLock}
+                        />
+                    </span>
                 </div>
 
                 {/*

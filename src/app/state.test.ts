@@ -191,6 +191,25 @@ test('snap makes the zoom whole and the pan land on voxels', () => {
     expect(Number.isInteger(pan(tight).orbit.camera.panX)).toBe(true)
 })
 
+test('the invert switch reaches the drag, not just the panel', () => {
+    const turn = (state: AppState): number =>
+        reduce(
+            reduce(state, {
+                type: 'orbit',
+                event: {type: 'pointerdown', x: 0, y: 0, secondary: false},
+                height: 400
+            }),
+            {type: 'orbit', event: {type: 'pointermove', x: 100, y: 0}, height: 400}
+        ).orbit.camera.yaw
+
+    // Against the opening yaw, which is not zero — the two have to be equal and opposite *turns*,
+    // not equal and opposite angles.
+    const from = fresh().orbit.camera.yaw
+    expect(fresh().invert).toBe(false)
+    expect(turn(fresh()) - from).toBeCloseTo(1, 10)
+    expect(turn(reduce(fresh(), {type: 'invert', on: true})) - from).toBeCloseTo(-1, 10)
+})
+
 test('duplicating copies the selected camera rather than referring to it', () => {
     const state = reduce(reduce(fresh(), {type: 'select', id: 'dir-4'}), {type: 'duplicate'})
     expect(state.cameras).toHaveLength(9)
@@ -967,8 +986,13 @@ test('importing a PNG opens it as a document and keeps the references and preset
     )
 
     const opened = reduce(saved, {type: 'import-image', volume: built, name: 'hero.png'})
-    expect(opened.volume).toBe(built)
+    // The cells are the image's, byte for byte — the import is what decides what a voxel is.
+    expect(opened.volume.data).toBe(built.data)
     expect([opened.volume.sx, opened.volume.sy, opened.volume.sz]).toEqual([2, 3, 1])
+    // The palette is not: a PNG brings as many colours as it had, and the rest of the 255 slots come
+    // up as the default palette rather than as 253 blanks. The image's own two are untouched.
+    expect([...opened.volume.palette.subarray(4, 12)]).toEqual([255, 0, 0, 255, 0, 0, 255, 255])
+    expect([...opened.volume.palette.subarray(12, 16)]).toEqual([0, 0, 0, 255])
     // A new document: its own cameras, its own history, its own objects.
     expect(opened.history.past).toHaveLength(0)
     expect(opened.objects.list).toHaveLength(1)

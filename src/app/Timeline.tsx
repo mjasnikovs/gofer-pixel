@@ -66,17 +66,19 @@ export const Timeline = ({
                 variant='ghost'
                 isDisabled
             />
-            <Selector
-                label='Frame rate'
-                isLabelHidden
-                size='sm'
-                width={110}
-                value={String(fps)}
-                options={FPS_OPTIONS.map(value => ({value, label: `${value} FPS`}))}
-                onChange={value => {
-                    onFps(Number(value))
-                }}
-            />
+            <span title='Frames a second, for when there is more than one frame'>
+                <Selector
+                    label='Frame rate'
+                    isLabelHidden
+                    size='sm'
+                    width={110}
+                    value={String(fps)}
+                    options={FPS_OPTIONS.map(value => ({value, label: `${value} FPS`}))}
+                    onChange={value => {
+                        onFps(Number(value))
+                    }}
+                />
+            </span>
         </div>
 
         <div className='timeline-track'>
@@ -97,11 +99,16 @@ export const Timeline = ({
             </div>
 
             <div className='timeline-frames'>
-                <button
-                    type='button'
+                {/*
+                 * The one frame there is. It was a button, which is a promise that clicking it
+                 * selects something — and with one frame there is nothing to select, so the click
+                 * went nowhere. A `div` is what it always was: a picture of the current frame.
+                 */}
+                <div
                     className='frame-tile'
                     data-selected
                     aria-current='true'
+                    title='The document holds one frame — see FEATURESET §24'
                 >
                     {camera ?
                         <Thumbnail
@@ -111,7 +118,7 @@ export const Timeline = ({
                         />
                     :   <span className='frame-blank' />}
                     <span className='frame-number'>{frame}</span>
-                </button>
+                </div>
 
                 <button
                     type='button'

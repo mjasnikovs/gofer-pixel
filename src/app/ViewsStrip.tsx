@@ -58,6 +58,7 @@ export const ViewsStrip = ({
                     type='button'
                     role='radio'
                     aria-checked={entry.id === selected}
+                    title={`${entry.name} — click to look through it, drag to reorder the sheet`}
                     className='view-tile'
                     data-selected={entry.id === selected || undefined}
                     data-dragging={entry.id === dragging || undefined}
@@ -96,6 +97,7 @@ export const ViewsStrip = ({
             <button
                 type='button'
                 className='view-add'
+                title='Store the current view as a new camera'
                 onClick={onCapture}
             >
                 <PlusIcon />
