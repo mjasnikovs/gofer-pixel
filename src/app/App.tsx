@@ -3,6 +3,8 @@ import {canRemove, shownVolume} from '../doc/objects'
 import type {Axis} from '../doc/brush'
 import {voxelsFromImage} from '../doc/import'
 import {toHexPalette} from '../doc/palette'
+import {loadDocument, saveDocument} from '../doc/save'
+import {browserStore, clearSnapshots, putSnapshot, snapshots, type Store} from '../doc/store'
 import {sheetMetadata} from '../sheet/metadata'
 import {selectionBounds} from '../doc/selection'
 import {canRadial} from '../doc/symmetry'
@@ -23,7 +25,7 @@ import {Timeline} from './Timeline'
 import {GridPanel, ToolRail} from './ToolRail'
 import {AxisGizmo, GroundGrid, HintBar, SelectionBox, ViewCube} from './ViewportOverlay'
 import {ViewsStrip} from './ViewsStrip'
-import {allPresets, initialState, presetMaps, reduce, TOOLS} from './state'
+import {allPresets, initialState, presetMaps, reduce, TOOLS, type OpenedDocument} from './state'
 import {handle} from './handle'
 
 /**
@@ -53,8 +55,18 @@ const NUDGES: Record<string, readonly [number, number, number] | undefined> = {
     ArrowDown: [0, -1, 0]
 }
 
-export const App = ({volume: source, name}: {volume: Volume; name: string}) => {
-    const [state, dispatch] = useReducer(reduce, source, initialState)
+export const App = ({
+    volume: source,
+    name,
+    opened,
+    store = browserStore()
+}: {
+    volume: Volume
+    name: string
+    opened?: OpenedDocument | undefined
+    store?: Store
+}) => {
+    const [state, dispatch] = useReducer(reduce, source, start => initialState(start, opened))
     // Everything below reads the *document's* volume, not the one the file was opened with. They
     // are the same object until the first stroke, and after it the difference is the whole point.
     const {volume} = state
@@ -211,6 +223,23 @@ export const App = ({volume: source, name}: {volume: Volume; name: string}) => {
         }
     }, [capture])
 
+    /*
+     * Autosave — `FEATURESET.md` §32.
+     *
+     * On every committed edit rather than on a timer. The history growing *is* the event "the
+     * artist changed something and meant it", and hanging a save off a clock would put a duration
+     * in the one place this project has spent the most effort keeping them out of. It also means a
+     * stroke in progress is never saved half-drawn.
+     */
+    const commits = state.history.past.length
+    useEffect(() => {
+        if (commits === 0) return
+        putSnapshot(store, saveDocument(state.volume, state.objects, state.cameras, name))
+        // Only `commits` and the store: this must fire once per committed edit, not once per
+        // camera turn, and the volume it reads is whatever the latest one is when it does.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [commits, store])
+
     // Publishing to the browser-test seam is exactly what an effect is for: pushing React's latest
     // state out to something that is not React.
     useEffect(() => {
@@ -237,6 +266,15 @@ export const App = ({volume: source, name}: {volume: Volume; name: string}) => {
                     dispatch({type: 'workspace', workspace})
                 }}
                 onExport={onExport}
+                restores={snapshots(store)}
+                onRestore={key => {
+                    const text = store.get(key)
+                    const back = text ? loadDocument(text) : undefined
+                    if (back) dispatch({type: 'open', document: back})
+                }}
+                onForget={() => {
+                    clearSnapshots(store)
+                }}
             />
 
             <div className='app-body'>

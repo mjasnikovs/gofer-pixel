@@ -3,7 +3,8 @@ import {IconButton} from '@astryxdesign/core/IconButton'
 import {SegmentedControl, SegmentedControlItem} from '@astryxdesign/core/SegmentedControl'
 import {Text} from '@astryxdesign/core/Text'
 import {countVoxels} from '../vox/vox-file'
-import {ChevronIcon, CubeIcon, MenuIcon, RedoIcon, SlidersIcon, SunIcon, UndoIcon} from './icons'
+import {MoreMenu} from '@astryxdesign/core/MoreMenu'
+import {ChevronIcon, CubeIcon, RedoIcon, SlidersIcon, SunIcon, UndoIcon} from './icons'
 import type {AppState} from './state'
 
 /**
@@ -18,12 +19,18 @@ export const Header = ({
     name,
     state,
     onWorkspace,
-    onExport
+    onExport,
+    restores,
+    onRestore,
+    onForget
 }: {
     name: string
     state: AppState
     onWorkspace: (workspace: AppState['workspace']) => void
     onExport: () => void
+    restores: readonly {key: string; at: number; name: string}[]
+    onRestore: (key: string) => void
+    onForget: () => void
 }) => (
     <header className='app-header'>
         <div className='header-group'>
@@ -36,7 +43,8 @@ export const Header = ({
                 color='disabled'
             >
                 · {state.volume.sx} × {state.volume.sy} × {state.volume.sz} ·{' '}
-                {countVoxels(state.volume)} voxels · Unsaved
+                {countVoxels(state.volume)} voxels ·{' '}
+                {state.history.past.length === 0 ? 'Unsaved' : 'Autosaved'}
             </Text>
         </div>
 
@@ -113,13 +121,28 @@ export const Header = ({
                 size='sm'
                 onClick={onExport}
             />
-            <IconButton
+            {/*
+             * Snapshots — `FEATURESET.md` §32. Restoring is not undo: undo covers the last 512
+             * strokes of this session, and these cover the last few sessions, which is the case
+             * undo cannot reach because the browser was closed.
+             */}
+            <MoreMenu
                 label='Main menu'
-                tooltip='Main menu'
-                icon={<MenuIcon />}
                 size='sm'
-                variant='ghost'
-                isDisabled
+                items={[
+                    ...restores.map(entry => ({
+                        label: `Restore ${entry.name} · ${new Date(entry.at).toLocaleTimeString()}`,
+                        onClick: () => {
+                            onRestore(entry.key)
+                        }
+                    })),
+                    ...(restores.length > 0 ? [{type: 'divider' as const}] : []),
+                    {
+                        label: 'Forget every snapshot',
+                        isDisabled: restores.length === 0,
+                        onClick: onForget
+                    }
+                ]}
             />
         </div>
     </header>

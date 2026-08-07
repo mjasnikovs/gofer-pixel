@@ -1,0 +1,112 @@
+import {expect, test} from 'bun:test'
+import {createVolume, setVoxel, voxelAt} from '../render/volume'
+import {eightDirections} from './cameras'
+import {initialObjects, setHidden} from './objects'
+import {loadDocument, saveDocument} from './save'
+import {
+    clearSnapshots,
+    latestSnapshot,
+    memoryStore,
+    putSnapshot,
+    SNAPSHOTS,
+    snapshots
+} from './store'
+
+const document = () => {
+    const volume = createVolume(16, 10, 7, new Uint8Array(256 * 4))
+    for (let x = 0; x < 16; x += 1) {
+        setVoxel(volume, x, 0, 0, (x % 5) + 1)
+        setVoxel(volume, x, 9, 6, 200)
+    }
+    volume.palette.set([12, 34, 56, 255], 4)
+    volume.emissive[4] = 255
+    const objects = setHidden(initialObjects(volume, 'Body'), 1, true)
+    return {volume, objects, cameras: eightDirections(volume)}
+}
+
+test('a document survives being written down and read back, byte for byte', () => {
+    const {volume, objects, cameras} = document()
+    const back = loadDocument(JSON.stringify(saveDocument(volume, objects, cameras, 'car.vox', 7)))
+    if (!back) throw new Error('the document we just wrote is one of ours')
+
+    expect([back.volume.sx, back.volume.sy, back.volume.sz]).toEqual([16, 10, 7])
+    expect(back.volume.data).toEqual(volume.data)
+    expect(back.volume.owner).toEqual(volume.owner)
+    expect(back.volume.palette).toEqual(volume.palette)
+    expect(back.volume.emissive).toEqual(volume.emissive)
+    expect(back.objects).toEqual(objects)
+    expect(back.cameras).toHaveLength(8)
+    expect(back.name).toBe('car.vox')
+    expect(back.at).toBe(7)
+    expect(voxelAt(back.volume, 3, 0, 0)).toBe(voxelAt(volume, 3, 0, 0))
+})
+
+test('the emptiness is counted rather than stored', () => {
+    const {volume, objects, cameras} = document()
+    const text = JSON.stringify(saveDocument(volume, objects, cameras, 'car.vox'))
+    // 1 120 cells of grid twice over, and the whole save — cameras, palette and all — is smaller
+    // than the raw grid would be even before base64 inflated it by a third.
+    expect(text.length).toBeLessThan(volume.data.length * 2)
+})
+
+test('a run longer than a 16-bit count is split rather than lost', () => {
+    const volume = createVolume(100, 100, 10, new Uint8Array(256 * 4))
+    setVoxel(volume, 99, 99, 9, 3)
+    const objects = initialObjects(volume)
+    const back = loadDocument(JSON.stringify(saveDocument(volume, objects, [], 'big')))
+
+    expect(back?.volume.data).toEqual(volume.data)
+    expect(voxelAt(back?.volume ?? volume, 99, 99, 9)).toBe(3)
+})
+
+test('anything that is not one of ours is refused rather than half-loaded', () => {
+    expect(loadDocument('not json')).toBeUndefined()
+    expect(loadDocument('null')).toBeUndefined()
+    expect(loadDocument('{"format":"something-else"}')).toBeUndefined()
+    expect(loadDocument('{"format":"gofer-pixel/document","version":99}')).toBeUndefined()
+    // Ours, but with the grid missing: a document that looks right with something quietly gone is
+    // worse than one that does not open.
+    expect(
+        loadDocument('{"format":"gofer-pixel/document","version":1,"size":[2,2,2]}')
+    ).toBeUndefined()
+    expect(
+        loadDocument('{"format":"gofer-pixel/document","version":1,"size":[0,2,2]}')
+    ).toBeUndefined()
+})
+
+test('snapshots rotate, newest first, and stop at the limit', () => {
+    const store = memoryStore()
+    const {volume, objects, cameras} = document()
+
+    for (let i = 1; i <= SNAPSHOTS + 3; i += 1) {
+        putSnapshot(store, saveDocument(volume, objects, cameras, `take ${String(i)}`, i))
+    }
+
+    const kept = snapshots(store)
+    expect(kept).toHaveLength(SNAPSHOTS)
+    expect(kept[0]?.at).toBe(SNAPSHOTS + 3)
+    expect(kept.at(-1)?.at).toBe(4)
+    // The name is read back without parsing a megabyte of base64 into a document.
+    expect(kept[0]?.name).toBe(`take ${String(SNAPSHOTS + 3)}`)
+
+    const newest = latestSnapshot(store)
+    if (!newest) throw new Error('there is a newest snapshot')
+    expect(loadDocument(newest)?.at).toBe(SNAPSHOTS + 3)
+
+    clearSnapshots(store)
+    expect(snapshots(store)).toHaveLength(0)
+    expect(latestSnapshot(store)).toBeUndefined()
+})
+
+test('a store that refuses to write loses the new snapshot and keeps the old ones', () => {
+    const backing = new Map<string, string>()
+    const store = memoryStore(backing)
+    const {volume, objects, cameras} = document()
+    putSnapshot(store, saveDocument(volume, objects, cameras, 'kept', 1))
+
+    const full = {...store, set: () => undefined}
+    putSnapshot(full, saveDocument(volume, objects, cameras, 'lost', 2))
+
+    expect(snapshots(store)).toHaveLength(1)
+    expect(snapshots(store)[0]?.name).toBe('kept')
+})

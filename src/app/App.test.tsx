@@ -3,6 +3,8 @@ import {act} from 'react'
 import {createRoot, type Root} from 'react-dom/client'
 import {readVox} from '../vox/vox-file'
 import {App} from './App'
+import {loadDocument} from '../doc/save'
+import {latestSnapshot, memoryStore, snapshots, type Store} from '../doc/store'
 import {handle} from './handle'
 
 const volume = readVox(
@@ -15,7 +17,7 @@ const volume = readVox(
  * fails to get a context and every other panel still works, because none of them are downstream of
  * one.
  */
-const mount = async (): Promise<{root: Root; host: HTMLElement}> => {
+const mount = async (store?: Store): Promise<{root: Root; host: HTMLElement}> => {
     const host = document.createElement('div')
     document.body.appendChild(host)
     const root = createRoot(host)
@@ -24,6 +26,7 @@ const mount = async (): Promise<{root: Root; host: HTMLElement}> => {
             <App
                 volume={volume}
                 name='car.vox'
+                {...(store ? {store} : {})}
             />
         )
     })
@@ -196,6 +199,37 @@ test('the viewport says why it has no picture instead of showing an empty box', 
     expect(failure?.textContent).toContain('Hardware acceleration is switched off')
     expect(failure?.textContent).toContain('privacy shield')
     expect(failure?.hasAttribute('hidden')).toBe(false)
+
+    await unmount(mounted)
+})
+
+test('an edit is autosaved, and the save reopens as the document that made it', async () => {
+    const store = memoryStore()
+    const mounted = await mount(store)
+    expect(snapshots(store)).toHaveLength(0)
+
+    // Nothing waits for a clock: the autosave hangs off the history growing, which happens inside
+    // this `act` because the reducer is synchronous.
+    await act(async () => {
+        handle.dispatch?.({type: 'object', op: {kind: 'add'}})
+        handle.dispatch?.({type: 'transform', op: {kind: 'delete'}})
+        handle.dispatch?.({type: 'select-color'})
+    })
+    await act(async () => {
+        handle.dispatch?.({type: 'transform', op: {kind: 'paint', color: 200}})
+    })
+
+    const kept = snapshots(store)
+    expect(kept).toHaveLength(1)
+    expect(kept[0]?.name).toBe('car.vox')
+
+    const text = latestSnapshot(store)
+    if (!text) throw new Error('the autosave is there to be read')
+    const back = loadDocument(text)
+    expect(back?.volume.data).toEqual(handle.state?.volume.data as never)
+    // The objects come back with it, or a recovered document would forget what its pieces were.
+    expect(back?.objects.list).toHaveLength(2)
+    expect(back?.cameras).toHaveLength(8)
 
     await unmount(mounted)
 })

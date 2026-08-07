@@ -367,6 +367,7 @@ export type AppAction =
     | {type: 'reference-lock'; plane: Axis; on: boolean}
     | {type: 'reference-drop'; plane: Axis}
     | {type: 'import-image'; volume: Volume; name: string}
+    | {type: 'open'; document: OpenedDocument}
     | {type: 'bake'}
     | {type: 'written'}
     | {type: 'tool'; tool: Tool}
@@ -415,8 +416,18 @@ export const allPresets = (
 const opening = (cameras: readonly NamedCamera[]): NamedCamera | undefined =>
     cameras[1] ?? cameras[0]
 
-export const initialState = (volume: Volume): AppState => {
-    const cameras = eightDirections(volume)
+/**
+ * A document opened from somewhere other than a `.vox` file — a recovered autosave, which brings
+ * its own objects and its own cameras and must not have them regenerated over the top.
+ */
+export interface OpenedDocument {
+    readonly volume: Volume
+    readonly objects: Objects
+    readonly cameras: readonly NamedCamera[]
+}
+
+export const initialState = (volume: Volume, opened?: OpenedDocument): AppState => {
+    const cameras = opened?.cameras.length ? [...opened.cameras] : eightDirections(volume)
     const first = opening(cameras)
     return {
         volume,
@@ -443,7 +454,7 @@ export const initialState = (volume: Volume): AppState => {
         band: undefined,
         drag: undefined,
         symmetry: NO_SYMMETRY,
-        objects: initialObjects(volume),
+        objects: opened?.objects ?? initialObjects(volume),
         search: '',
         plane: undefined,
         clipboard: undefined,
@@ -1225,6 +1236,16 @@ export const reduce = (state: AppState, action: AppAction): AppState => {
          */
         case 'import-image': {
             const opened = initialState(action.volume)
+            return {...opened, references: state.references, presets: state.presets}
+        }
+
+        /*
+         * Restoring a snapshot — `FEATURESET.md` §32. It replaces the document and empties the
+         * history, because the history is a list of diffs against a grid that is no longer there
+         * and undoing one of them would apply it to the wrong model.
+         */
+        case 'open': {
+            const opened = initialState(action.document.volume, action.document)
             return {...opened, references: state.references, presets: state.presets}
         }
 

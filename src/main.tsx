@@ -10,6 +10,8 @@ import {App} from './app/App'
 import {handle} from './app/handle'
 import {goferPixelTheme} from './theme/gofer-pixel'
 import carVox from './assets/car.vox?url'
+import {loadDocument} from './doc/save'
+import {browserStore, latestSnapshot} from './doc/store'
 import {readVox} from './vox/vox-file'
 
 /*
@@ -21,10 +23,21 @@ import {readVox} from './vox/vox-file'
 ;(globalThis as unknown as {goferPixel: typeof handle}).goferPixel = handle
 
 /**
- * One hard-coded model, as the proof of concept asks for. `car.vox` came over from the old build
- * with its bytes untouched; the reader is new.
+ * What opens: the last autosave if there is one, and `car.vox` otherwise.
+ *
+ * Crash recovery without a dialog — `FEATURESET.md` §32. An artist whose browser died wants their
+ * work back, not a question about whether they want it back, and the file they started from is one
+ * click away in the snapshot list. A save that fails to load is skipped rather than fatal: the
+ * worst case has to be an old document, never a window that will not open.
  */
-const volume = readVox(new Uint8Array(await (await fetch(carVox)).arrayBuffer()))
+const recovered = (() => {
+    const store = browserStore()
+    const latest = latestSnapshot(store)
+    return latest ? loadDocument(latest) : undefined
+})()
+
+const volume =
+    recovered?.volume ?? readVox(new Uint8Array(await (await fetch(carVox)).arrayBuffer()))
 
 const host = document.getElementById('root')
 if (host) {
@@ -36,7 +49,8 @@ if (host) {
             >
                 <App
                     volume={volume}
-                    name='car.vox'
+                    name={recovered?.name ?? 'car.vox'}
+                    opened={recovered}
                 />
             </Theme>
         </StrictMode>
