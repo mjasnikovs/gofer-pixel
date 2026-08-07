@@ -1,7 +1,9 @@
 import {Kbd} from '@astryxdesign/core/Kbd'
 import {Text} from '@astryxdesign/core/Text'
+import type {Cell} from '../doc/selection'
 import {basisFor, type Camera, type Vec3} from '../render/camera'
-import type {Volume} from '../render/volume'
+
+import {filledBounds, type Volume} from '../render/volume'
 import {CameraIcon, MouseIcon} from './icons'
 
 /**
@@ -75,9 +77,23 @@ export const GroundGrid = ({volume, camera}: {volume: Volume; camera: Camera}) =
         lines.push({a: project([-pad, y, 0]), b: project([volume.sx + pad, y, 0])})
     }
 
+    /*
+     * The hole is cut around the *voxels*, not around the grid.
+     *
+     * Masking by `sx, sy, sz` looked right on `car.vox`, whose model fills its grid — and took the
+     * floor away entirely on any document that does not. A 128³ grid holding a handful of voxels
+     * projects a box the size of the viewport, so the artist got a picture with a grid round the
+     * edges, nothing under the model, and no way at all to tell how high anything was floating.
+     */
+    const box = filledBounds(volume)
     const corners: Vec3[] = []
     for (let i = 0; i < 8; i += 1) {
-        corners.push([(i & 1) * volume.sx, ((i >> 1) & 1) * volume.sy, ((i >> 2) & 1) * volume.sz])
+        if (!box) break
+        corners.push([
+            (i & 1) === 0 ? box.min[0] : box.max[0] + 1,
+            ((i >> 1) & 1) === 0 ? box.min[1] : box.max[1] + 1,
+            ((i >> 2) & 1) === 0 ? box.min[2] : box.max[2] + 1
+        ])
     }
     const silhouette = hull(corners.map(project))
         .map(({x, y}) => `${String(x)},${String(y)}`)
@@ -86,7 +102,7 @@ export const GroundGrid = ({volume, camera}: {volume: Volume; camera: Camera}) =
     const half = camera.zoom / 2
     return (
         <svg
-            className='ground-grid'
+            className='ground-grid overlay-plane'
             viewBox={`${String(-half)} ${String(-half)} ${String(camera.zoom)} ${String(camera.zoom)}`}
             preserveAspectRatio='xMidYMid slice'
             aria-hidden='true'
@@ -118,6 +134,226 @@ export const GroundGrid = ({volume, camera}: {volume: Volume; camera: Camera}) =
                     />
                 ))}
             </g>
+        </svg>
+    )
+}
+
+/**
+ * The block the next click makes or unmakes: the real voxels, in three dimensions, translucent and
+ * wireframed — the answer to the question this window could not answer before, which is *what* the
+ * press is about to do rather than merely where the pointer is.
+ *
+ * The cells come from the state, which got them from the same `strokeCells` the stroke writes with,
+ * so this cannot promise a footprint the edit will not deliver.
+ *
+ * Two paths, and neither is a picture of the other:
+ *
+ * - **Skin.** Each cell contributes only the faces that have no neighbour in the footprint and that
+ *   point at the camera. That is the outside of the block, and no interior face is ever drawn — so
+ *   the whole thing takes one uniform alpha instead of stacking up wherever two cells overlap.
+ * - **Wireframe.** A cube edge is kept when the four cells meeting along it are neither all present
+ *   nor all absent. The rule is the whole of it: interior edges of a slab have four neighbours and
+ *   vanish, a lone cell keeps its twelve, and a diagonal pinch keeps the edge it pinches at.
+ *
+ * The back edges show through, deliberately. This is a proposal, not a solid, and a wireframe box
+ * that hides its own far side reads as a surface decal rather than as a volume.
+ *
+ * `blocked` is the case that was silent before: the footprint is off the grid, or locked, or
+ * already exactly what the click would write, so the press will do nothing at all. It is drawn
+ * dashed and inert rather than in a new colour, because "this does nothing" is the absence of an
+ * action and should not look like a second kind of action.
+ */
+/** The three axes, and for each the two it spreads over. Typed so indexing a cell stays a number. */
+type Axis3 = 0 | 1 | 2
+const AXES3: readonly Axis3[] = [0, 1, 2]
+const PERP: Record<Axis3, readonly [Axis3, Axis3]> = {
+    0: [1, 2],
+    1: [0, 2],
+    2: [0, 1]
+}
+
+/**
+ * The neighbourhoods around a cube edge that are not an edge of anything, as a four-bit mask of the
+ * cells meeting along it — bits in the order `(-1,-1) (-1,0) (0,-1) (0,0)` across the two axes the
+ * edge does not run down.
+ *
+ * Empty and full are obvious. The four two-bit entries are the ones worth naming: two cells sitting
+ * *side by side* mean the surface runs straight through, so the faces meeting at the edge are
+ * coplanar and drawing a line there would rule a lattice across a flat slab. Two cells meeting only
+ * at the corner is the opposite case — a genuine pinch — and it stays, as do one and three.
+ */
+const FLAT: ReadonlySet<number> = new Set([0b0000, 0b1111, 0b0011, 0b1100, 0b0101, 0b1010])
+
+export const BrushGhost = ({
+    volume,
+    camera,
+    hover,
+    tool,
+    color
+}: {
+    volume: Volume
+    camera: Camera
+    hover: {cells: readonly Cell[]; blocked: boolean} | undefined
+    /** Erase is drawn as a hole being opened, Draw as a block being added. See `app.css`. */
+    tool: string
+    /** The loaded palette index. The block is previewed in the paint it would be made of. */
+    color: number
+}) => {
+    if (!hover || hover.cells.length === 0) return undefined
+    const {right, up, forward, center} = basisFor(camera, volume, 1)
+    const project = (p: Vec3): string => {
+        const d: Vec3 = [p[0] - center[0], p[1] - center[1], p[2] - center[2]]
+        return `${String(dot(d, right))} ${String(-dot(d, up))}`
+    }
+
+    const key = (x: number, y: number, z: number): string =>
+        `${String(x)},${String(y)},${String(z)}`
+    const cells = new Set(hover.cells.map(([x, y, z]) => key(x, y, z)))
+
+    // The outside of the block, and only the half of it facing the viewer.
+    const skin: string[] = []
+    for (const cell of hover.cells) {
+        const [x, y, z] = cell
+        for (const axis of AXES3) {
+            for (const side of [0, 1]) {
+                const step = side === 0 ? -1 : 1
+                const at: [number, number, number] = [x, y, z]
+                at[axis] += step
+                if (cells.has(key(at[0], at[1], at[2]))) continue
+                const normal: [number, number, number] = [0, 0, 0]
+                normal[axis] = step
+                // A face pointing away from the camera is the far side of the block, and the near
+                // side is already covering it.
+                if (dot(normal, forward) >= 0) continue
+                const [u, v] = PERP[axis]
+                const corner = (a: number, b: number): Vec3 => {
+                    const point: [number, number, number] = [x, y, z]
+                    point[axis] = cell[axis] + side
+                    point[u] = cell[u] + a
+                    point[v] = cell[v] + b
+                    return point
+                }
+                skin.push(
+                    `M${project(corner(0, 0))}`
+                        + `L${project(corner(1, 0))}`
+                        + `L${project(corner(1, 1))}`
+                        + `L${project(corner(0, 1))}Z`
+                )
+            }
+        }
+    }
+
+    /*
+     * Every edge the footprint could have, keyed by where it runs. `along` is the axis it points
+     * down; `a` and `b` are its position on the other two, in lattice coordinates — so the four
+     * cells that meet along it are the four combinations of one step back on each.
+     */
+    const wire: string[] = []
+    const seen = new Set<string>()
+    for (const cell of hover.cells) {
+        for (const along of AXES3) {
+            const [u, v] = PERP[along]
+            for (const du of [0, 1]) {
+                for (const dv of [0, 1]) {
+                    const a = cell[u] + du
+                    const b = cell[v] + dv
+                    const id = `${String(along)}:${String(cell[along])}:${String(a)}:${String(b)}`
+                    if (seen.has(id)) continue
+                    seen.add(id)
+
+                    let around = 0
+                    let bit = 1
+                    for (const ou of [-1, 0]) {
+                        for (const ov of [-1, 0]) {
+                            const at: [number, number, number] = [0, 0, 0]
+                            at[along] = cell[along]
+                            at[u] = a + ou
+                            at[v] = b + ov
+                            if (cells.has(key(at[0], at[1], at[2]))) around |= bit
+                            bit <<= 1
+                        }
+                    }
+                    if (FLAT.has(around)) continue
+
+                    const end = (t: number): Vec3 => {
+                        const point: [number, number, number] = [0, 0, 0]
+                        point[along] = cell[along] + t
+                        point[u] = a
+                        point[v] = b
+                        return point
+                    }
+                    wire.push(`M${project(end(0))}L${project(end(1))}`)
+                }
+            }
+        }
+    }
+
+    /*
+     * The shadow, and the drop to it.
+     *
+     * An orthographic camera gives away nothing about height: a block one voxel up and a block ten
+     * up are the same picture moved a few pixels, and with an empty grid under them there is nothing
+     * to move relative to. So the footprint is repeated on the floor and joined to the block by its
+     * four corners — the oldest trick there is, and the only one that reads without a second view.
+     */
+    let x0 = Infinity
+    let y0 = Infinity
+    let z0 = Infinity
+    let x1 = -Infinity
+    let y1 = -Infinity
+    for (const [x, y, z] of hover.cells) {
+        if (x < x0) x0 = x
+        if (y < y0) y0 = y
+        if (z < z0) z0 = z
+        if (x > x1) x1 = x
+        if (y > y1) y1 = y
+    }
+    const drop: string[] = []
+    if (z0 > 0) {
+        const feet: [number, number][] = [
+            [x0, y0],
+            [x1 + 1, y0],
+            [x1 + 1, y1 + 1],
+            [x0, y1 + 1]
+        ]
+        drop.push(
+            feet.map((f, i) => `${i === 0 ? 'M' : 'L'}${project([f[0], f[1], 0])}`).join('') + 'Z'
+        )
+        for (const [x, y] of feet) drop.push(`M${project([x, y, z0])}L${project([x, y, 0])}`)
+    }
+
+    // The fill inherits this — see `.brush-ghost-fill`. A preview in a colour the click would not
+    // use says where the block goes and lies about what it is.
+    const at = color * 4
+    const paint = `rgb(${String(volume.palette[at] ?? 255)} ${String(volume.palette[at + 1] ?? 255)} ${String(volume.palette[at + 2] ?? 255)})`
+
+    const half = camera.zoom / 2
+    return (
+        <svg
+            className='brush-ghost overlay-plane'
+            data-blocked={hover.blocked || undefined}
+            data-tool={tool}
+            style={{color: paint}}
+            viewBox={`${String(-half)} ${String(-half)} ${String(camera.zoom)} ${String(camera.zoom)}`}
+            preserveAspectRatio='xMidYMid slice'
+            aria-hidden='true'
+        >
+            <path
+                className='brush-ghost-drop'
+                d={drop.join('')}
+                fill='none'
+                vectorEffect='non-scaling-stroke'
+            />
+            <path
+                className='brush-ghost-fill'
+                d={skin.join('')}
+            />
+            <path
+                className='brush-ghost-outline'
+                d={wire.join('')}
+                fill='none'
+                vectorEffect='non-scaling-stroke'
+            />
         </svg>
     )
 }
@@ -165,7 +401,7 @@ export const SelectionBox = ({
         <>
             {flat.length === 8 ?
                 <svg
-                    className='selection-box'
+                    className='selection-box overlay-plane'
                     viewBox={`${String(-half)} ${String(-half)} ${String(camera.zoom)} ${String(camera.zoom)}`}
                     preserveAspectRatio='xMidYMid slice'
                     aria-hidden='true'
@@ -320,11 +556,57 @@ export const ViewCube = ({volume, camera}: {volume: Volume; camera: Camera}) => 
  * right button — the arrangement every voxel editor already uses, and the only one where arming
  * Draw does not cost the artist the ability to look at what they are drawing.
  */
-export const HintBar = ({tool, onCapture}: {tool: string; onCapture: () => void}) => (
+export const HintBar = ({
+    tool,
+    hover,
+    height,
+    onCapture
+}: {
+    tool: string
+    /** Where the next click lands, in the grid's own coordinates. */
+    hover: {cell: Cell; blocked: boolean} | undefined
+    /** How tall the grid is, so the layer reads as a position rather than as a number. */
+    height: number
+    onCapture: () => void
+}) => (
     <div className='hints'>
         <span className='hint'>
             <MouseIcon />
             <Text type='supporting'>{tool}</Text>
+        </span>
+        {/*
+         * The cell under the cursor, and how high it is.
+         *
+         * An orthographic view of a lattice of identical cubes cannot be read for position — the
+         * shadow says which way is up, and this says exactly where. `Z of sz` rather than a bare
+         * number, because "6" means nothing and "6 / 32" is a height.
+         */}
+        <span
+            className='hint hint-cell'
+            data-blocked={hover?.blocked === true || undefined}
+        >
+            {hover ?
+                <>
+                    <Text type='supporting'>
+                        {hover.cell[0]}, {hover.cell[1]}
+                    </Text>
+                    <Text
+                        type='supporting'
+                        color='disabled'
+                    >
+                        Z
+                    </Text>
+                    <Text type='supporting'>
+                        {hover.cell[2]} / {height - 1}
+                    </Text>
+                </>
+            :   <Text
+                    type='supporting'
+                    color='disabled'
+                >
+                    off the model
+                </Text>
+            }
         </span>
         <span className='hint'>
             <Text

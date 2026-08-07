@@ -17,6 +17,7 @@ interface Handle {
         sheet: {width: number; height: number} | undefined
         volume: {data: Uint8Array}
         history: {past: unknown[]}
+        orbit: {camera: {zoom: number}}
     }
     dispatch: (action: unknown) => void
     firstFrame: Promise<void>
@@ -252,4 +253,42 @@ test('exporting writes both PNGs, not just the colour one', async ({page}) => {
 
     await page.getByRole('button', {name: 'Export sprite sheet'}).click()
     expect((await both).sort()).toEqual(['sprites-normal.png', 'sprites.png'])
+})
+
+/**
+ * The overlays are SVG in *voxels* and the render behind them is WebGL in pixels, so whether they
+ * line up is a layout fact and happy-dom has no layout. It was 35% out at 704 × 520 — the viewBox
+ * spanned the width while the renderer fits `camera.zoom` to the height — which put the brush
+ * outline a voxel and a half from the face it claimed to be on.
+ */
+test('the brush outline is drawn at the same scale as the render under it', async ({page}) => {
+    await ready(page)
+    const box = await page.locator('[data-testid="viewport"]').boundingBox()
+    if (!box) throw new Error('the viewport has no box')
+
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height * 0.42)
+    const seen = await page.evaluate(() => {
+        const svg = document.querySelector('.brush-ghost')
+        const outline = svg?.querySelector('.brush-ghost-outline')
+        if (!(svg instanceof SVGSVGElement) || !(outline instanceof SVGPathElement))
+            return undefined
+        const stage = svg.parentElement?.getBoundingClientRect()
+        const matrix = outline.getScreenCTM()
+        return {
+            drawn: matrix?.a ?? 0,
+            expected: (stage?.height ?? 0) / window.goferPixel.state.orbit.camera.zoom,
+            outline: outline.getBoundingClientRect()
+        }
+    })
+    if (!seen) throw new Error('the pointer is over the model and the outline is drawn')
+
+    // One voxel on screen is one voxel on screen, to the pixel.
+    expect(seen.drawn).toBeCloseTo(seen.expected, 6)
+    // And it is under the cursor rather than merely near it: the default brush is 2 × 2, so the
+    // outline is at most two voxels across and the pointer is inside it.
+    const centre = {x: box.x + box.width / 2, y: box.y + box.height * 0.42}
+    expect(seen.outline.left).toBeLessThanOrEqual(centre.x)
+    expect(seen.outline.right).toBeGreaterThanOrEqual(centre.x)
+    expect(seen.outline.top).toBeLessThanOrEqual(centre.y)
+    expect(seen.outline.bottom).toBeGreaterThanOrEqual(centre.y)
 })

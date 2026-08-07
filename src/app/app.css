@@ -124,6 +124,7 @@ body,
 
 .stage {
     position: relative;
+    overflow: hidden;
     grid-column: 4;
     grid-row: 1;
     min-height: 0;
@@ -536,7 +537,7 @@ body,
 /* The tile being dragged along the strip, so the artist can see which cell they are moving. */
 .view-tile[data-dragging] {
     opacity: 0.5;
-    outline: 1px dashed var(--color-accent-default);
+    outline: 1px dashed var(--color-accent);
 }
 
 /* ---- objects ---- */
@@ -961,17 +962,35 @@ body,
 }
 
 /*
+ * The three overlays that draw in *voxels*: the ground grid, the selection box and the brush ghost.
+ *
+ * Each one is an SVG whose `viewBox` is `camera.zoom` voxels square, and the renderer behind them
+ * fits that same `zoom` to the canvas **height** (`basisFor(camera, volume, height)`). So the
+ * element has to be square and as tall as the stage, or the two disagree: at 704 x 520 a viewBox
+ * stretched across the full width was 30.6 px per voxel against the render's 22.6, which is a 35%
+ * over-size that reads as "the outline is near the thing it is pointing at" instead of on it.
+ *
+ * `overflow: visible` because the picture is wider than it is tall and the grid must not stop at
+ * the square; `.stage` clips it back to the viewport.
+ */
+.overlay-plane {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    height: 100%;
+    aspect-ratio: 1 / 1;
+    transform: translateX(-50%);
+    overflow: visible;
+    pointer-events: none;
+}
+
+/*
  * The ground grid sits over the canvas rather than in the render — see `ViewportOverlay.tsx` for
  * why. Faint enough to read as a floor and never as content.
  */
 .ground-grid {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
     color: var(--color-border-emphasized);
     opacity: 0.35;
-    pointer-events: none;
 }
 
 /*
@@ -979,18 +998,52 @@ body,
  * everything. The grid above is deliberately faint for the opposite reason.
  */
 .selection-box {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    color: var(--color-accent-default);
-    pointer-events: none;
+    color: var(--color-accent);
+}
+
+/*
+ * The block the click would make: the loaded colour, at a quarter strength, wireframed in accent.
+ *
+ * The fill is `currentColor` and `App.tsx` sets that to the colour being drawn with, so the
+ * proposal is the paint the artist chose rather than a generic highlight — a preview in some other
+ * hue answers "where" but not "with what". Accent stays on the wire, which is what says the block
+ * is not there yet.
+ */
+.brush-ghost-fill {
+    fill: currentColor;
+    opacity: 0.45;
+}
+
+.brush-ghost-outline {
+    stroke: var(--color-accent);
+    stroke-width: 1.5;
+}
+
+/*
+ * Erase is the same block read backwards. The viewport is already drawing the hole — `App.tsx`
+ * takes the cells out of the grid it hands the renderer — so the wash here is the *background*
+ * showing through, and its job is only to say that the gap under the wireframe is a proposal
+ * rather than a gap in the model.
+ */
+.brush-ghost[data-tool='erase'] .brush-ghost-fill {
+    fill: var(--color-background-body);
+    opacity: 0.35;
+}
+
+/* Nothing would be written here: inert, and dashed so it cannot be mistaken for a live outline. */
+.brush-ghost[data-blocked] .brush-ghost-fill {
+    fill: none;
+}
+
+.brush-ghost[data-blocked] .brush-ghost-outline {
+    stroke: var(--color-border-emphasized);
+    stroke-dasharray: 3 3;
 }
 
 .rubber-band {
     position: absolute;
-    border: 1px dashed var(--color-accent-default);
-    background: color-mix(in srgb, var(--color-accent-default) 12%, transparent);
+    border: 1px dashed var(--color-accent);
+    background: color-mix(in srgb, var(--color-accent) 12%, transparent);
     pointer-events: none;
 }
 
@@ -1091,7 +1144,7 @@ body,
 }
 
 .symmetry-axis[data-on] {
-    border-color: var(--color-accent-default);
+    border-color: var(--color-accent);
     background: var(--color-accent-subtle);
     color: var(--color-text-accent);
 }
@@ -1099,4 +1152,30 @@ body,
 .symmetry-axis[aria-disabled='true'] {
     color: var(--color-text-disabled);
     cursor: not-allowed;
+}
+
+/*
+ * The block's shadow on the floor and the four lines down to it — the only thing in the viewport
+ * that says how high a voxel is, since an orthographic camera says nothing about depth by itself.
+ * Faint and dashed: it is a measurement, not a second block.
+ */
+.brush-ghost-drop {
+    stroke: var(--color-accent);
+    stroke-width: 1;
+    stroke-dasharray: 2 3;
+    opacity: 0.55;
+}
+
+/*
+ * The coordinate readout. Tabular figures and a fixed minimum width, because a chip that resizes as
+ * the pointer moves drags the whole bar about and makes the numbers harder to read than no numbers.
+ */
+.hint-cell {
+    min-width: 128px;
+    justify-content: center;
+    font-variant-numeric: tabular-nums;
+}
+
+.hint-cell[data-blocked] {
+    opacity: 0.5;
 }

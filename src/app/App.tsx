@@ -24,9 +24,17 @@ import {RendersPanel} from './RendersPanel'
 import {SelectionBar} from './SelectionBar'
 import {Timeline} from './Timeline'
 import {GridPanel, ToolRail} from './ToolRail'
-import {AxisGizmo, GroundGrid, HintBar, SelectionBox, ViewCube} from './ViewportOverlay'
+import {AxisGizmo, BrushGhost, GroundGrid, HintBar, SelectionBox, ViewCube} from './ViewportOverlay'
 import {ViewsStrip} from './ViewsStrip'
-import {allPresets, initialState, presetMaps, reduce, TOOLS, type OpenedDocument} from './state'
+import {
+    allPresets,
+    initialState,
+    presetMaps,
+    previewVolume,
+    reduce,
+    TOOLS,
+    type OpenedDocument
+} from './state'
 import {handle} from './handle'
 
 /**
@@ -79,12 +87,19 @@ export const App = ({
      */
     const shown = useMemo(() => shownVolume(volume, state.objects), [volume, state.objects])
 
+    // What the viewport draws — see `previewVolume`. Erase shows its hole before the press.
+    const drawn = useMemo(() => previewVolume(state, shown), [state, shown])
+
     const onOrbit = useCallback((event: OrbitEvent, height: number) => {
         dispatch({type: 'orbit', event, height})
     }, [])
 
     const onPointer = useCallback((event: ViewportPointer) => {
         dispatch({type: 'pointer', event})
+    }, [])
+
+    const onLeave = useCallback(() => {
+        dispatch({type: 'unaim'})
     }, [])
 
     const onReady = useCallback((raycaster: Raycaster) => {
@@ -358,13 +373,14 @@ export const App = ({
                         references={state.references}
                     />
                     <Viewport
-                        volume={shown}
+                        volume={drawn}
                         camera={state.orbit.camera}
                         map={state.map}
                         cursor={TOOL_CURSORS[state.tool]}
                         isMovingCamera={state.orbit.gesture !== undefined}
                         onOrbit={onOrbit}
                         onPointer={onPointer}
+                        onLeave={onLeave}
                         onReady={onReady}
                         onFrame={onFrame}
                     />
@@ -374,6 +390,13 @@ export const App = ({
                             camera={state.orbit.camera}
                         />
                     :   undefined}
+                    <BrushGhost
+                        volume={shown}
+                        camera={state.orbit.camera}
+                        hover={state.hover}
+                        tool={state.tool}
+                        color={state.color}
+                    />
                     <SelectionBox
                         volume={shown}
                         camera={state.orbit.camera}
@@ -399,6 +422,8 @@ export const App = ({
                     />
                     <HintBar
                         tool={`${(state.tool[0] ?? '').toUpperCase()}${state.tool.slice(1)}`}
+                        hover={state.hover}
+                        height={volume.sz}
                         onCapture={capture}
                     />
                 </div>

@@ -45,6 +45,7 @@ export const Viewport = ({
     isMovingCamera = false,
     onOrbit,
     onPointer,
+    onLeave,
     onReady,
     onFrame
 }: {
@@ -62,6 +63,11 @@ export const Viewport = ({
     /** The wheel only. Where a *drag* goes is decided in `reduce`, not here. */
     onOrbit: (event: OrbitEvent, height: number) => void
     onPointer: (event: ViewportPointer) => void
+    /**
+     * The pointer has left the canvas. Its own callback rather than a fourth `ViewportPointer` type,
+     * because there is no position to report: the one fact is that there is no longer one.
+     */
+    onLeave?: (() => void) | undefined
     onReady?: (raycaster: Raycaster) => void
     /** Fired after a frame has landed, not after a draw was issued. */
     onFrame?: (frames: number) => void
@@ -177,6 +183,9 @@ export const Viewport = ({
             onPointerUp={event => {
                 event.currentTarget.releasePointerCapture(event.pointerId)
                 onPointer(report('up', event))
+            }}
+            onPointerLeave={() => {
+                onLeave?.()
             }}
         >
             <canvas

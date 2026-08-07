@@ -68,3 +68,38 @@ export const setVoxel = (volume: Volume, x: number, y: number, z: number, value:
 
 /** The longest straight line through the volume — how far a ray can possibly travel inside it. */
 export const volumeDiagonal = ({sx, sy, sz}: Volume): number => Math.hypot(sx, sy, sz)
+
+/**
+ * The box the *voxels* fill, which is rarely the box the grid offers.
+ *
+ * `undefined` when the grid is empty. Everything that wants to know where the model is — the ground
+ * grid deciding what to draw under, a camera framing it — wants this rather than `sx, sy, sz`: a
+ * 128³ document holding one voxel has a bounding box the size of the room and a model the size of a
+ * die, and treating the two as the same thing is what leaves an artist with no floor to judge
+ * height against.
+ */
+export const filledBounds = (
+    volume: Volume
+): {min: [number, number, number]; max: [number, number, number]} | undefined => {
+    const {sx, sy, data} = volume
+    let x0 = Infinity
+    let y0 = Infinity
+    let z0 = Infinity
+    let x1 = -Infinity
+    let y1 = -Infinity
+    let z1 = -Infinity
+    for (let i = 0; i < data.length; i += 1) {
+        if ((data[i] ?? 0) === 0) continue
+        const z = Math.floor(i / (sx * sy))
+        const rest = i - z * sx * sy
+        const x = rest % sx
+        const y = Math.floor(rest / sx)
+        if (x < x0) x0 = x
+        if (y < y0) y0 = y
+        if (z < z0) z0 = z
+        if (x > x1) x1 = x
+        if (y > y1) y1 = y
+        if (z > z1) z1 = z
+    }
+    return x1 < x0 ? undefined : {min: [x0, y0, z0], max: [x1, y1, z1]}
+}

@@ -5,7 +5,7 @@ import {SHEET_MAPS} from '../sheet/sheet'
 import {basisFor} from '../render/camera'
 import {render} from '../render/raycast'
 import {MODE_NORMAL} from '../render/raycast.glsl'
-import {voxelAt, type Volume} from '../render/volume'
+import {voxelAt, voxelIndex, type Volume} from '../render/volume'
 import type {ViewportPointer} from '../viewport/orbit'
 import {readVox} from '../vox/vox-file'
 import {
@@ -13,6 +13,7 @@ import {
     initialState,
     MAX_BRUSH,
     presetMaps,
+    previewVolume,
     reduce,
     type AppState,
     type Tool
@@ -1055,4 +1056,114 @@ test('the chrome settings move without touching the render or the sheet', () => 
     expect(after.workspace).toBe('render')
     expect(after.sheet).toBe(baked.sheet)
     expect(after.orbit).toBe(baked.orbit)
+})
+
+test('the outline names the cells the click is about to write, not an approximation of them', () => {
+    const state = armed('draw')
+    const {column, row} = onModel(state)
+
+    const aimed = reduce(state, at('move', column, row))
+    const hover = aimed.hover
+    if (!hover) throw new Error('the pointer is over the model')
+    expect(hover.blocked).toBe(false)
+
+    // The same pixel, pressed. What was outlined has to be exactly what was written — a preview
+    // that is merely close is a preview the artist learns to distrust.
+    const drawn = reduce(reduce(aimed, at('down', column, row)), at('up', column, row))
+    const edit = drawn.history.past[0]
+    if (!edit) throw new Error('the click wrote something')
+    const outlined = new Set(hover.cells.map(([x, y, z]) => voxelIndex(state.volume, x, y, z)))
+    expect(new Set(edit.at)).toEqual(outlined)
+})
+
+test('a click that would write nothing says so before the press, not after', () => {
+    // The `+y` face of `car.vox` is flush with the grid, so Draw there aims at a cell that does not
+    // exist and the press is silent. That silence is what `blocked` is for.
+    const state = reduce(armed('draw'), {type: 'select', id: fresh().cameras[0]?.id ?? ''})
+    const basis = basisFor(state.orbit.camera, state.volume, SIZE)
+    const {id} = render(state.volume, basis, SIZE, SIZE)
+
+    let silent: {column: number; row: number} | undefined
+    let live: {column: number; row: number} | undefined
+    for (let index = 0; index < id.length && !(silent && live); index += 1) {
+        if ((id[index] ?? 0) === 0) continue
+        const spot = {column: index % SIZE, row: Math.floor(index / SIZE)}
+        const done = reduce(
+            reduce(state, at('down', spot.column, spot.row)),
+            at('up', spot.column, spot.row)
+        )
+        if (done.history.past.length === 0) silent ??= spot
+        else live ??= spot
+    }
+    if (!silent || !live) throw new Error('the model has both kinds of pixel from the front')
+
+    expect(reduce(state, at('move', silent.column, silent.row)).hover?.blocked).toBe(true)
+    expect(reduce(state, at('move', live.column, live.row)).hover?.blocked).toBe(false)
+})
+
+test('the outline re-aims when the brush changes, without the mouse moving', () => {
+    const state = armed('draw')
+    const {column, row} = onModel(state)
+    const aimed = reduce(state, at('move', column, row))
+    expect(aimed.hover?.cells).toHaveLength(4)
+
+    // Nothing but the brush changed, and the outline is already the new footprint.
+    const bigger = reduce(aimed, {type: 'brush', brush: {size: 3}})
+    expect(bigger.hover?.cells).toHaveLength(9)
+    expect(reduce(aimed, {type: 'tool', tool: 'move'}).hover).toBeUndefined()
+})
+
+test('nothing is outlined while a gesture owns the pointer, or once it has left', () => {
+    const state = armed('draw')
+    const {column, row} = onModel(state)
+    const aimed = reduce(state, at('move', column, row))
+    expect(aimed.hover).toBeDefined()
+
+    // Mid-stroke the voxels themselves are the preview.
+    expect(reduce(aimed, at('down', column, row)).hover).toBeUndefined()
+    // Mid-orbit the picture is still moving.
+    expect(reduce(aimed, at('down', column, row, {button: 2})).hover).toBeUndefined()
+    expect(reduce(aimed, {type: 'unaim'}).hover).toBeUndefined()
+    expect(reduce(aimed, {type: 'unaim'}).aim).toBeUndefined()
+})
+
+test('draw and erase outline the same plane: the face the ray struck', () => {
+    const {column, row} = onModel(armed('draw'))
+
+    // Draw aims at the empty cell in front of the surface, Erase at the voxel behind it. They are
+    // one voxel apart and the outline belongs on the surface between them, for both.
+    const drawing = reduce(armed('draw'), at('move', column, row)).hover
+    const erasing = reduce(armed('erase'), at('move', column, row)).hover
+    if (!drawing || !erasing) throw new Error('the pointer is over the model')
+    expect(drawing.face).toBe(erasing.face)
+    expect(drawing.surface).toBe(erasing.surface)
+
+    // And the plane really is the boundary: the two cells sit on either side of it.
+    const axis =
+        drawing.face === 1 || drawing.face === 2 ? 0
+        : drawing.face <= 4 ? 1
+        : 2
+    const near = Math.min(drawing.cell[axis], erasing.cell[axis])
+    expect(drawing.surface).toBe(near + 1)
+})
+
+test('with erase armed the viewport is handed the hole, and every other tool the model', () => {
+    const state = armed('erase')
+    const {column, row} = onModel(state)
+    const aimed = reduce(state, at('move', column, row))
+    const hover = aimed.hover
+    if (!hover) throw new Error('the pointer is over the model')
+
+    // The preview is the document minus exactly the cells the press would clear, and the document
+    // itself is untouched — nothing here is an edit.
+    const preview = previewVolume(aimed, aimed.volume)
+    expect(occupied(preview)).toBe(occupied(aimed.volume) - hover.cells.length)
+    for (const [x, y, z] of hover.cells) expect(voxelAt(preview, x, y, z)).toBe(0)
+    expect(occupied(aimed.volume)).toBe(occupied(state.volume))
+
+    // Draw proposes voxels that are not there yet, so the render must not show them as though they
+    // were: the overlay says what is coming, and the grid handed to the viewport is the real one.
+    const drawing = reduce(armed('draw'), at('move', column, row))
+    expect(previewVolume(drawing, drawing.volume)).toBe(drawing.volume)
+    expect(previewVolume(reduce(aimed, {type: 'unaim'}), aimed.volume)).toBe(aimed.volume)
 })

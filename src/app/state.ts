@@ -254,6 +254,38 @@ export interface Stroke {
     readonly at: Cell
 }
 
+/**
+ * Where the next click would land, computed on every pointer move that is not already a gesture.
+ *
+ * It is not a hint and not an approximation: `cells` comes out of the same `strokeCells` and the
+ * same symmetry maps that `beginStroke` writes with, so the outline on screen cannot disagree with
+ * the edit it is previewing. Without it the artist aims a one-voxel brush at a 3-pixel voxel and
+ * finds out where it went afterwards — and finds out nothing at all when the answer is `blocked`.
+ */
+export interface Hover {
+    /** The cell the click would write into: in front of the face for Draw, the voxel for the rest. */
+    readonly cell: Cell
+    /** The face the ray struck, which is what a flat brush lies in. */
+    readonly face: number
+    /**
+     * The grid plane the outline is drawn on, along the face's own axis.
+     *
+     * Decided here rather than in the overlay, because it is not the same side of the cell for every
+     * tool: Draw aims at the empty cell in front of the surface and wants the near side of it, Erase
+     * and Paint aim at the voxel itself and want its outer side. Both are the *struck face* — one
+     * plane, arrived at from the two directions the tools approach it from.
+     */
+    readonly surface: number
+    /** Every cell the click would write, mirrors included. May be empty when all of them are off-grid. */
+    readonly cells: readonly Offset[]
+    /**
+     * The click would write nothing — the brush is entirely off the grid, which is what happens on
+     * any face flush with the volume's boundary. A press there is silent, so the outline has to say
+     * it before the press rather than after.
+     */
+    readonly blocked: boolean
+}
+
 export interface AppState {
     readonly volume: Volume
     readonly cameras: readonly NamedCamera[]
@@ -300,6 +332,14 @@ export interface AppState {
     readonly band: Band | undefined
     /** Non-`undefined` while voxels are being dragged — moved, cloned or pulled. */
     readonly drag: Drag | undefined
+    /**
+     * The last place the pointer was seen over the viewport, and nothing else. `undefined` once it
+     * has left. Kept because `hover` is a function of it *and* of the tool, the brush, the colour
+     * and the model — all of which change without the mouse moving.
+     */
+    readonly aim: ViewportPointer | undefined
+    /** Where the next click would go. `undefined` while a gesture owns the pointer, or off the model. */
+    readonly hover: Hover | undefined
     /** Draw-time mirroring. Writes real voxels as the stroke happens — see `doc/symmetry.ts`. */
     readonly symmetry: Symmetry
     /** The flat list of named objects over the one grid — see `doc/objects.ts`. */
@@ -409,6 +449,7 @@ export type AppAction =
     | {type: 'workspace'; workspace: 'model' | 'render'}
     | {type: 'preset'; preset: string}
     | {type: 'fps'; fps: number}
+    | {type: 'unaim'}
 
 /**
  * The export presets of `docs/editor.png` — `FEATURESET.md` §38.
@@ -485,6 +526,8 @@ export const initialState = (source: Volume, opened?: OpenedDocument): AppState 
         selection: EMPTY_SELECTION,
         band: undefined,
         drag: undefined,
+        aim: undefined,
+        hover: undefined,
         symmetry: NO_SYMMETRY,
         objects: opened?.objects ?? initialObjects(volume),
         search: '',
@@ -552,6 +595,110 @@ const mirrored = (state: AppState, cells: readonly Offset[]): readonly Offset[] 
     const maps = symmetryMaps(state.volume, state.symmetry)
     if (maps.length === 1) return cells
     return maps.flatMap(map => cells.map(map))
+}
+
+/**
+ * Would writing `value` here change anything? The four ways a write is silently dropped, asked in
+ * one place — see `writeOwned`, which is where they are actually enforced.
+ *
+ * Out of bounds, owned by a locked object, or already exactly what is being written. A tool whose
+ * click does nothing is not a bug on its own; a tool that gives no sign of it beforehand is.
+ */
+const wouldWrite = (
+    state: AppState,
+    locked: ReadonlySet<number>,
+    [x, y, z]: Offset,
+    value: number
+): boolean => {
+    const {sx, sy, sz, data, owner} = state.volume
+    if (x < 0 || y < 0 || z < 0 || x >= sx || y >= sy || z >= sz) return false
+    const index = voxelIndex(state.volume, x, y, z)
+    const wasOwner = owner[index] ?? 0
+    if (locked.has(wasOwner)) return false
+    const nowOwner = value === 0 ? 0 : state.objects.active
+    return (data[index] ?? 0) !== value || wasOwner !== nowOwner
+}
+
+/**
+ * The grid the *viewport* draws, which is not always the grid the document holds.
+ *
+ * With Erase armed, the cells under the cursor come out before the frame is cast, so the artist
+ * sees the hole they are about to open. It is worth a grid copy per pointer move — the same bill a
+ * stroke already pays — because erasing into a solid, evenly coloured block is otherwise invisible:
+ * measured on `car.vox`, up to 18 of 41 erases left the clicked pixel byte for byte identical, the
+ * voxel exposed behind carrying the same palette entry and the same face.
+ *
+ * Only Erase. Draw's new voxels sit in empty space, where the translucent block in `BrushGhost`
+ * already reads correctly, and painting them into the render would make a proposal look like a fact.
+ */
+export const previewVolume = (state: AppState, shown: Volume): Volume => {
+    const {hover} = state
+    if (!hover || state.tool !== 'erase' || hover.blocked) return shown
+    const data = new Uint8Array(shown.data)
+    for (const [x, y, z] of hover.cells) {
+        if (x < 0 || y < 0 || z < 0) continue
+        if (x >= shown.sx || y >= shown.sy || z >= shown.sz) continue
+        data[voxelIndex(shown, x, y, z)] = 0
+    }
+    return {...shown, data}
+}
+
+const withHover = (state: AppState, hover: Hover | undefined): AppState =>
+    state.hover === undefined && hover === undefined ? state : {...state, hover}
+
+/**
+ * Where the next click would land, decided by the same reasoning `beginStroke` uses.
+ *
+ * Every branch below is the one two functions down, deliberately: which cell Draw aims at, which
+ * face orients the brush, what a plane lock and slice mode override. The preview is worth having
+ * only for as long as it cannot be more optimistic than the edit.
+ *
+ * It reads `aim` — the last place the pointer was seen — rather than an event, so that changing the
+ * brush, the colour, the tool or the model re-aims without the artist having to jiggle the mouse.
+ * `reduce` is what notices those, at the bottom of this file.
+ */
+const hoverAt = (state: AppState): AppState => {
+    const event = state.aim
+    if (!event) return withHover(state, undefined)
+    // A gesture owns the pointer: a stroke is already showing its own voxels, and an outline that
+    // chased an orbit would be aiming at a picture that is still moving.
+    if (state.stroke || state.drag || state.band) return withHover(state, undefined)
+    if (state.orbit.gesture !== undefined) return withHover(state, undefined)
+    if (!WRITES.has(state.tool)) return withHover(state, undefined)
+    if (event.height <= 0 || event.width <= 0) return withHover(state, undefined)
+    const volume = visible(state)
+    const basis = basisFor(state.orbit.camera, volume, event.height)
+    const hit = pick(volume, basis, event.x, event.y, event.width, event.height)
+    if (!hit) return withHover(state, undefined)
+
+    const outward = state.tool === 'draw' && !event.alt
+    const cell: Cell = outward ? hit.place : [hit.x, hit.y, hit.z]
+    // The floor is a surface to draw on, and nothing to erase, recolour or take a colour from.
+    if (!outward && hit.value === 0) return withHover(state, undefined)
+
+    const axis = state.plane ?? faceAxis(hit.face)
+    const face = state.plane === undefined ? hit.face : axis * 2 + 1
+    /*
+     * Fill and Pick do not stamp a footprint, so showing them one would be a lie about the size of
+     * what is coming. They get the single cell the ray landed on, which is all either of them acts
+     * on — the region a fill would flood is the fill's own answer and costs a traversal per move.
+     */
+    const cells =
+        state.tool === 'fill' || state.tool === 'pick' ?
+            [cell]
+        :   mirrored(state, strokeCells(state.brush, face, cell, cell))
+    const value = state.tool === 'erase' ? 0 : state.color
+    const locked = lockedIds(state.objects)
+    const blocked =
+        state.tool === 'pick' ? false : !cells.some(spot => wouldWrite(state, locked, spot, value))
+    /*
+     * The struck face, as a plane. Face codes pair up odd-negative, even-positive, so a `+` face
+     * sits at the far side of the voxel it belongs to and at the near side of the cell in front of
+     * it — which is why `outward` flips the offset rather than the axis.
+     */
+    const positive = face % 2 === 0
+    const surface = cell[axis] + (positive === outward ? 0 : 1)
+    return withHover(state, {cell, face, surface, cells, blocked})
 }
 
 const beginStroke = (state: AppState, event: ViewportPointer): AppState => {
@@ -883,7 +1030,7 @@ const endStroke = (state: AppState): AppState => {
     }
 }
 
-export const reduce = (state: AppState, action: AppAction): AppState => {
+const step = (state: AppState, action: AppAction): AppState => {
     switch (action.type) {
         case 'orbit': {
             // In slice mode the wheel walks through depth, which is what §6 asks of it. Zoom is
@@ -916,12 +1063,15 @@ export const reduce = (state: AppState, action: AppAction): AppState => {
          */
         case 'pointer': {
             const {event} = action
+            // Every viewport event is a sighting of the pointer, whatever else it turns out to be.
+            // `reduce` re-aims the outline from it once this case has decided what happened.
+            const seen: AppState = {...state, aim: event}
             if (event.type === 'down') {
                 if (event.button === 0 && !event.shift) {
-                    if (WRITES.has(state.tool)) return beginStroke(state, event)
-                    if (SELECTS.has(state.tool)) return beginSelect(state, event)
+                    if (WRITES.has(seen.tool)) return beginStroke(seen, event)
+                    if (SELECTS.has(seen.tool)) return beginSelect(seen, event)
                 }
-                return reduce(state, {
+                return reduce(seen, {
                     type: 'orbit',
                     event: {
                         type: 'pointerdown',
@@ -932,18 +1082,18 @@ export const reduce = (state: AppState, action: AppAction): AppState => {
                     height: event.height
                 })
             }
-            if (state.stroke) {
-                return event.type === 'move' ? continueStroke(state, event) : endStroke(state)
+            if (seen.stroke) {
+                return event.type === 'move' ? continueStroke(seen, event) : endStroke(seen)
             }
-            if (state.band) {
+            if (seen.band) {
                 return event.type === 'move' ?
-                        {...state, band: {...state.band, x1: event.x, y1: event.y}}
-                    :   endBand(state)
+                        {...seen, band: {...seen.band, x1: event.x, y1: event.y}}
+                    :   endBand(seen)
             }
-            if (state.drag) {
-                return event.type === 'move' ? continueDrag(state, event) : endDrag(state)
+            if (seen.drag) {
+                return event.type === 'move' ? continueDrag(seen, event) : endDrag(seen)
             }
-            return reduce(state, {
+            return reduce(seen, {
                 type: 'orbit',
                 event:
                     event.type === 'move' ?
@@ -952,6 +1102,10 @@ export const reduce = (state: AppState, action: AppAction): AppState => {
                 height: event.height
             })
         }
+
+        /** The pointer has left the viewport, so there is no next click to point at. */
+        case 'unaim':
+            return state.aim === undefined ? state : {...state, aim: undefined}
 
         case 'undo': {
             // Mid-stroke there is nothing coherent to undo *to*: the draft is not an edit yet.
@@ -1453,4 +1607,34 @@ export const reduce = (state: AppState, action: AppAction): AppState => {
         case 'fps':
             return {...state, fps: action.fps}
     }
+}
+
+/**
+ * What `hover` depends on. Anything here changing means the outline on screen is now describing a
+ * click that would do something else.
+ *
+ * A list rather than a `hoverAt` call in each of the fifty cases above, because the list can be
+ * read and the fifty call sites could not — and a case that forgot one would leave the artist an
+ * outline that is quietly lying, which is worse than the nothing this replaces.
+ */
+const AIMED_AT: readonly (keyof AppState)[] = [
+    'aim',
+    'volume',
+    'tool',
+    'brush',
+    'color',
+    'plane',
+    'slice',
+    'symmetry',
+    'objects',
+    'orbit',
+    'stroke',
+    'drag',
+    'band'
+]
+
+export const reduce = (state: AppState, action: AppAction): AppState => {
+    const next = step(state, action)
+    if (next === state) return state
+    return AIMED_AT.some(key => next[key] !== state[key]) ? hoverAt(next) : next
 }
