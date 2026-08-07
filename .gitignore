@@ -4,3 +4,7 @@ dist
 __pycache__
 *.pyc
 out
+test-results/
+playwright-report/
+.eslintcache
+node_modules/.cache

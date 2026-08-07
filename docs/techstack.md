@@ -209,16 +209,25 @@ Both load-bearing unknowns were closed on 2026-08-07 by writing the spikes, not 
 - **Astryx mounts under happy-dom with no shims** — `Button`, `HStack`, `VStack`, `NumberInput` and
   `TextInput` render, click and update at 1.31 ms per interaction.
 
+Closed since, by building the proof of concept:
+
+- **What a camera is.** A stored orthographic transform plus a name — yaw, pitch, zoom and a
+  two-axis pan (`src/doc/cameras.ts`). The named list is the data; "create 8 directions" is a
+  generator that produces eight of them and nothing more. Sprite size is not part of a camera: it
+  belongs to the export, so one camera list can be rendered at 32, 64 or 128 px.
+- **How lighting works, to the extent the renderer needs one.** Flat per-face light, as an integer
+  numerator over 256 (`src/render/faces.ts`). Integer and over a power of two because that is the
+  arithmetic both backends have to agree on byte-for-byte; it also happens to be the look voxel art
+  wants. There is no light direction.
+
 Still open, and each one is a decision rather than a measurement:
 
 1. **How a render becomes pixel art.** One ray per output pixel is crisp and aliased. Whether the
    pipeline also quantises shading into N palette-aware steps (`FEATURESET.md` §22) changes the
    renderer's output stage. Not decided.
-2. **What a camera is.** The mockups show both a named list with thumbnails and a "create 8
-   directions" generator. Which one is the stored data and which is a convenience matters to the
-   document format.
-3. **What happens to `src/gen/`.** It survives the cut, but it currently scores candidates by
+2. **What happens to `src/gen/`.** It survives the cut, but it currently scores candidates by
    rendering them with the sprite-stacking renderer that is being deleted. It has to be repointed at
    the raycaster.
-4. **Whether 2D slice editing survives.** `FEATURESET.md` §6 wants it; the mockups have no trace of
-   it. `src/editor/state.ts` is the only part of the old editor worth keeping either way.
+3. **Whether 2D slice editing survives.** `FEATURESET.md` §6 wants it; the mockups have no trace of
+   it. `legacy/src/editor/state.ts` is the only part of the old editor worth keeping either way, and
+   its gesture-replay pattern is already carried over into `src/viewport/orbit.ts`.

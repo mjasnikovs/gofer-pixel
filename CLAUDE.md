@@ -13,8 +13,9 @@ produce pixels.
 2. `docs/FEATURESET.md` — the product intent, 40 items. Treat it as a someday-list.
 3. `docs/editor.png` and `docs/featureset.png` — **these two mockups are the spec.** When the two
    disagree with FEATURESET.md, the mockups win.
-4. `docs/POC_PROMPT.md` — the current task. The next thing to build, in order, with a do-not-build
-   list and measurable done criteria.
+4. `docs/POC_PROMPT.md` — the brief the current `src/` was built against, with its do-not-build list
+   and its measurable done criteria. All six steps are built; the list of things it says not to
+   build is still the list of things not to build.
 
 ## The rebuild
 
@@ -22,8 +23,24 @@ The project was restarted on 2026-08-07. Everything built before that is in `leg
 excluded from lint, format, typecheck, test and build. Read `legacy/README.md` before opening
 anything in there — it says what is worth reading and what is superseded.
 
-`src/` is nearly empty on purpose. Code from `legacy/` is carried over deliberately, file by file,
-with its tests — never by import.
+Code from `legacy/` is carried over deliberately, file by file, with its tests — never by import.
+Carried over so far: the `.vox` reader (`src/vox/`), the PNG encoder (`src/image/`), the gesture
+replay pattern (`src/viewport/orbit.ts`), and `assets/car.vox` itself. Everything else in `src/` is
+new.
+
+What is there now, and roughly in dependency order:
+
+| Path            | Holds                                                                            |
+| --------------- | -------------------------------------------------------------------------------- |
+| `src/render/`   | the CPU raycaster, the shader it is mirrored by, the camera, the WebGL2 renderer |
+| `src/vox/`      | `.vox` → `Volume`                                                                |
+| `src/doc/`      | what a camera is, and the eight-direction generator                              |
+| `src/sheet/`    | packing cameras into a colour sheet and a normal sheet                           |
+| `src/image/`    | PNG encoding                                                                     |
+| `src/viewport/` | orbit/pan/zoom as a pure function, and the React canvas                          |
+| `src/app/`      | the whole app as one value and one `reduce`, plus the panels that show it        |
+| `src/theme/`    | `theme.ts` and the CSS it generates; never edit the CSS                          |
+| `browser/`      | the Playwright suite and the page it drives                                      |
 
 ## The renderer
 
@@ -60,6 +77,12 @@ no polling, no `@testing-library/user-event`, no animated scrolling, no screensh
   `bun run check`. Chromium needs
   `--use-angle=vulkan --enable-features=Vulkan --use-gl=angle --ignore-gpu-blocklist` or it silently
   falls back to SwiftShader and is 51× slower.
+- `gl.finish()` does **not** make a frame land — Chrome's command buffer returns from it long before
+  the GPU is done, and a benchmark built on it reports 0.006 ms on software rendering. `renderNow`
+  reads one pixel back instead, which really blocks, costs ~0.2 ms, and is what makes the frame
+  counter mean anything.
+- The browser suite drives the running app through `src/app/handle.ts` rather than by polling the
+  DOM. It is a deliberate seam and the app only ever writes to it.
 
 `test/preload.ts` registers happy-dom for every test via `bunfig.toml`, so `document` is always
 available.
@@ -67,13 +90,17 @@ available.
 ## Commands
 
 ```bash
-bun run check       # format:check + lint + typecheck + test — the gate, ~4 s, no browser
-bun run test        # bun test — scoped to src/ by bunfig.toml
-bun run build       # deployable app bundle to dist/ (not a package — no .d.ts, no lib entry)
-bun run test:browser # the Playwright suite — separate, does not gate `check`
-bun run dev         # playground on :1430
-bun run format      # prettier --write
+bun run check        # format:check + lint + typecheck + test — the gate, 3.8 s, no browser
+bun run test         # bun test — scoped to src/ by bunfig.toml
+bun run build        # deployable app bundle to dist/ (not a package — no .d.ts, no lib entry)
+bun run test:browser # the Playwright suite — separate, does not gate `check`, 9 s
+bun run dev          # the app on :1430
+bun run theme        # rebuild src/theme/gofer-pixel-theme.css from src/theme/theme.ts
+bun run format       # prettier --write
 ```
+
+`lint` and `format` are cached (`.eslintcache`, prettier's own). A cold `check` is about 7 s; the
+number above is the one that matters, because it is the one the inner loop pays.
 
 ## Conventions
 
@@ -84,7 +111,13 @@ width 100), TypeScript 6 with `noUncheckedIndexedAccess` and `exactOptionalPrope
 That combination bans non-null assertions on indexed access. Use a `?? fallback`, a `DataView` read,
 or an early-return guard — not `!`.
 
-Imports are extensionless. `legacy/` and `bunfig.toml` are excluded from lint and format.
+Imports are extensionless. `legacy/`, `docs/spikes/` and `bunfig.toml` are excluded from lint and
+format, as are the two files `bun run theme` generates.
+
+The theme is not decoration and it has a gate: `src/theme/theme.test.ts` measures the built CSS for
+collapsed distinctions — text roles under 12 L* apart, a surface ramp step under 3 L*, an accent no
+brighter than body text, a control border under 3:1 — and it runs inside `bun test`. Read
+`skills/gofer-ui/SKILL.md` before touching any of it.
 
 ## Environment
 

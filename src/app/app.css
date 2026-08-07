@@ -1,0 +1,305 @@
+/*
+ * The frame only: regions, their budgets, and the two things Astryx has no component for — a
+ * canvas and a pixel-art image. Every colour is a token, never a hex, so the whole window moves
+ * when `src/theme/theme.ts` does.
+ *
+ * The shape comes from `docs/editor.png`, which is the spec: a thin header, a rail on each side and
+ * the render in the middle. Each rail is *one* panel divided into sections by a hairline, not a
+ * stack of boxes — boxing every section is what turns a tool into a settings page, and the mockup
+ * does not do it.
+ *
+ * Responsive contract: this is a desktop tool with three fixed regions and a flexible middle. It
+ * does not collapse; below about 1100 px the rails keep their width and the viewport shrinks.
+ */
+
+html,
+body,
+#root {
+    height: 100%;
+}
+
+.app {
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
+    background: var(--color-background-body);
+    overflow: hidden;
+}
+
+.app-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 44px;
+    flex: 0 0 44px;
+    padding: 0 14px;
+    border-bottom: 1px solid var(--color-border);
+}
+
+/* The one piece of decoration in the window, and it is the accent saying which app this is. */
+.app-mark {
+    width: 14px;
+    height: 14px;
+    border-radius: 4px;
+    background: var(--color-accent);
+}
+
+.app-divider {
+    width: 1px;
+    height: 18px;
+    background: var(--color-border);
+    margin: 0 4px;
+}
+
+.spacer {
+    flex: 1 1 auto;
+}
+
+.app-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: 232px minmax(0, 1fr) 340px;
+    gap: 8px;
+    padding: 8px;
+}
+
+/* ---- panels and the sections inside them ---- */
+
+.panel {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    background: var(--color-background-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-container);
+    overflow: hidden;
+}
+
+.section {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+/* One rule *between* sections, drawn by the section below. Never a bar around a title. */
+.section + .section {
+    border-top: 1px solid var(--color-border);
+}
+
+/* The section that takes the slack, so the one after it can pin itself to the bottom. */
+.section-grows {
+    flex: 1 1 auto;
+}
+
+/* Sized by its content, never squeezed by the section below it — a grid of tiles cut off through
+ * the middle of a row reads as a rendering bug rather than as more content below the fold. */
+.section-holds {
+    flex: 0 0 auto;
+}
+
+.section-pinned {
+    margin-top: auto;
+}
+
+.section-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 12px 12px 8px;
+    min-height: 32px;
+}
+
+/* Small, wide-tracked, upper-cased: a label for a region, not a heading in a document. */
+.section-head > span:first-child {
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    font-size: 11px;
+}
+
+.section-body {
+    padding: 0 12px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+/* Pinned to the bottom of whatever space the section got, so the action does not float in the
+ * middle of an empty panel before anything has been rendered. */
+.section-foot {
+    margin-top: auto;
+    padding: 4px 12px 12px;
+}
+
+.model-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+/* ---- viewport ---- */
+
+.viewport {
+    position: relative;
+    min-height: 0;
+    overflow: hidden;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-container);
+    /* Darker than the panels on purpose: the render is the brightest thing in the window. */
+    background: var(--color-background-body);
+    touch-action: none;
+    cursor: grab;
+}
+
+.viewport:active {
+    cursor: grabbing;
+}
+
+.viewport-canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+.viewport-failure {
+    position: absolute;
+    inset: 12px;
+    color: var(--color-text-secondary);
+}
+
+/* ---- cameras ---- */
+
+.app-rail {
+    display: flex;
+    flex-direction: column;
+}
+
+.camera-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+    padding: 0 12px 8px;
+    /* Three rows of tiles at the rail's width. Past that the grid scrolls rather than pushing the
+     * sheet below it out of the window; eight cameras and an add tile fit exactly. */
+    max-height: 42vh;
+    overflow-y: auto;
+}
+
+/*
+ * The thumbnail fills the tile and the name sits over the bottom of it, as in the mockup. Putting
+ * the name underneath instead costs a row of height per tile and makes eight cameras taller than
+ * the rail, which is the whole reason the mockup overlays it.
+ */
+.camera-tile {
+    position: relative;
+    display: block;
+    border-radius: var(--radius-element);
+    overflow: hidden;
+    background: var(--color-background-body);
+}
+
+.camera-name {
+    position: absolute;
+    inset: auto 0 0 0;
+    padding: 12px 6px 4px;
+    font-size: 11px;
+    background: linear-gradient(to top, var(--color-background-body) 30%, transparent);
+}
+
+.camera-add {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    min-height: 72px;
+    padding: 6px;
+    border: 1px dashed var(--color-border-emphasized);
+    border-radius: var(--radius-element);
+    background: none;
+    color: var(--color-icon-secondary);
+    cursor: pointer;
+}
+
+.camera-add:hover {
+    background: var(--color-overlay-hover);
+    border-color: var(--color-accent);
+    color: var(--color-icon-accent);
+}
+
+/* Nearest-neighbour all the way out: a preview that resamples is a lie about the exported file. */
+.thumbnail,
+.sheet-canvas {
+    image-rendering: pixelated;
+    display: block;
+}
+
+.thumbnail {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 1;
+}
+
+/* ---- sheet ---- */
+
+.sheet-body {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 0 12px 8px;
+    overflow-y: auto;
+}
+
+.sheet-preview {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.sheet-preview-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 28px;
+}
+
+/*
+ * The checkerboard is not decoration: a sprite sheet is mostly transparent, and a preview on a
+ * flat panel cannot tell an empty pixel from one the model happens to have painted panel-coloured.
+ */
+.sheet-frame {
+    padding: 6px;
+    border-radius: var(--radius-element);
+    border: 1px solid var(--color-border);
+    background-color: var(--color-background-body);
+    background-image:
+        linear-gradient(45deg, var(--color-background-card) 25%, transparent 25%),
+        linear-gradient(-45deg, var(--color-background-card) 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, var(--color-background-card) 75%),
+        linear-gradient(-45deg, transparent 75%, var(--color-background-card) 75%);
+    background-size: 12px 12px;
+    background-position:
+        0 0,
+        0 6px,
+        6px -6px,
+        -6px 0;
+}
+
+/*
+ * Big enough to judge, small enough that the colour sheet and the normal sheet both fit above the
+ * fold — seeing them together is the point, since the claim being made is that they are aligned.
+ * Never upscaled past its own pixels: at 32 px cells the sheet is 128 px wide and stays there.
+ */
+.sheet-canvas {
+    margin: 0 auto;
+    width: auto;
+    height: auto;
+    max-width: 100%;
+    max-height: 130px;
+}
+
+.sheet-empty {
+    padding: 20px 14px 24px;
+    text-align: center;
+}

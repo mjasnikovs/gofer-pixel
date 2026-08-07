@@ -10,3 +10,9 @@ experiments
 DESIGN_PROGRESS.md
 results.html
 bunfig.toml
+
+src/theme/gofer-pixel.js
+src/theme/gofer-pixel.d.ts
+test-results
+playwright-report
+.eslintcache
