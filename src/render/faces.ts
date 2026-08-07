@@ -53,3 +53,20 @@ export const FACE_NORMAL_RGB: readonly (readonly [number, number, number])[] = [
 
 /** The same table flat, three bytes per face, indexed `face * 3`. */
 export const FACE_NORMAL = new Uint8Array(FACE_NORMAL_RGB.flat())
+
+/**
+ * The face as a step: from the voxel that was struck to the empty cell in front of it.
+ *
+ * This is the whole of "hover empty space → Draw adds voxels" (`FEATURESET.md` §4). A draw tool
+ * writes at `hit + FACE_STEP[face]` and a paint tool writes at `hit`, which is why the two need no
+ * separate hit test and can never disagree about which cell the cursor is on.
+ */
+export const FACE_STEP: readonly (readonly [number, number, number])[] = [
+    [0, 0, 0], // unused
+    [-1, 0, 0],
+    [1, 0, 0],
+    [0, -1, 0],
+    [0, 1, 0],
+    [0, 0, -1],
+    [0, 0, 1]
+]

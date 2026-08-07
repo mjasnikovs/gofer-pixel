@@ -1,3 +1,4 @@
+import {BRUSH_KINDS, MAX_BRUSH, SHAPES, type Brush, type BrushKind, type Shape} from '../doc/brush'
 import {captureCamera, eightDirections, ISOMETRIC_PITCH, type NamedCamera} from '../doc/cameras'
 import {firstColor} from '../doc/palette'
 import {createCamera, type Camera} from '../render/camera'
@@ -27,21 +28,13 @@ export const TOOLS = [
 ] as const
 export type Tool = (typeof TOOLS)[number]
 
-/** The four brush footprints in the mockup's Shape row. */
-export const SHAPES = ['square', 'circle', 'ring', 'cube'] as const
-export type Shape = (typeof SHAPES)[number]
-
-export const BRUSH_KINDS = ['voxel', 'face', 'plane'] as const
-export type BrushKind = (typeof BRUSH_KINDS)[number]
-
-/** A brush wider than eight voxels is a fill, and there is a fill tool two rows down. */
-export const MAX_BRUSH = 8
-
-export interface Brush {
-    readonly kind: BrushKind
-    readonly size: number
-    readonly shape: Shape
-}
+/**
+ * The brush lives in `doc/` — which cells a click writes is document arithmetic, and the panel
+ * here is a projection of it. Re-exported so the panels keep importing their types from the state
+ * they are drawn from.
+ */
+export {BRUSH_KINDS, MAX_BRUSH, SHAPES}
+export type {Brush, BrushKind, Shape}
 
 export interface AppState {
     readonly volume: Volume
