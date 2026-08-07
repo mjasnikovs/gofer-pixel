@@ -72,6 +72,7 @@ import {
     arrayCells,
     deleteCells,
     duplicateCells,
+    lossCount,
     extrudeCells,
     fitsAfter,
     flipCells,
@@ -425,6 +426,16 @@ export interface AppState {
     /** Non-`undefined` while voxels are being dragged — moved, cloned or pulled. */
     readonly drag: Drag | undefined
     /**
+     * How many voxels the drag, as it stands right now, would destroy if it were dropped.
+     *
+     * Zero when nothing is being dragged. Move and clone overwrite, which is right — refusing would
+     * mean never sliding a voxel one step along a surface — but it is the one loss undo cannot make
+     * obvious afterwards, because a drop onto air looks exactly like a drop that ate three voxels.
+     * Kept on the state rather than worked out by the bar, so the number the artist reads is the
+     * number the reducer is about to act on.
+     */
+    readonly losing: number
+    /**
      * The last place the pointer was seen over the viewport, and nothing else. `undefined` once it
      * has left. Kept because `hover` is a function of it *and* of the tool, the brush, the colour
      * and the model — all of which change without the mouse moving.
@@ -618,6 +629,7 @@ export const initialState = (source: Volume, opened?: OpenedDocument): AppState 
         selection: EMPTY_SELECTION,
         band: undefined,
         drag: undefined,
+        losing: 0,
         aim: undefined,
         hover: undefined,
         symmetry: NO_SYMMETRY,
@@ -1297,7 +1309,7 @@ const continueDrag = (state: AppState, event: ViewportPointer): AppState => {
     if (drag.kind === 'turn') {
         const quarters = quartersTurned(state, drag, event)
         if (quarters === 0) {
-            return {...state, volume: drag.volume, selection: drag.selection}
+            return {...state, volume: drag.volume, selection: drag.selection, losing: 0}
         }
         const turned = rotateCells(draft, drag.selection, faceAxis(drag.face), quarters)
         /*
@@ -1307,7 +1319,7 @@ const continueDrag = (state: AppState, event: ViewportPointer): AppState => {
          * is a throwaway copy, so dropping it costs nothing.
          */
         if (turned.size !== drag.selection.size) {
-            return {...state, volume: drag.volume, selection: drag.selection}
+            return {...state, volume: drag.volume, selection: drag.selection, losing: 0}
         }
         return {...state, volume: draft.volume, selection: turned, sheet: undefined}
     }
@@ -1315,7 +1327,7 @@ const continueDrag = (state: AppState, event: ViewportPointer): AppState => {
     if (drag.kind === 'extrude') {
         const layers = layersPulled(state, drag, event)
         if (layers === 0) {
-            return {...state, volume: drag.volume, selection: drag.selection}
+            return {...state, volume: drag.volume, selection: drag.selection, losing: 0}
         }
         const face = extrudeCells(draft, drag.selection, FACE_STEP[drag.face] ?? [0, 0, 0], layers)
         return {...state, volume: draft.volume, selection: face, sheet: undefined}
@@ -1334,13 +1346,19 @@ const continueDrag = (state: AppState, event: ViewportPointer): AppState => {
     if (!cell) return state
     const delta: Cell = [cell[0] - drag.from[0], cell[1] - drag.from[1], cell[2] - drag.from[2]]
     if (delta[0] === 0 && delta[1] === 0 && delta[2] === 0) {
-        return {...state, volume: drag.volume, selection: drag.selection}
+        return {...state, volume: drag.volume, selection: drag.selection, losing: 0}
     }
+    /*
+     * Counted against the grid the drag *started* on, which is the one the drop is about to be
+     * replayed over. Counting against `state.volume` would count the previous position of this same
+     * gesture, and read as a warning about voxels the artist has not lost.
+     */
+    const losing = lossCount(drag.volume, drag.selection, delta, drag.kind !== 'clone')
     const selection =
         drag.kind === 'clone' ?
             duplicateCells(draft, drag.selection, delta)
         :   moveCells(draft, drag.selection, delta)
-    return {...state, volume: draft.volume, selection, sheet: undefined}
+    return {...state, volume: draft.volume, selection, losing, sheet: undefined}
 }
 
 const endDrag = (state: AppState): AppState => {
@@ -1362,6 +1380,8 @@ const endDrag = (state: AppState): AppState => {
     return {
         ...state,
         drag: undefined,
+        // The warning was about a drop that had not happened yet. It has now.
+        losing: 0,
         history: edit ? record(state.history, edit) : state.history
     }
 }

@@ -558,3 +558,46 @@ test('typing in a field is typing, not a shortcut', async ({page}) => {
     expect(now.cameras).toBe(was.cameras)
     expect(now.slice).toBeUndefined()
 })
+
+/**
+ * The warning a drop owes the artist, on screen while the button is still down.
+ *
+ * Move overwrites what it lands on and drops off the grid what will not fit, and a moment later
+ * both are invisible: the voxels are simply not in the picture and nothing says they ever were.
+ * Undo brings them back, but only for someone who noticed. Read off the bar rather than the state,
+ * because the state having the number and the artist never seeing it is the bug this closes.
+ */
+test('a drag that would destroy voxels says so before the button comes up', async ({page}) => {
+    const {on} = await start(page, 'move')
+    const warning = page.locator('.hint-losing')
+    const box = page.locator('.selection-box')
+
+    await page.mouse.move(on.x, on.y)
+    await page.mouse.down()
+    await expect(warning).toHaveCount(0)
+
+    // Walk into the model until something is in the way. A drop onto air must stay silent, so the
+    // sweep is what proves the warning is about the drop and not about dragging at all.
+    let said = ''
+    for (let step = 1; step <= 24 && said === ''; step += 1) {
+        await page.mouse.move(on.x - step * 4, on.y)
+        const state = await read(page)
+        const shown = await warning.count()
+        expect(shown, `at step ${String(step)} the bar must agree with the state`).toBe(
+            state.losing > 0 ? 1 : 0
+        )
+        if (state.losing > 0) {
+            said = (await warning.innerText()).trim()
+            expect(said).toContain(String(state.losing))
+            expect(said).toContain('destroyed')
+            // The box the artist is looking at carries the same warning.
+            await expect(box).toHaveAttribute('data-losing', 'true')
+        }
+    }
+    expect(said, 'no drag position destroyed anything').not.toBe('')
+
+    // The drop happens and the warning goes with it. It was about what was still avoidable.
+    await page.mouse.up()
+    await expect(warning).toHaveCount(0)
+    expect((await read(page)).losing).toBe(0)
+})

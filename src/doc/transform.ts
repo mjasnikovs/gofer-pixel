@@ -64,6 +64,51 @@ const put = (
 }
 
 /**
+ * How many voxels a drop would destroy — voxels that exist now and will not exist after it.
+ *
+ * Move and clone overwrite what they land on, and a move pushes off the edge of the grid whatever
+ * will not fit. Both are right: refusing the first would mean never sliding a voxel one step along
+ * a surface, and clamping the second would pile the model against the wall. Both are also invisible
+ * the moment they are done — a drop onto air looks exactly like a drop that ate three voxels — so
+ * they are counted before they happen and said out loud while the button is still down.
+ *
+ * Two victims, one number, because the artist is asking one question. A move that runs off the grid
+ * loses the voxel that was moving; a move onto an occupied cell loses the voxel that was standing
+ * there. Either way the model ends one lighter, and for a move this count is exactly that
+ * difference.
+ *
+ * `vacates` is where the two tools part. A move empties the cells it came from, so a destination
+ * inside the selection is a cell handed from one moving voxel to another and nothing is lost, and a
+ * destination off the grid takes its voxel with it. A copy empties nothing, so those same interior
+ * cells really are written over — and a copy that falls off the grid simply does not appear, which
+ * destroys nothing.
+ *
+ * Walks the selection, never the grid: this runs on every pointer move, beside a drag that already
+ * copies the whole volume once, and a second full pass for a warning would not be worth it.
+ */
+export const lossCount = (
+    volume: Volume,
+    selection: Selection,
+    delta: Cell,
+    vacates: boolean
+): number => {
+    const {sx, sy, sz} = volume
+    let count = 0
+    for (const index of selection) {
+        const [x, y, z] = cellOf(volume, index)
+        const [dx, dy, dz] = [x + delta[0], y + delta[1], z + delta[2]]
+        if (dx < 0 || dy < 0 || dz < 0 || dx >= sx || dy >= sy || dz >= sz) {
+            if (vacates) count += 1
+            continue
+        }
+        if (voxelAt(volume, dx, dy, dz) === 0) continue
+        if (vacates && selection.has(voxelIndex(volume, dx, dy, dz))) continue
+        count += 1
+    }
+    return count
+}
+
+/**
  * Move by whole voxels. Cells pushed off the edge of the grid are dropped, not wrapped and not
  * clamped into a pile against the wall.
  */

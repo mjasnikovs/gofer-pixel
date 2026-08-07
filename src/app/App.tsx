@@ -402,6 +402,7 @@ export const App = ({
                         camera={state.orbit.camera}
                         bounds={bounds}
                         band={state.band}
+                        losing={state.losing}
                     />
                     <AxisGizmo
                         volume={shown}
@@ -424,6 +425,7 @@ export const App = ({
                         tool={`${(state.tool[0] ?? '').toUpperCase()}${state.tool.slice(1)}`}
                         hover={state.hover}
                         height={volume.sz}
+                        losing={state.losing}
                         onCapture={capture}
                     />
                 </div>

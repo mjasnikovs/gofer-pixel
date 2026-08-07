@@ -27,6 +27,7 @@ export interface Handle {
         stroke: unknown
         slice: number | undefined
         clipboard: unknown
+        losing: number
     }
     dispatch: (action: unknown) => void
     firstFrame: Promise<void>
@@ -99,6 +100,7 @@ export interface Reading {
     cameras: number
     slice: number | undefined
     clipboard: boolean
+    losing: number
 }
 
 export const read = (page: Page): Promise<Reading> =>
@@ -126,6 +128,7 @@ export const read = (page: Page): Promise<Reading> =>
             zoom: state.orbit.camera.zoom,
             cameras: state.cameras.length,
             slice: state.slice,
-            clipboard: state.clipboard !== undefined
+            clipboard: state.clipboard !== undefined,
+            losing: state.losing
         }
     })

@@ -465,12 +465,15 @@ export const SelectionBox = ({
     volume,
     camera,
     bounds,
-    band
+    band,
+    losing = 0
 }: {
     volume: Volume
     camera: Camera
     bounds: {min: Vec3; max: Vec3} | undefined
     band: {x0: number; y0: number; x1: number; y1: number} | undefined
+    /** How many voxels the drag in progress would destroy, which turns the box the warning colour. */
+    losing?: number
 }) => {
     const {right, up, center} = basisFor(camera, volume, 1)
     const project = (p: Vec3): {x: number; y: number} => {
@@ -497,6 +500,7 @@ export const SelectionBox = ({
             {flat.length === 8 ?
                 <svg
                     className='selection-box overlay-plane'
+                    data-losing={losing > 0 || undefined}
                     viewBox={`${String(-half)} ${String(-half)} ${String(camera.zoom)} ${String(camera.zoom)}`}
                     preserveAspectRatio='xMidYMid slice'
                     aria-hidden='true'
@@ -655,6 +659,7 @@ export const HintBar = ({
     tool,
     hover,
     height,
+    losing,
     onCapture
 }: {
     tool: string
@@ -662,6 +667,8 @@ export const HintBar = ({
     hover: {cell: Cell; blocked: boolean} | undefined
     /** How tall the grid is, so the layer reads as a position rather than as a number. */
     height: number
+    /** How many voxels the drag in progress would destroy by landing. Zero when there is no drag. */
+    losing: number
     onCapture: () => void
 }) => (
     <div className='hints'>
@@ -669,6 +676,22 @@ export const HintBar = ({
             <MouseIcon />
             <Text type='supporting'>{tool}</Text>
         </span>
+        {/*
+         * What the drop will cost, while the button is still down.
+         *
+         * A move overwrites what it lands on and drops off the grid what will not fit, and both are
+         * invisible a moment later — the voxels are simply not in the picture, and nothing says they
+         * ever were. Undo brings them back, but only for an artist who noticed. It takes the front
+         * of the bar rather than a corner, because a warning nobody reads is the same as no warning,
+         * and it exists only while the drag does so there is nothing to tune out.
+         */}
+        {losing > 0 ?
+            <span className='hint hint-losing'>
+                <Text type='supporting'>
+                    {losing} {losing === 1 ? 'voxel' : 'voxels'} will be destroyed
+                </Text>
+            </span>
+        :   undefined}
         {/*
          * The cell under the cursor, and how high it is.
          *

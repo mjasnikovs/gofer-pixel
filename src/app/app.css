@@ -1019,6 +1019,11 @@ body,
     color: var(--color-accent);
 }
 
+/* The same warning the bar is showing, on the box the artist is actually looking at. */
+.selection-box[data-losing] {
+    color: var(--color-warning);
+}
+
 /*
  * Write, and the default the other four kinds override: the block the press would make, in the
  * loaded colour at a quarter strength, wireframed in accent.
@@ -1239,4 +1244,14 @@ body,
 
 .hint-cell[data-blocked] {
     opacity: 0.5;
+}
+
+/*
+ * What a drop is about to cost. Warning rather than danger: the artist asked for this and undo will
+ * take it back, so it is a number to read and not a mistake to feel bad about. It appears only while
+ * a drag is in flight, which is why it can afford to be the one coloured thing in the bar.
+ */
+.hint-losing {
+    color: var(--color-warning);
+    background: var(--color-warning-muted);
 }

@@ -9,6 +9,7 @@ import {
     duplicateCells,
     fitsAfter,
     flipCells,
+    lossCount,
     mirrorCells,
     moveCells,
     paintCells,
@@ -196,4 +197,48 @@ test('a symmetric write is one undo step, however many images it left', () => {
     expect(revertEdit(draft.volume, edit).data).toEqual(volume.data)
     // Undo puts the ownership back too, or a hidden object would come back visible.
     expect(revertEdit(draft.volume, edit).owner).toEqual(volume.owner)
+})
+
+/**
+ * What a drop would destroy, counted before it happens.
+ *
+ * A move overwrites whatever it lands on and says nothing, which is the one loss undo cannot make
+ * obvious: a move onto air and a move that ate three voxels look identical afterwards. Refusing it
+ * is not the answer — on a dense model the artist could never slide a voxel one step along a
+ * surface — so the count is the answer, and it has to be exact or it is worse than nothing.
+ *
+ * O(selection) rather than a scan of the grid: this runs on every pointer move, next to a drag that
+ * already copies the whole volume once, and doubling that bill for a warning is not a trade.
+ */
+test('a drop reports exactly how many voxels it would destroy', () => {
+    const volume = ell()
+    // A wall two steps to the right of the L, in its own colour so the loss is visible.
+    for (let y = 0; y < 3; y += 1) setVoxel(volume, 3, 1 + y, 0, 9)
+    const selection = selectColor(volume, 4)
+    expect(selection.size).toBe(3)
+
+    // Straight into the wall: every one of the three lands on a voxel that is not moving with it.
+    expect(lossCount(volume, selection, [2, 0, 0], true)).toBe(3)
+    // Along its own length: two of the three land on cells the L is vacating, and the third on air.
+    expect(lossCount(volume, selection, [0, 1, 0], true)).toBe(0)
+    // One step right is one voxel — the L's own foot, which is a different colour and not selected.
+    expect(lossCount(volume, selection, [1, 0, 0], true)).toBe(1)
+    // Away from everything.
+    expect(lossCount(volume, selection, [0, 0, 4], true)).toBe(0)
+    // Off the grid entirely: a move takes its voxels over the edge with it, which is the same loss
+    // wearing a different hat and belongs in the same number.
+    expect(lossCount(volume, selection, [-4, 0, 0], true)).toBe(3)
+
+    // A copy vacates nothing, so the cells the original sits on count too: sliding it along its own
+    // length now costs the two it used to be handed for free.
+    expect(lossCount(volume, selection, [0, 1, 0], false)).toBe(2)
+    expect(lossCount(volume, selection, [0, 0, 0], false)).toBe(3)
+    // A copy that falls off the grid simply does not appear, and destroys nothing on the way.
+    expect(lossCount(volume, selection, [-4, 0, 0], false)).toBe(0)
+
+    // And the count is the loss: the model really does end that many voxels lighter.
+    const draft = beginEdit(volume)
+    const before = occupied(volume)
+    moveCells(draft, selection, [2, 0, 0])
+    expect(occupied(draft.volume)).toBe(before - 3)
 })

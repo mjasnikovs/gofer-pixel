@@ -1479,3 +1479,58 @@ test('a footprint too large to draw arrives as a box instead', () => {
     expect(hover.cells).toHaveLength(0)
     expect(hover.bounds).toEqual({min: [0, 0, 0], max: [11, 11, 11]})
 })
+
+/**
+ * The warning a drag owes the artist.
+ *
+ * Move overwrites whatever it lands on and pushes off the grid whatever will not fit, and until
+ * this existed nothing said so: the voxels were gone from the picture before there was anything to
+ * notice. `losing` is live while the drag is, so the bar can say it *before* the button comes up,
+ * which is the only moment the artist can still call it off.
+ *
+ * The assertion is the whole contract and not a sample of it: for a move, the number has to be the
+ * difference the drop makes to how many voxels the model has. Swept over fifteen offsets, because
+ * the two ways to lose one — eaten by an occupied cell, carried off the edge — sit at different
+ * distances and either alone would pass a single-point test.
+ */
+test('a drag says how many voxels its landing would destroy, while it can still be called off', () => {
+    const state = armed('move')
+    const {column, row} = onModel(state)
+    const before = occupied(state.volume)
+    expect(state.losing).toBe(0)
+
+    const down = reduce(state, at('down', column, row))
+    expect(down.selection.size).toBe(1)
+    expect(down.losing).toBe(0)
+
+    const offsets = [
+        [1, 0],
+        [2, 0],
+        [3, 0],
+        [4, 0],
+        [-1, 0],
+        [-2, 0],
+        [-3, 0],
+        [0, 1],
+        [0, 2],
+        [0, 3],
+        [0, -1],
+        [0, -2],
+        [0, -3],
+        [2, 2],
+        [-2, -2]
+    ] as const
+
+    let sawALoss = false
+    for (const [dx, dy] of offsets) {
+        const landed = reduce(down, at('move', column + dx, row + dy))
+        const lost = before - occupied(landed.volume)
+        expect(landed.losing, `drag (${String(dx)}, ${String(dy)})`).toBe(lost)
+        if (lost > 0) sawALoss = true
+    }
+    // A test where nothing is ever lost proves only that zero equals zero.
+    expect(sawALoss).toBe(true)
+
+    // The gesture ends and the warning goes with it: it was about a drop, not about the document.
+    expect(reduce(down, at('up', column, row)).losing).toBe(0)
+})
