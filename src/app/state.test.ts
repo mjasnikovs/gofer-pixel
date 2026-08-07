@@ -558,6 +558,66 @@ test('the scale tool pulls the surface under the cursor, and pushing it back is 
     expect(reduce(done, {type: 'undo'}).volume.data).toEqual(state.volume.data)
 })
 
+test('a figure is redrawn from where the stroke started, not appended to', () => {
+    const state = reduce(armed('draw'), {type: 'brush', brush: {figure: 'rect', size: 1}})
+    const {column, row} = onModel(state)
+
+    const down = reduce(state, at('down', column, row))
+    const big = reduce(down, at('move', column + 28, row + 18))
+    const small = reduce(big, at('move', column + 6, row + 4))
+    const changed = (next: AppState): number =>
+        [...next.volume.data].filter((value, i) => value !== state.volume.data[i]).length
+
+    // Dragging back shrinks the rectangle. An appending stroke could only ever grow.
+    expect(changed(small)).toBeLessThan(changed(big))
+    // And the small one is exactly what one drag straight to that point would have drawn.
+    expect(small.volume.data).toEqual(reduce(down, at('move', column + 6, row + 4)).volume.data)
+
+    const done = reduce(small, at('up', column + 6, row + 4))
+    expect(done.history.past).toHaveLength(1)
+    expect(reduce(done, {type: 'undo'}).volume.data).toEqual(state.volume.data)
+})
+
+test('a plane lock overrides the face under the cursor', () => {
+    const free = armed('draw')
+    const {column, row} = onModel(free)
+
+    const byFace = reduce(free, at('down', column, row))
+    for (const axis of [0, 1, 2] as const) {
+        const locked = reduce(reduce(free, {type: 'plane', axis}), at('down', column, row))
+        expect(locked.stroke?.axis).toBe(axis)
+    }
+    // Without a lock it is whichever face the ray came in through, and one of the three is it.
+    expect([0, 1, 2]).toContain(byFace.stroke?.axis ?? -1)
+
+    expect(
+        reduce(reduce(free, {type: 'plane', axis: 0}), {type: 'plane', axis: undefined}).plane
+    ).toBeUndefined()
+})
+
+test('copy and paste put the block back one voxel up, selected and ready to drag', () => {
+    const picked = reduce(armed('move'), {type: 'select-color'})
+    const copied = reduce(picked, {type: 'copy'})
+    expect(copied.clipboard?.cells.length).toBe(picked.selection.size)
+    expect(copied.volume).toBe(picked.volume)
+
+    const pasted = reduce(copied, {type: 'paste'})
+    expect(pasted.history.past).toHaveLength(1)
+    expect(pasted.selection.size).toBeGreaterThan(0)
+    expect(reduce(pasted, {type: 'undo'}).volume.data).toEqual(picked.volume.data)
+
+    // Every pasted cell is one voxel above a cell that was copied.
+    const {sx, sy} = pasted.volume
+    for (const index of pasted.selection) {
+        expect(copied.selection.has(index - sx * sy)).toBe(true)
+    }
+
+    // Nothing on the clipboard is nothing to paste.
+    const bare = armed('move')
+    expect(reduce(bare, {type: 'paste'})).toBe(bare)
+    expect(reduce(bare, {type: 'copy'})).toBe(bare)
+})
+
 test('the chrome settings move without touching the render or the sheet', () => {
     const baked = reduce(fresh(), {type: 'bake'})
     const after = reduce(

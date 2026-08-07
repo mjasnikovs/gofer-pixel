@@ -928,6 +928,31 @@ body,
     color: var(--color-text-primary);
 }
 
+/* ---- figures ---- */
+
+.figure-row {
+    display: flex;
+    gap: 4px;
+}
+
+.figure {
+    flex: 1;
+    height: 24px;
+    padding: 0;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-small);
+    background: var(--color-background-subtle);
+    color: var(--color-text-secondary);
+    font-size: var(--font-size-supporting);
+    cursor: pointer;
+}
+
+.figure[data-selected] {
+    border-color: var(--color-accent-default);
+    background: var(--color-accent-subtle);
+    color: var(--color-text-accent);
+}
+
 /* ---- symmetry ---- */
 
 .symmetry-row {

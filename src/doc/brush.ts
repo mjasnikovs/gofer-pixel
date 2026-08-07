@@ -1,4 +1,5 @@
 import {FACE_Z_POS} from '../render/faces'
+import type {Figure} from './figures'
 
 /**
  * The brush of `docs/editor.png`: a kind, a size and one of four footprints.
@@ -20,13 +21,28 @@ export interface Brush {
     readonly kind: BrushKind
     readonly size: number
     readonly shape: Shape
+    /**
+     * What the stroke draws between its two ends: freehand, or one of the pixel-editor figures of
+     * `FEATURESET.md` §5. The footprint above is stamped on every cell of whichever it is.
+     */
+    readonly figure: Figure
 }
 
 /** A cell of the footprint, relative to the voxel under the cursor. */
 export type Offset = readonly [number, number, number]
 
-/** Which axis a face code names: `0` = x, `1` = y, `2` = z. Face codes are 1-based and paired. */
-export const faceAxis = (face: number): number => Math.max(0, (face - 1) >> 1)
+/**
+ * Which axis a face code names: `0` = x, `1` = y, `2` = z. Face codes are 1-based and paired.
+ *
+ * The literal union rather than `number`, because indexing a three-tuple with a plain `number`
+ * yields `number | undefined` under `noUncheckedIndexedAccess`, and every axis-indexed line in the
+ * transforms would otherwise need a fallback that can never happen.
+ */
+export type Axis = 0 | 1 | 2
+
+const FACE_AXIS: readonly Axis[] = [0, 0, 0, 1, 1, 2, 2]
+
+export const faceAxis = (face: number): Axis => FACE_AXIS[face] ?? 0
 
 /**
  * Where a run of `size` cells sits around the cursor.

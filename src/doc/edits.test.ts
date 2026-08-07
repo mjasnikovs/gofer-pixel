@@ -19,6 +19,7 @@ const brush = (over: Partial<Brush> = {}): Brush => ({
     kind: 'voxel',
     size: 1,
     shape: 'square',
+    figure: 'free',
     ...over
 })
 

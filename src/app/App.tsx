@@ -28,8 +28,9 @@ import {handle} from './handle'
  *
  * There is no state here. Everything is `reduce` in `state.ts`, which is why the interesting tests
  * are 1 ms functions rather than a browser driving a UI.
+ *
+ * Arrow keys move the selection by one voxel along a grid axis; see the key handler for Shift.
  */
-/** Arrow keys move the selection by one voxel along a grid axis. See the handler for Shift. */
 const NUDGES: Record<string, readonly [number, number, number] | undefined> = {
     ArrowRight: [1, 0, 0],
     ArrowLeft: [-1, 0, 0],
@@ -90,9 +91,12 @@ export const App = ({volume: source, name}: {volume: Volume; name: string}) => {
                 && (target.isContentEditable || ['INPUT', 'TEXTAREA'].includes(target.tagName))
             if (isTyping) return
             if (event.metaKey || event.ctrlKey) {
-                if (event.key.toLowerCase() !== 'z') return
+                const key = event.key.toLowerCase()
+                if (key === 'z') dispatch({type: event.shiftKey ? 'redo' : 'undo'})
+                else if (key === 'c') dispatch({type: 'copy'})
+                else if (key === 'v') dispatch({type: 'paste'})
+                else return
                 event.preventDefault()
-                dispatch({type: event.shiftKey ? 'redo' : 'undo'})
                 return
             }
             if (event.altKey) return
@@ -231,6 +235,7 @@ export const App = ({volume: source, name}: {volume: Volume; name: string}) => {
                         voxelSize={Math.max(1, Math.round(state.cell / state.orbit.camera.zoom))}
                         symmetry={state.symmetry}
                         canRadial={canRadial(volume)}
+                        plane={state.plane}
                         onGrid={on => {
                             dispatch({type: 'grid', on})
                         }}
@@ -239,6 +244,9 @@ export const App = ({volume: source, name}: {volume: Volume; name: string}) => {
                         }}
                         onSymmetry={(axis, on) => {
                             dispatch({type: 'symmetry', axis, on})
+                        }}
+                        onPlane={axis => {
+                            dispatch({type: 'plane', axis})
                         }}
                     />
                 </div>

@@ -3,6 +3,7 @@ import {
     faceAxis,
     MAX_BRUSH,
     SHAPES,
+    type Axis,
     type Brush,
     type BrushKind,
     type Offset,
@@ -10,9 +11,11 @@ import {
 } from '../doc/brush'
 import {captureCamera, eightDirections, ISOMETRIC_PITCH, type NamedCamera} from '../doc/cameras'
 import {beginEdit, commitEdit, fillRegion, strokeCells, writeCells, type Draft} from '../doc/edits'
+import {figureCells} from '../doc/figures'
 import {EMPTY_HISTORY, record, redo, undo, type History} from '../doc/history'
 import {firstColor} from '../doc/palette'
 import {
+    cellOf,
     EMPTY_SELECTION,
     grow,
     selectColor,
@@ -20,6 +23,7 @@ import {
     selectObject,
     selectRect,
     facePatch,
+    selectionBounds,
     selectVoxel,
     shrink,
     type Cell,
@@ -36,8 +40,8 @@ import {
     mirrorCells,
     moveCells,
     paintCells,
-    rotateCells,
-    type Axis
+    pasteCells,
+    rotateCells
 } from '../doc/transform'
 import {basisFor, createCamera, type Camera} from '../render/camera'
 import {FACE_STEP} from '../render/faces'
@@ -141,6 +145,18 @@ export interface Drag {
     readonly y: number
 }
 
+/**
+ * What Copy took: the values, as offsets from the corner of the box they filled.
+ *
+ * Offsets rather than absolute cells, so a paste can land anywhere. `at` is where they came from,
+ * which is where a paste puts them back — one voxel up, so the copy is visible instead of landing
+ * exactly on top of the original and looking like nothing happened.
+ */
+export interface Clipboard {
+    readonly at: Cell
+    readonly cells: readonly {offset: Cell; value: number}[]
+}
+
 /** A rubber band while the pointer is down, in the viewport's own pixels. */
 export interface Band {
     readonly x0: number
@@ -159,13 +175,20 @@ export interface Band {
  */
 export interface Stroke {
     readonly draft: Draft
+    /**
+     * The document the stroke opened on. A figure is redrawn from here on every move — a rectangle
+     * that grew by appending would leave every intermediate rectangle behind it.
+     */
+    readonly base: Volume
+    /** Where the pointer went down. One end of the figure; the cursor is the other. */
+    readonly origin: Cell
     /** `0` = x, `1` = y, `2` = z — the axis the drawing plane is perpendicular to. */
-    readonly axis: number
+    readonly axis: Axis
     readonly layer: number
     /** The face the first click struck, which is what orients a flat brush. */
     readonly face: number
     readonly value: number
-    readonly at: readonly [number, number, number]
+    readonly at: Cell
 }
 
 export interface AppState {
@@ -199,6 +222,13 @@ export interface AppState {
     readonly drag: Drag | undefined
     /** Draw-time mirroring. Writes real voxels as the stroke happens — see `doc/symmetry.ts`. */
     readonly symmetry: Symmetry
+    /**
+     * Lock drawing to one plane of the grid rather than to the face under the cursor
+     * (`FEATURESET.md` §5). `undefined` is the default: the face you click is the canvas.
+     */
+    readonly plane: Axis | undefined
+    /** What Copy took, as offsets from the corner of what was selected, plus that corner. */
+    readonly clipboard: Clipboard | undefined
 
     readonly tool: Tool
     readonly brush: Brush
@@ -223,6 +253,9 @@ export type AppAction =
     | {type: 'clear-selection'}
     | {type: 'transform'; op: TransformOp}
     | {type: 'symmetry'; axis: keyof Symmetry; on: boolean}
+    | {type: 'plane'; axis: Axis | undefined}
+    | {type: 'copy'}
+    | {type: 'paste'}
     | {type: 'select'; id: string}
     | {type: 'eight-directions'}
     | {type: 'capture'}
@@ -277,8 +310,10 @@ export const initialState = (volume: Volume): AppState => {
         band: undefined,
         drag: undefined,
         symmetry: NO_SYMMETRY,
+        plane: undefined,
+        clipboard: undefined,
         tool: 'draw',
-        brush: {kind: 'voxel', size: 2, shape: 'square'},
+        brush: {kind: 'voxel', size: 2, shape: 'square', figure: 'free'},
         color: firstColor(volume),
         grid: true,
         snap: true,
@@ -357,12 +392,28 @@ const beginStroke = (state: AppState, event: ViewportPointer): AppState => {
 
     const value = tool === 'erase' ? 0 : color
     const draft = beginEdit(volume)
-    const axis = faceAxis(hit.face)
-    writeCells(draft, mirrored(state, strokeCells(brush, hit.face, cell, cell)), value)
+    /*
+     * With no plane lock the canvas is the face that was clicked — `FEATURESET.md` §5's "click a
+     * face to temporarily make it your canvas", which falls out of the stroke pinning to a layer.
+     * With a lock it is that plane of the grid, at whatever layer the click landed on, so drawing
+     * stays flat across a surface that is not.
+     */
+    const axis = state.plane ?? faceAxis(hit.face)
+    const face = state.plane === undefined ? hit.face : axis * 2 + 1
+    writeCells(draft, mirrored(state, strokeCells(brush, face, cell, cell)), value)
     return {
         ...state,
         volume: live(draft),
-        stroke: {draft, axis, layer: cell[axis] ?? 0, face: hit.face, value, at: cell},
+        stroke: {
+            draft,
+            base: volume,
+            origin: cell,
+            axis,
+            layer: cell[axis],
+            face,
+            value,
+            at: cell
+        },
         sheet: undefined
     }
 }
@@ -383,9 +434,25 @@ const continueStroke = (state: AppState, event: ViewportPointer): AppState => {
     if (!cell) return state
     const [x, y, z] = cell
     if (x === stroke.at[0] && y === stroke.at[1] && z === stroke.at[2]) return state
-    const cells = strokeCells(state.brush, stroke.face, stroke.at, cell)
-    writeCells(stroke.draft, mirrored(state, cells), stroke.value)
-    return {...state, volume: live(stroke.draft), stroke: {...stroke, at: cell}}
+
+    /*
+     * Freehand appends to the draft it already has. A figure is redrawn from the document the
+     * stroke opened on, because a rectangle that grew by appending would leave every intermediate
+     * rectangle behind it — and because dragging back the way you came has to shrink the figure,
+     * which appending cannot do.
+     */
+    if (state.brush.figure === 'free') {
+        const cells = strokeCells(state.brush, stroke.face, stroke.at, cell)
+        writeCells(stroke.draft, mirrored(state, cells), stroke.value)
+        return {...state, volume: live(stroke.draft), stroke: {...stroke, at: cell}}
+    }
+
+    const draft = beginEdit(stroke.base)
+    const cells = figureCells(state.brush.figure, stroke.origin, cell, stroke.axis).flatMap(spot =>
+        strokeCells(state.brush, stroke.face, spot, spot)
+    )
+    writeCells(draft, mirrored(state, cells), stroke.value)
+    return {...state, volume: live(draft), stroke: {...stroke, draft, at: cell}}
 }
 
 /**
@@ -428,7 +495,7 @@ const beginSelect = (state: AppState, event: ViewportPointer): AppState => {
                 selection: patch,
                 from: [hit.x, hit.y, hit.z],
                 axis: faceAxis(hit.face),
-                layer: hit[AXIS_KEYS[faceAxis(hit.face)] ?? 'x'],
+                layer: hit[AXIS_KEYS[faceAxis(hit.face)]],
                 face: hit.face,
                 x: event.x,
                 y: event.y
@@ -464,7 +531,7 @@ const beginSelect = (state: AppState, event: ViewportPointer): AppState => {
             // The plane of the face that was grabbed: dragging follows the surface under the hand.
             from: [hit.x, hit.y, hit.z],
             axis,
-            layer: hit[AXIS_KEYS[axis] ?? 'x'],
+            layer: hit[AXIS_KEYS[axis]],
             face: hit.face,
             x: event.x,
             y: event.y
@@ -697,6 +764,44 @@ export const reduce = (state: AppState, action: AppAction): AppState => {
              * additive and may legitimately clip.
              */
             if (KEEPS_COUNT.has(op.kind) && selection.size !== state.selection.size) return state
+            const edit = commitEdit(draft)
+            if (!edit) return state
+            return {
+                ...state,
+                volume: draft.volume,
+                selection,
+                history: record(state.history, edit),
+                sheet: undefined
+            }
+        }
+
+        case 'plane':
+            return {...state, plane: action.axis}
+
+        case 'copy': {
+            const box = selectionBounds(state.volume, state.selection)
+            if (!box) return state
+            const cells = [...state.selection].map(index => {
+                const [x, y, z] = cellOf(state.volume, index)
+                return {
+                    offset: [x - box.min[0], y - box.min[1], z - box.min[2]] as Cell,
+                    value: state.volume.data[index] ?? 0
+                }
+            })
+            return {...state, clipboard: {at: box.min, cells}}
+        }
+
+        case 'paste': {
+            const {clipboard} = state
+            if (!clipboard) return state
+            const draft = beginEdit(state.volume)
+            // One voxel up from where it was copied. Pasting exactly on top of the original looks
+            // like nothing happened, and the copy comes back selected so it can be dragged.
+            const selection = pasteCells(draft, clipboard.cells, [
+                clipboard.at[0],
+                clipboard.at[1],
+                clipboard.at[2] + 1
+            ])
             const edit = commitEdit(draft)
             if (!edit) return state
             return {

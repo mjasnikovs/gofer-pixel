@@ -1,4 +1,5 @@
 import {voxelAt, voxelIndex, type Volume} from '../render/volume'
+import type {Axis} from './brush'
 import {writeVoxel, type Draft} from './edits'
 import {cellOf, EMPTY_SELECTION, selectionBounds, type Cell, type Selection} from './selection'
 
@@ -18,7 +19,7 @@ import {cellOf, EMPTY_SELECTION, selectionBounds, type Cell, type Selection} fro
  * all of them read the whole selection out first: a move that wrote as it went would overwrite the
  * cells it had not read yet whenever source and destination overlap.
  */
-export type Axis = 0 | 1 | 2
+export type {Axis}
 
 const snapshot = (draft: Draft, selection: Selection): Map<number, number> => {
     const values = new Map<number, number>()
@@ -223,6 +224,20 @@ export const extrudeCells = (
     })
     return new Set(behind.filter(index => (draft.volume.data[index] ?? 0) !== 0))
 }
+
+/** Put a copied block down with its corner at `at`, and select what landed. */
+export const pasteCells = (
+    draft: Draft,
+    cells: readonly {offset: Cell; value: number}[],
+    at: Cell
+): Selection =>
+    put(
+        draft,
+        cells.map(({offset, value}) => ({
+            cell: [at[0] + offset[0], at[1] + offset[1], at[2] + offset[2]] as Cell,
+            value
+        }))
+    )
 
 export const deleteCells = (draft: Draft, selection: Selection): Selection => {
     clear(draft, selection)

@@ -13,6 +13,7 @@ import {
     RotateIcon,
     ScaleIcon
 } from './icons'
+import type {Axis} from '../doc/brush'
 import type {Tool} from './state'
 
 /**
@@ -170,24 +171,35 @@ const SymmetryButton = ({
     </button>
 )
 
+const PLANES: readonly {axis: Axis | undefined; label: string; title: string}[] = [
+    {axis: undefined, label: 'Face', title: 'Draw on the face under the cursor'},
+    {axis: 0, label: 'YZ', title: 'Lock drawing to the YZ plane'},
+    {axis: 1, label: 'XZ', title: 'Lock drawing to the XZ plane'},
+    {axis: 2, label: 'XY', title: 'Lock drawing to the XY plane'}
+]
+
 export const GridPanel = ({
     grid,
     snap,
     voxelSize,
     symmetry,
     canRadial,
+    plane,
     onGrid,
     onSnap,
-    onSymmetry
+    onSymmetry,
+    onPlane
 }: {
     grid: boolean
     snap: boolean
     voxelSize: number
     symmetry: {x: boolean; y: boolean; z: boolean; radial: boolean}
     canRadial: boolean
+    plane: Axis | undefined
     onGrid: (on: boolean) => void
     onSnap: (on: boolean) => void
     onSymmetry: (axis: 'x' | 'y' | 'z' | 'radial', on: boolean) => void
+    onPlane: (axis: Axis | undefined) => void
 }) => (
     <div className='panel snap-panel'>
         <div className='snap-row'>
@@ -238,6 +250,42 @@ export const GridPanel = ({
                         onSymmetry('radial', on)
                     }}
                 />
+            </span>
+        </div>
+        {/*
+         * Which plane a stroke is flattened onto — `FEATURESET.md` §5. "Face" is the default and
+         * means the canvas is whatever surface the cursor is on, which is where the stroke pins
+         * itself anyway; the other three override that with a plane of the grid.
+         */}
+        <div className='snap-size'>
+            <Text
+                type='supporting'
+                color='disabled'
+            >
+                Plane
+            </Text>
+            <span className='spacer' />
+            <span
+                className='symmetry-row'
+                role='radiogroup'
+                aria-label='Drawing plane'
+            >
+                {PLANES.map(entry => (
+                    <button
+                        key={entry.label}
+                        type='button'
+                        role='radio'
+                        aria-checked={plane === entry.axis}
+                        aria-label={entry.title}
+                        className='symmetry-axis'
+                        data-on={plane === entry.axis || undefined}
+                        onClick={() => {
+                            onPlane(entry.axis)
+                        }}
+                    >
+                        {entry.label}
+                    </button>
+                ))}
             </span>
         </div>
         <div className='snap-size'>

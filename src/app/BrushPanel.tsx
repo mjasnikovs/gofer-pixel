@@ -6,6 +6,7 @@ import {colorCss, projectPalette, SWATCH_COLUMNS, type Swatch} from '../doc/pale
 import type {Volume} from '../render/volume'
 import {CircleIcon, CubeIcon, MinusIcon, PickIcon, PlusIcon, RingIcon, SquareIcon} from './icons'
 import {SectionHead} from './SectionHead'
+import {FIGURES, type Figure} from '../doc/figures'
 import {BRUSH_KINDS, MAX_BRUSH, SHAPES, type Brush, type Shape} from './state'
 
 /**
@@ -16,8 +17,8 @@ import {BRUSH_KINDS, MAX_BRUSH, SHAPES, type Brush, type Shape} from './state'
  * grid is always the model, which is what a palette panel is for. Inventing a grid of pretty
  * swatches would have looked closer to the mockup and told the artist nothing.
  *
- * Nothing here writes a voxel. The brush and the loaded colour are real state that a stroke will
- * read once strokes exist; drawing itself is on the proof of concept's do-not-build list.
+ * The brush, the figure and the loaded colour are what a stroke reads: the footprint is stamped on
+ * every cell the figure covers, and the colour is what gets written into them.
  */
 const SHAPE_ICONS: Record<Shape, ReactNode> = {
     square: <SquareIcon />,
@@ -31,6 +32,13 @@ const SHAPE_LABELS: Record<Shape, string> = {
     circle: 'Round brush',
     ring: 'Hollow brush',
     cube: 'Cube brush'
+}
+
+const FIGURE_LABELS: Record<Figure, string> = {
+    free: 'Free',
+    line: 'Line',
+    rect: 'Rect',
+    ellipse: 'Ellipse'
 }
 
 const KIND_LABELS: Record<(typeof BRUSH_KINDS)[number], string> = {
@@ -168,6 +176,40 @@ export const BrushPanel = ({
                             }}
                         >
                             {SHAPE_ICONS[shape]}
+                        </button>
+                    ))}
+                </div>
+
+                {/*
+                 * What a drag draws between its two ends — `FEATURESET.md` §5. Words rather than
+                 * icons: a line, a rectangle and an ellipse have no icon that beats their own name
+                 * at this size, and the Shape row above already spends the icons it has.
+                 */}
+                <Text
+                    type='supporting'
+                    color='disabled'
+                >
+                    Figure
+                </Text>
+                <div
+                    className='figure-row'
+                    role='radiogroup'
+                    aria-label='Figure'
+                >
+                    {FIGURES.map(figure => (
+                        <button
+                            key={figure}
+                            type='button'
+                            role='radio'
+                            aria-checked={figure === brush.figure}
+                            aria-label={FIGURE_LABELS[figure]}
+                            className='figure'
+                            data-selected={figure === brush.figure || undefined}
+                            onClick={() => {
+                                onBrush({figure})
+                            }}
+                        >
+                            {FIGURE_LABELS[figure]}
                         </button>
                     ))}
                 </div>
