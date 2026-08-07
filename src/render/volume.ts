@@ -25,6 +25,20 @@ export interface Volume {
      * deliberately does not have one.
      */
     readonly emissive: Uint8Array
+    /**
+     * Which object owns each cell, 1-based. `0` is unowned, and an empty cell is always unowned.
+     *
+     * `FEATURESET.md` §8 asks for objects instead of one giant volume. This is that, as a second
+     * grid rather than as a list of grids: an object is a *named set of cells* of the one world
+     * grid, so hiding, locking and soloing are lookups, and every tool, transform, selection and
+     * symmetry plane already written keeps working in world coordinates. A list of grids at
+     * integer offsets would have to be composited for every ray, and the two raycasters have to
+     * keep agreeing byte for byte while it happened.
+     *
+     * It lives on the volume rather than beside it because it is diffed, drafted and undone
+     * exactly like `data` is, and two arrays that must move together should not be able to drift.
+     */
+    readonly owner: Uint8Array
 }
 
 export const createVolume = (sx: number, sy: number, sz: number, palette?: Uint8Array): Volume => ({
@@ -33,7 +47,8 @@ export const createVolume = (sx: number, sy: number, sz: number, palette?: Uint8
     sz,
     data: new Uint8Array(sx * sy * sz),
     palette: palette ?? new Uint8Array(256 * 4),
-    emissive: new Uint8Array(256)
+    emissive: new Uint8Array(256),
+    owner: new Uint8Array(sx * sy * sz)
 })
 
 export const voxelIndex = ({sx, sy}: Volume, x: number, y: number, z: number): number =>

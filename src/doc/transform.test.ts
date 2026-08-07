@@ -1,6 +1,6 @@
 import {expect, test} from 'bun:test'
-import {createVolume, setVoxel, voxelAt, voxelIndex, type Volume} from '../render/volume'
-import {beginEdit, commitEdit, revertEdit} from './edits'
+import {createVolume, setVoxel, voxelAt, type Volume} from '../render/volume'
+import {beginEdit, commitEdit, revertEdit, writeVoxel} from './edits'
 import {cellOf, selectBox, selectColor, selectionBounds, type Selection} from './selection'
 import {canRadial, NO_SYMMETRY, symmetricCells, symmetryMaps} from './symmetry'
 import {
@@ -188,15 +188,12 @@ test('a symmetric write is one undo step, however many images it left', () => {
     const volume = createVolume(8, 8, 8, new Uint8Array(256 * 4))
     const draft = beginEdit(volume)
     for (const [x, y, z] of symmetricCells(volume, {...NO_SYMMETRY, x: true, y: true}, [1, 1, 1])) {
-        draft.volume.data[voxelIndex(volume, x, y, z)] = 5
-        draft.before.set(voxelIndex(volume, x, y, z), 0)
+        writeVoxel(draft, x, y, z, 5)
     }
     const edit = commitEdit(draft)
-    expect(edit?.at).toHaveLength(4)
-    expect(
-        revertEdit(
-            draft.volume,
-            edit ?? {at: new Int32Array(), from: new Uint8Array(), to: new Uint8Array()}
-        ).data
-    ).toEqual(volume.data)
+    if (!edit) throw new Error('the symmetric write changed cells')
+    expect(edit.at).toHaveLength(4)
+    expect(revertEdit(draft.volume, edit).data).toEqual(volume.data)
+    // Undo puts the ownership back too, or a hidden object would come back visible.
+    expect(revertEdit(draft.volume, edit).owner).toEqual(volume.owner)
 })

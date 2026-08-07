@@ -17,32 +17,75 @@ export interface Edit {
     readonly at: Int32Array
     readonly from: Uint8Array
     readonly to: Uint8Array
+    /** Which object owned each cell before and after. Moves carry ownership with the voxels. */
+    readonly ownerFrom: Uint8Array
+    readonly ownerTo: Uint8Array
 }
 
 export interface Draft {
     /** The volume as it now stands. Shares nothing with the volume the draft was opened on. */
     readonly volume: Volume
+    /** Which object a *new* voxel joins. A transform overrides it per cell; see `writeOwned`. */
+    readonly object: number
+    /**
+     * Objects whose cells this draft may not touch — `FEATURESET.md` §28's lock, enforced at the
+     * one place that writes rather than at each of the dozen tools that ask for a write.
+     */
+    readonly locked: ReadonlySet<number>
     /** Cell index → the value it held before this stroke touched it. */
     readonly before: Map<number, number>
+    /** The same, for ownership. */
+    readonly beforeOwner: Map<number, number>
 }
 
-export const beginEdit = (volume: Volume): Draft => ({
-    volume: {...volume, data: new Uint8Array(volume.data)},
-    before: new Map()
+export const NOTHING_LOCKED: ReadonlySet<number> = new Set<number>()
+
+export const beginEdit = (volume: Volume, object = 1, locked = NOTHING_LOCKED): Draft => ({
+    volume: {
+        ...volume,
+        data: new Uint8Array(volume.data),
+        owner: new Uint8Array(volume.owner)
+    },
+    object,
+    locked,
+    before: new Map(),
+    beforeOwner: new Map()
 })
 
-/** `0` erases. Out-of-bounds writes are dropped, so a brush may hang off the edge of the grid. */
+/**
+ * `0` erases. Out-of-bounds writes are dropped, so a brush may hang off the edge of the grid, and a
+ * cell belonging to a locked object is dropped too.
+ */
 export const writeVoxel = (draft: Draft, x: number, y: number, z: number, value: number): void => {
-    const {volume, before} = draft
-    const {sx, sy, sz, data} = volume
+    writeOwned(draft, x, y, z, value, value === 0 ? 0 : draft.object)
+}
+
+/** A write that names the object the cell joins, for transforms that carry ownership with them. */
+export const writeOwned = (
+    draft: Draft,
+    x: number,
+    y: number,
+    z: number,
+    value: number,
+    object: number
+): void => {
+    const {volume, before, beforeOwner, locked} = draft
+    const {sx, sy, sz, data, owner} = volume
     if (x < 0 || y < 0 || z < 0 || x >= sx || y >= sy || z >= sz) return
     const index = voxelIndex(volume, x, y, z)
+    const wasOwner = owner[index] ?? 0
+    if (locked.has(wasOwner)) return
     const was = data[index] ?? 0
-    if (was === value) return
+    const nowOwner = value === 0 ? 0 : object
+    if (was === value && wasOwner === nowOwner) return
     // Only the *first* value seen is kept: a stroke that crosses itself must undo to where it
     // started, not to the middle of itself.
-    if (!before.has(index)) before.set(index, was)
+    if (!before.has(index)) {
+        before.set(index, was)
+        beforeOwner.set(index, wasOwner)
+    }
     data[index] = value
+    owner[index] = nowOwner
 }
 
 /**
@@ -185,27 +228,46 @@ export const fillRegion = (draft: Draft, x: number, y: number, z: number, value:
 
 /** `undefined` when the stroke changed nothing, which is what keeps a stray click out of undo. */
 export const commitEdit = (draft: Draft): Edit | undefined => {
-    const {volume, before} = draft
+    const {volume, before, beforeOwner} = draft
     const at: number[] = []
     const from: number[] = []
     const to: number[] = []
+    const ownerFrom: number[] = []
+    const ownerTo: number[] = []
     for (const [index, was] of before) {
         const now = volume.data[index] ?? 0
-        if (now === was) continue
+        const ownedNow = volume.owner[index] ?? 0
+        const ownedWas = beforeOwner.get(index) ?? 0
+        if (now === was && ownedNow === ownedWas) continue
         at.push(index)
         from.push(was)
         to.push(now)
+        ownerFrom.push(ownedWas)
+        ownerTo.push(ownedNow)
     }
     if (at.length === 0) return undefined
-    return {at: Int32Array.from(at), from: Uint8Array.from(from), to: Uint8Array.from(to)}
+    return {
+        at: Int32Array.from(at),
+        from: Uint8Array.from(from),
+        to: Uint8Array.from(to),
+        ownerFrom: Uint8Array.from(ownerFrom),
+        ownerTo: Uint8Array.from(ownerTo)
+    }
 }
 
-const replay = (volume: Volume, edit: Edit, values: Uint8Array): Volume => {
+const replay = (volume: Volume, edit: Edit, values: Uint8Array, owners: Uint8Array): Volume => {
     const data = new Uint8Array(volume.data)
-    for (let i = 0; i < edit.at.length; i += 1) data[edit.at[i] ?? 0] = values[i] ?? 0
-    return {...volume, data}
+    const owner = new Uint8Array(volume.owner)
+    for (let i = 0; i < edit.at.length; i += 1) {
+        const index = edit.at[i] ?? 0
+        data[index] = values[i] ?? 0
+        owner[index] = owners[i] ?? 0
+    }
+    return {...volume, data, owner}
 }
 
-export const applyEdit = (volume: Volume, edit: Edit): Volume => replay(volume, edit, edit.to)
+export const applyEdit = (volume: Volume, edit: Edit): Volume =>
+    replay(volume, edit, edit.to, edit.ownerTo)
 
-export const revertEdit = (volume: Volume, edit: Edit): Volume => replay(volume, edit, edit.from)
+export const revertEdit = (volume: Volume, edit: Edit): Volume =>
+    replay(volume, edit, edit.from, edit.ownerFrom)

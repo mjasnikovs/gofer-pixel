@@ -9,9 +9,31 @@ import {
     type Offset,
     type Shape
 } from '../doc/brush'
-import {captureCamera, eightDirections, ISOMETRIC_PITCH, type NamedCamera} from '../doc/cameras'
+import {
+    captureCamera,
+    eightDirections,
+    focusOn,
+    ISOMETRIC_PITCH,
+    type NamedCamera
+} from '../doc/cameras'
 import {beginEdit, commitEdit, fillRegion, strokeCells, writeCells, type Draft} from '../doc/edits'
 import {figureCells} from '../doc/figures'
+import {
+    addObject,
+    initialObjects,
+    lockedIds,
+    moveObject,
+    objectBounds,
+    objectCells,
+    ownerAt,
+    removeObject,
+    renameObject,
+    setHidden,
+    setLocked,
+    shownVolume,
+    soloObject,
+    type Objects
+} from '../doc/objects'
 import {EMPTY_HISTORY, record, redo, undo, type History} from '../doc/history'
 import {firstColor} from '../doc/palette'
 import {
@@ -114,6 +136,20 @@ export type TransformOp =
     | {kind: 'array'; delta: Cell; count: number}
     | {kind: 'delete'}
     | {kind: 'paint'; color: number}
+
+/**
+ * What the objects panel can do. One action for the lot, for the same reason `TransformOp` is one:
+ * `remove` is the only one that touches voxels, and every other case would be a chance to forget.
+ */
+export type ObjectOp =
+    | {kind: 'add'}
+    | {kind: 'active'; id: number}
+    | {kind: 'rename'; id: number; name: string}
+    | {kind: 'hidden'; id: number; on: boolean}
+    | {kind: 'locked'; id: number; on: boolean}
+    | {kind: 'solo'; id: number}
+    | {kind: 'remove'; id: number}
+    | {kind: 'reorder'; id: number; to: number}
 
 /** The transforms that must end with as many voxels as they started with. See the reducer. */
 const KEEPS_COUNT: ReadonlySet<TransformOp['kind']> = new Set(['move', 'rotate', 'flip'])
@@ -222,6 +258,10 @@ export interface AppState {
     readonly drag: Drag | undefined
     /** Draw-time mirroring. Writes real voxels as the stroke happens — see `doc/symmetry.ts`. */
     readonly symmetry: Symmetry
+    /** The flat list of named objects over the one grid — see `doc/objects.ts`. */
+    readonly objects: Objects
+    /** What the objects panel's search box holds. Chrome, not document. */
+    readonly search: string
     /**
      * Lock drawing to one plane of the grid rather than to the face under the cursor
      * (`FEATURESET.md` §5). `undefined` is the default: the face you click is the canvas.
@@ -256,6 +296,9 @@ export type AppAction =
     | {type: 'plane'; axis: Axis | undefined}
     | {type: 'copy'}
     | {type: 'paste'}
+    | {type: 'object'; op: ObjectOp}
+    | {type: 'focus'}
+    | {type: 'search'; query: string}
     | {type: 'select'; id: string}
     | {type: 'eight-directions'}
     | {type: 'capture'}
@@ -322,6 +365,8 @@ export const initialState = (volume: Volume): AppState => {
         band: undefined,
         drag: undefined,
         symmetry: NO_SYMMETRY,
+        objects: initialObjects(volume),
+        search: '',
         plane: undefined,
         clipboard: undefined,
         tool: 'draw',
@@ -352,6 +397,19 @@ const withCamera = (state: AppState, camera: Camera, selected: string | undefine
 const live = (draft: Draft): Volume => ({...draft.volume})
 
 /**
+ * The grid as the artist sees it: hidden objects emptied out of it.
+ *
+ * Everything that renders, picks or exports goes through here, so what is on screen is what can be
+ * clicked and what gets written. It returns the volume itself when nothing is hidden, which is the
+ * usual case and the reason this is cheap enough to call per pointer event.
+ */
+const visible = (state: AppState): Volume => shownVolume(state.volume, state.objects)
+
+/** A draft that knows which object new voxels join and which objects refuse to be touched. */
+const open = (state: AppState, volume: Volume = state.volume): Draft =>
+    beginEdit(volume, state.objects.active, lockedIds(state.objects))
+
+/**
  * Every cell of a stroke, plus every image of every cell.
  *
  * Cells, not stamp centres. An even-sized brush grows towards `+`, so it is not its own mirror
@@ -366,10 +424,12 @@ const mirrored = (state: AppState, cells: readonly Offset[]): readonly Offset[] 
 }
 
 const beginStroke = (state: AppState, event: ViewportPointer): AppState => {
-    const {volume, tool, color, brush} = state
+    const {tool, color, brush} = state
     // A viewport with no size has no pixels to cast a ray through, and `zoom / 0` would send one
     // off to infinity. happy-dom reports exactly this, so it is a real case and not a guard.
     if (event.height <= 0 || event.width <= 0) return state
+    // Picked against what is on screen: a hidden object is not something the cursor can land on.
+    const volume = visible(state)
     const basis = basisFor(state.orbit.camera, volume, event.height)
     const hit = pick(volume, basis, event.x, event.y, event.width, event.height)
     if (!hit) return state
@@ -378,7 +438,7 @@ const beginStroke = (state: AppState, event: ViewportPointer): AppState => {
     if (tool === 'pick') return hit.value === 0 ? state : {...state, color: hit.value}
 
     if (tool === 'fill') {
-        const draft = beginEdit(volume)
+        const draft = open(state)
         fillRegion(draft, hit.x, hit.y, hit.z, color)
         const edit = commitEdit(draft)
         if (!edit) return state
@@ -403,7 +463,7 @@ const beginStroke = (state: AppState, event: ViewportPointer): AppState => {
     if (!outward && hit.value === 0) return state
 
     const value = tool === 'erase' ? 0 : color
-    const draft = beginEdit(volume)
+    const draft = open(state)
     /*
      * With no plane lock the canvas is the face that was clicked — `FEATURESET.md` §5's "click a
      * face to temporarily make it your canvas", which falls out of the stroke pinning to a layer.
@@ -418,7 +478,7 @@ const beginStroke = (state: AppState, event: ViewportPointer): AppState => {
         volume: live(draft),
         stroke: {
             draft,
-            base: volume,
+            base: state.volume,
             origin: cell,
             axis,
             layer: cell[axis],
@@ -459,7 +519,7 @@ const continueStroke = (state: AppState, event: ViewportPointer): AppState => {
         return {...state, volume: live(stroke.draft), stroke: {...stroke, at: cell}}
     }
 
-    const draft = beginEdit(stroke.base)
+    const draft = open(state, stroke.base)
     const cells = figureCells(state.brush.figure, stroke.origin, cell, stroke.axis).flatMap(spot =>
         strokeCells(state.brush, stroke.face, spot, spot)
     )
@@ -476,8 +536,9 @@ const continueStroke = (state: AppState, event: ViewportPointer): AppState => {
  */
 const beginSelect = (state: AppState, event: ViewportPointer): AppState => {
     if (event.height <= 0 || event.width <= 0) return state
-    const basis = basisFor(state.orbit.camera, state.volume, event.height)
-    const hit = pickRay(state.volume, basis, event.x, event.y, event.width, event.height)
+    const volume = visible(state)
+    const basis = basisFor(state.orbit.camera, volume, event.height)
+    const hit = pickRay(volume, basis, event.x, event.y, event.width, event.height)
     if (!hit) {
         return {
             ...state,
@@ -497,7 +558,7 @@ const beginSelect = (state: AppState, event: ViewportPointer): AppState => {
      * standing selection, because a pull is aimed at a face and the artist is pointing at one.
      */
     if (state.tool === 'scale') {
-        const patch = facePatch(state.volume, hit.x, hit.y, hit.z, FACE_STEP[hit.face] ?? [0, 0, 0])
+        const patch = facePatch(volume, hit.x, hit.y, hit.z, FACE_STEP[hit.face] ?? [0, 0, 0])
         return {
             ...state,
             selection: patch,
@@ -525,11 +586,16 @@ const beginSelect = (state: AppState, event: ViewportPointer): AppState => {
      * it to one cell, which is what makes a rubber-banded group draggable.
      */
     const already = state.selection.has(voxelIndex(state.volume, hit.x, hit.y, hit.z))
+    // Alt now means the *named* object, not the connected solid: with a list of objects to point
+    // at, `FEATURESET.md` §31's "modifier-click = whole object" has an exact answer, and two
+    // pieces of one object that do not touch are still one object.
+    const owned = ownerAt(state.volume, hit.x, hit.y, hit.z)
     const selection =
-        event.clicks >= 2 ? selectConnectedColor(state.volume, hit.x, hit.y, hit.z)
-        : event.alt ? selectObject(state.volume, hit.x, hit.y, hit.z)
+        event.clicks >= 2 ? selectConnectedColor(volume, hit.x, hit.y, hit.z)
+        : event.alt && owned !== 0 ? objectCells(state.volume, owned)
+        : event.alt ? selectObject(volume, hit.x, hit.y, hit.z)
         : already ? state.selection
-        : selectVoxel(state.volume, hit.x, hit.y, hit.z)
+        : selectVoxel(volume, hit.x, hit.y, hit.z)
 
     const axis = faceAxis(hit.face)
     return {
@@ -576,7 +642,7 @@ const layersPulled = (state: AppState, drag: Drag, event: ViewportPointer): numb
 const continueDrag = (state: AppState, event: ViewportPointer): AppState => {
     const {drag} = state
     if (!drag) return state
-    const draft = beginEdit(drag.volume)
+    const draft = open(state, drag.volume)
 
     if (drag.kind === 'extrude') {
         const layers = layersPulled(state, drag, event)
@@ -614,11 +680,15 @@ const endDrag = (state: AppState): AppState => {
     if (!drag) return state
     // The document already shows the result, so the commit is only about the history: replay the
     // whole gesture once against the volume it started from and record that as one diff.
-    const draft = beginEdit(drag.volume)
+    const draft = open(state, drag.volume)
     draft.volume.data.set(state.volume.data)
+    draft.volume.owner.set(state.volume.owner)
     for (let i = 0; i < draft.volume.data.length; i += 1) {
         const was = drag.volume.data[i] ?? 0
-        if (was !== (draft.volume.data[i] ?? 0)) draft.before.set(i, was)
+        const owned = drag.volume.owner[i] ?? 0
+        if (was === (draft.volume.data[i] ?? 0) && owned === (draft.volume.owner[i] ?? 0)) continue
+        draft.before.set(i, was)
+        draft.beforeOwner.set(i, owned)
     }
     const edit = commitEdit(draft)
     return {
@@ -765,7 +835,7 @@ export const reduce = (state: AppState, action: AppAction): AppState => {
             if (op.kind === 'move' && !fitsAfter(state.volume, state.selection, op.delta)) {
                 return state
             }
-            const draft = beginEdit(state.volume)
+            const draft = open(state)
             const selection = applyTransform(draft, state, op)
             /*
              * Move, rotate and flip are bijections: every selected voxel has exactly one
@@ -806,7 +876,7 @@ export const reduce = (state: AppState, action: AppAction): AppState => {
         case 'paste': {
             const {clipboard} = state
             if (!clipboard) return state
-            const draft = beginEdit(state.volume)
+            const draft = open(state)
             // One voxel up from where it was copied. Pasting exactly on top of the original looks
             // like nothing happened, and the copy comes back selected so it can be dragged.
             const selection = pasteCells(draft, clipboard.cells, [
@@ -824,6 +894,83 @@ export const reduce = (state: AppState, action: AppAction): AppState => {
                 sheet: undefined
             }
         }
+
+        /*
+         * Every object operation but one is a change to a list of names and flags. `remove` is the
+         * exception: it takes the voxels with it, so it goes through a draft and lands in the
+         * history like any other edit — deleting an object the artist spent an hour on has to be
+         * one Ctrl-Z away.
+         */
+        case 'object': {
+            const {op} = action
+            const {objects} = state
+            switch (op.kind) {
+                case 'add': {
+                    const added = addObject(objects)
+                    return added ? {...state, objects: added} : state
+                }
+                case 'active':
+                    return {...state, objects: {...objects, active: op.id}}
+                case 'rename':
+                    return {...state, objects: renameObject(objects, op.id, op.name)}
+                case 'hidden':
+                    // The sheet was baked from what was on screen, and that has just changed.
+                    return {
+                        ...state,
+                        objects: setHidden(objects, op.id, op.on),
+                        sheet: undefined
+                    }
+                case 'locked':
+                    return {...state, objects: setLocked(objects, op.id, op.on)}
+                case 'solo':
+                    return {...state, objects: soloObject(objects, op.id), sheet: undefined}
+                case 'reorder':
+                    return {...state, objects: moveObject(objects, op.id, op.to)}
+                case 'remove': {
+                    const list = removeObject(objects, op.id)
+                    if (list === objects) return state
+                    // Removing has to be able to clear a locked object: the artist is deleting it
+                    // on purpose, and a lock is about stray clicks.
+                    const draft = beginEdit(state.volume, list.active)
+                    const gone = objectCells(state.volume, op.id)
+                    for (const index of gone) {
+                        const [x, y, z] = cellOf(state.volume, index)
+                        writeCells(draft, [[x, y, z]], 0)
+                    }
+                    const edit = commitEdit(draft)
+                    return {
+                        ...state,
+                        objects: list,
+                        volume: edit ? draft.volume : state.volume,
+                        selection: EMPTY_SELECTION,
+                        history: edit ? record(state.history, edit) : state.history,
+                        sheet: undefined
+                    }
+                }
+            }
+            return state
+        }
+
+        /*
+         * Fill the frame with the active object — `FEATURESET.md` §1. The angle is left alone,
+         * because an artist who has found the three-quarter view they want to work at should not
+         * lose it to a button that means "look closer".
+         */
+        case 'focus': {
+            const box = objectBounds(state.volume, state.objects.active)
+            if (!box) return state
+            return {
+                ...state,
+                selected: undefined,
+                orbit: {
+                    camera: focusOn(state.orbit.camera, state.volume, box),
+                    gesture: undefined
+                }
+            }
+        }
+
+        case 'search':
+            return {...state, search: action.query}
 
         case 'symmetry': {
             if (action.axis === 'radial' && !canRadial(state.volume)) return state
@@ -901,8 +1048,10 @@ export const reduce = (state: AppState, action: AppAction): AppState => {
             return {
                 ...state,
                 exporting: true,
+                // Baked from what is on screen: a hidden object is hidden in the export too, which
+                // is what makes hiding a way to render one piece of a model on its own.
                 sheet: renderSheet(
-                    state.volume,
+                    visible(state),
                     state.cameras,
                     state.cell,
                     presetMaps(state.preset)

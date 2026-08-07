@@ -1,4 +1,5 @@
 import {expect, test} from 'bun:test'
+import {objectCells, shownVolume} from '../doc/objects'
 import {basisFor} from '../render/camera'
 import {render} from '../render/raycast'
 import {MODE_NORMAL} from '../render/raycast.glsl'
@@ -643,6 +644,101 @@ test('a preset decides which maps get baked, and colour is always one of them', 
 
     const every = reduce(reduce(fresh(), {type: 'preset', preset: 'Every map'}), {type: 'bake'})
     expect(Object.keys(every.sheet?.maps ?? {})).toHaveLength(6)
+})
+
+test('a stroke joins the active object, and a new object is where the next one goes', () => {
+    const state = armed('draw')
+    expect(state.objects.list).toHaveLength(1)
+    expect(state.objects.active).toBe(1)
+
+    const second = reduce(state, {type: 'object', op: {kind: 'add'}})
+    expect(second.objects.list).toHaveLength(2)
+    expect(second.objects.active).toBe(2)
+
+    const {column, row} = onModel(second)
+    const drawn = reduce(reduce(second, at('down', column, row)), at('up', column, row))
+    expect(objectCells(drawn.volume, 2).size).toBe(4)
+    // Undo takes the ownership back with the voxels.
+    expect(objectCells(reduce(drawn, {type: 'undo'}).volume, 2).size).toBe(0)
+})
+
+test('hiding an object takes it out of what is drawn, picked and exported', () => {
+    const state = reduce(armed('draw'), {type: 'object', op: {kind: 'add'}})
+    const {column, row} = onModel(state)
+    const drawn = reduce(reduce(state, at('down', column, row)), at('up', column, row))
+
+    const hidden = reduce(drawn, {type: 'object', op: {kind: 'hidden', id: 1, on: true}})
+    // The document keeps every voxel; only the picture loses them.
+    expect(occupied(hidden.volume)).toBe(occupied(drawn.volume))
+    expect(occupied(shownVolume(hidden.volume, hidden.objects))).toBe(4)
+    expect(hidden.sheet).toBeUndefined()
+
+    // And a sheet baked while it is hidden holds only what was on screen.
+    const baked = reduce(hidden, {type: 'bake'})
+    const colour = baked.sheet?.maps.color ?? new Uint8Array(0)
+    let opaque = 0
+    for (let i = 3; i < colour.length; i += 4) if (colour[i] === 255) opaque += 1
+    expect(opaque).toBeGreaterThan(0)
+    expect(opaque).toBeLessThan(
+        (() => {
+            const all = reduce(drawn, {type: 'bake'}).sheet?.maps.color ?? new Uint8Array(0)
+            let count = 0
+            for (let i = 3; i < all.length; i += 4) if (all[i] === 255) count += 1
+            return count
+        })()
+    )
+})
+
+test('a locked object refuses a stroke while the rest of the model takes one', () => {
+    const state = armed('draw')
+    const {column, row} = onModel(state)
+    const locked = reduce(state, {type: 'object', op: {kind: 'locked', id: 1, on: true}})
+
+    // Draw writes into the empty cell in front of a face, and that cell belongs to nobody, so it
+    // still lands. Erase aims at the locked voxel itself, and does not.
+    const rubbed = reduce(
+        reduce(reduce(locked, {type: 'tool', tool: 'erase'}), at('down', column, row)),
+        at('up', column, row)
+    )
+    expect(rubbed.history.past).toHaveLength(0)
+    expect(occupied(rubbed.volume)).toBe(occupied(state.volume))
+})
+
+test('solo hides everything else, and deleting an object takes its voxels with it', () => {
+    const state = reduce(armed('draw'), {type: 'object', op: {kind: 'add'}})
+    const soloed = reduce(state, {type: 'object', op: {kind: 'solo', id: 2}})
+    expect(occupied(shownVolume(soloed.volume, soloed.objects))).toBe(0)
+    expect(reduce(soloed, {type: 'object', op: {kind: 'solo', id: 2}}).objects.solo).toBeUndefined()
+
+    const gone = reduce(state, {type: 'object', op: {kind: 'remove', id: 1}})
+    expect(gone.objects.list).toHaveLength(1)
+    expect(occupied(gone.volume)).toBe(0)
+    expect(gone.history.past).toHaveLength(1)
+    expect(reduce(gone, {type: 'undo'}).volume.data).toEqual(state.volume.data)
+})
+
+test('alt-click takes the whole named object, not just what happens to touch', () => {
+    const state = reduce(armed('move'), {type: 'object', op: {kind: 'add'}})
+    const {column, row} = onModel(state)
+    const picked = reduce(state, at('down', column, row, {alt: true}))
+    // Object 1 is the whole car, including the wheels that do not touch the body.
+    expect(picked.selection.size).toBe(occupied(state.volume))
+})
+
+test('focus fills the frame with the active object and leaves the angle alone', () => {
+    const state = fresh()
+    const before = state.orbit.camera
+    const focused = reduce(state, {type: 'focus'})
+
+    expect(focused.orbit.camera.yaw).toBe(before.yaw)
+    expect(focused.orbit.camera.pitch).toBe(before.pitch)
+    expect(focused.orbit.camera.zoom).toBeLessThan(before.zoom)
+    // No longer any stored camera, because the view is not one of them any more.
+    expect(focused.selected).toBeUndefined()
+
+    // An empty object has no box, so there is nothing to focus on and nothing changes.
+    const empty = reduce(state, {type: 'object', op: {kind: 'add'}})
+    expect(reduce(empty, {type: 'focus'})).toBe(empty)
 })
 
 test('the chrome settings move without touching the render or the sheet', () => {

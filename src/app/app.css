@@ -488,6 +488,77 @@ body,
     color: var(--color-icon-accent);
 }
 
+/* ---- objects ---- */
+
+.object-body {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 0 12px 12px;
+}
+
+/* Four rows fit; past that it scrolls rather than pushing the cameras out of the window. */
+.object-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 116px;
+    overflow-y: auto;
+}
+
+.object-row {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 1px 2px 1px 6px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-small);
+}
+
+.object-row:hover {
+    background: var(--color-overlay-hover);
+}
+
+/* The object a stroke lands in, carried by a fill and a border rather than by one thin line. */
+.object-row[data-active] {
+    border-color: var(--color-accent);
+    background: var(--color-accent-muted);
+}
+
+.object-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    text-align: left;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    border: none;
+    background: none;
+    padding: 3px 0;
+    color: inherit;
+    cursor: pointer;
+}
+
+.object-flag {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    flex: 0 0 20px;
+    padding: 0;
+    border: none;
+    border-radius: var(--radius-small);
+    background: none;
+    color: var(--color-text-disabled);
+    font-size: var(--font-size-supporting);
+    cursor: pointer;
+}
+
+.object-flag[data-on] {
+    color: var(--color-icon-accent);
+}
+
 /* ---- cameras ---- */
 
 .camera-grid {

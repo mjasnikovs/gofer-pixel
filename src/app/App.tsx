@@ -1,4 +1,5 @@
 import {useCallback, useEffect, useMemo, useReducer} from 'react'
+import {canRemove, shownVolume} from '../doc/objects'
 import {selectionBounds} from '../doc/selection'
 import {canRadial} from '../doc/symmetry'
 import type {Raycaster} from '../render/gl'
@@ -10,6 +11,7 @@ import {CamerasPanel} from './CamerasPanel'
 import {writeSheet} from './download'
 import {ExportPanel} from './ExportPanel'
 import {Header} from './Header'
+import {ObjectsPanel} from './ObjectsPanel'
 import {RendersPanel} from './RendersPanel'
 import {SelectionBar} from './SelectionBar'
 import {Timeline} from './Timeline'
@@ -43,6 +45,13 @@ export const App = ({volume: source, name}: {volume: Volume; name: string}) => {
     // Everything below reads the *document's* volume, not the one the file was opened with. They
     // are the same object until the first stroke, and after it the difference is the whole point.
     const {volume} = state
+
+    /*
+     * What is drawn is the grid with hidden objects taken out of it, and everything that renders
+     * uses it: the viewport, every thumbnail and the exported sheet. The panels that are about the
+     * *document* rather than about the picture — the palette, the object list — keep the whole one.
+     */
+    const shown = useMemo(() => shownVolume(volume, state.objects), [volume, state.objects])
 
     const onOrbit = useCallback((event: OrbitEvent, height: number) => {
         dispatch({type: 'orbit', event, height})
@@ -103,6 +112,7 @@ export const App = ({volume: source, name}: {volume: Volume; name: string}) => {
             if (event.key === 'c' || event.key === 'C') capture()
             if (event.key === 'Escape') dispatch({type: 'clear-selection'})
             // The two brackets that every editor uses for "more of this" and "less of this".
+            if (event.key === 'f' || event.key === 'F') dispatch({type: 'focus'})
             if (event.key === ']') dispatch({type: 'grow-selection'})
             if (event.key === '[') dispatch({type: 'shrink-selection'})
             if (event.key === 'Delete' || event.key === 'Backspace') {
@@ -188,7 +198,7 @@ export const App = ({volume: source, name}: {volume: Volume; name: string}) => {
 
                 <div className='stage'>
                     <Viewport
-                        volume={volume}
+                        volume={shown}
                         camera={state.orbit.camera}
                         map={state.map}
                         onOrbit={onOrbit}
@@ -203,17 +213,17 @@ export const App = ({volume: source, name}: {volume: Volume; name: string}) => {
                         />
                     :   undefined}
                     <SelectionBox
-                        volume={volume}
+                        volume={shown}
                         camera={state.orbit.camera}
                         bounds={bounds}
                         band={state.band}
                     />
                     <AxisGizmo
-                        volume={volume}
+                        volume={shown}
                         camera={state.orbit.camera}
                     />
                     <ViewCube
-                        volume={volume}
+                        volume={shown}
                         camera={state.orbit.camera}
                     />
                     <SelectionBar
@@ -255,7 +265,7 @@ export const App = ({volume: source, name}: {volume: Volume; name: string}) => {
                 </div>
 
                 <ViewsStrip
-                    volume={volume}
+                    volume={shown}
                     cameras={state.cameras}
                     selected={state.selected}
                     onSelect={id => {
@@ -265,8 +275,25 @@ export const App = ({volume: source, name}: {volume: Volume; name: string}) => {
                 />
 
                 <div className='panel app-rail'>
+                    <ObjectsPanel
+                        objects={state.objects}
+                        query={state.search}
+                        canRemove={canRemove(state.objects)}
+                        onQuery={query => {
+                            dispatch({type: 'search', query})
+                        }}
+                        onRename={objectName => {
+                            dispatch({
+                                type: 'object',
+                                op: {kind: 'rename', id: state.objects.active, name: objectName}
+                            })
+                        }}
+                        onOp={op => {
+                            dispatch({type: 'object', op})
+                        }}
+                    />
                     <CamerasPanel
-                        volume={volume}
+                        volume={shown}
                         cameras={state.cameras}
                         selected={state.selected}
                         onSelect={id => {
@@ -281,7 +308,7 @@ export const App = ({volume: source, name}: {volume: Volume; name: string}) => {
                         }}
                     />
                     <RendersPanel
-                        volume={volume}
+                        volume={shown}
                         camera={current}
                         map={state.map}
                         onMap={map => {
@@ -289,7 +316,7 @@ export const App = ({volume: source, name}: {volume: Volume; name: string}) => {
                         }}
                     />
                     <ExportPanel
-                        volume={volume}
+                        volume={shown}
                         cameras={state.cameras}
                         cell={state.cell}
                         sheet={state.sheet}
@@ -306,7 +333,7 @@ export const App = ({volume: source, name}: {volume: Volume; name: string}) => {
             </div>
 
             <Timeline
-                volume={volume}
+                volume={shown}
                 camera={current ?? state.cameras[0]}
                 frame={state.frame}
                 fps={state.fps}

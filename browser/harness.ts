@@ -40,7 +40,9 @@ const gpuRender = async (
             sz: wire.sz,
             data: new Uint8Array(wire.data),
             palette: new Uint8Array(wire.palette),
-            emissive: Uint8Array.from(wire.emissive ?? new Array<number>(256).fill(0))
+            emissive: Uint8Array.from(wire.emissive ?? new Array<number>(256).fill(0)),
+            // The shader never reads ownership; it exists so the document can name its objects.
+            owner: new Uint8Array(wire.data.length)
         }
         raycaster.setVolume(volume)
         loaded = key

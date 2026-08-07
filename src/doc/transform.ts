@@ -1,6 +1,6 @@
 import {voxelAt, voxelIndex, type Volume} from '../render/volume'
 import type {Axis} from './brush'
-import {writeVoxel, type Draft} from './edits'
+import {writeOwned, writeVoxel, type Draft} from './edits'
 import {cellOf, EMPTY_SELECTION, selectionBounds, type Cell, type Selection} from './selection'
 
 /**
@@ -21,9 +21,23 @@ import {cellOf, EMPTY_SELECTION, selectionBounds, type Cell, type Selection} fro
  */
 export type {Axis}
 
-const snapshot = (draft: Draft, selection: Selection): Map<number, number> => {
-    const values = new Map<number, number>()
-    for (const index of selection) values.set(index, draft.volume.data[index] ?? 0)
+/**
+ * The values *and* their owners, read out before anything is written.
+ *
+ * Ownership travels with the voxel: moving one object's arm must not hand it to whichever object
+ * happens to be active, and undoing the move must not hand it back to a third.
+ */
+const snapshot = (
+    draft: Draft,
+    selection: Selection
+): Map<number, {value: number; owner: number}> => {
+    const values = new Map<number, {value: number; owner: number}>()
+    for (const index of selection) {
+        values.set(index, {
+            value: draft.volume.data[index] ?? 0,
+            owner: draft.volume.owner[index] ?? 0
+        })
+    }
     return values
 }
 
@@ -34,13 +48,16 @@ const clear = (draft: Draft, selection: Selection): void => {
     }
 }
 
-const put = (draft: Draft, cells: Iterable<{cell: Cell; value: number}>): Selection => {
+const put = (
+    draft: Draft,
+    cells: Iterable<{cell: Cell; value: number; owner: number}>
+): Selection => {
     const landed = new Set<number>()
     const {sx, sy, sz} = draft.volume
-    for (const {cell, value} of cells) {
+    for (const {cell, value, owner} of cells) {
         const [x, y, z] = cell
         if (x < 0 || y < 0 || z < 0 || x >= sx || y >= sy || z >= sz) continue
-        writeVoxel(draft, x, y, z, value)
+        writeOwned(draft, x, y, z, value, owner)
         landed.add(voxelIndex(draft.volume, x, y, z))
     }
     return landed
@@ -56,9 +73,9 @@ export const moveCells = (draft: Draft, selection: Selection, delta: Cell): Sele
     clear(draft, selection)
     return put(
         draft,
-        [...values].map(([index, value]) => {
+        [...values].map(([index, held]) => {
             const [x, y, z] = cellOf(draft.volume, index)
-            return {cell: [x + delta[0], y + delta[1], z + delta[2]] as Cell, value}
+            return {cell: [x + delta[0], y + delta[1], z + delta[2]] as Cell, ...held}
         })
     )
 }
@@ -83,14 +100,14 @@ export const rotateCells = (
     const turns = ((quarters % 4) + 4) % 4
     if (selection.size === 0 || turns === 0) return selection
     const values = snapshot(draft, selection)
-    let placed = [...values].map(([index, value]) => ({
+    let placed = [...values].map(([index, held]) => ({
         cell: cellOf(draft.volume, index),
-        value
+        ...held
     }))
     for (let turn = 0; turn < turns; turn += 1) {
         const box = boundsOf(placed.map(({cell}) => cell))
         if (!box) break
-        placed = placed.map(({cell, value}) => ({cell: quarter(cell, axis, box), value}))
+        placed = placed.map(entry => ({...entry, cell: quarter(entry.cell, axis, box)}))
     }
     clear(draft, selection)
     return put(draft, placed)
@@ -102,11 +119,11 @@ export const flipCells = (draft: Draft, selection: Selection, axis: Axis): Selec
     const box = selectionBounds(draft.volume, selection)
     if (!box) return selection
     const values = snapshot(draft, selection)
-    const flipped = [...values].map(([index, value]) => {
+    const flipped = [...values].map(([index, held]) => {
         const cell = cellOf(draft.volume, index)
         const mirrored: [number, number, number] = [cell[0], cell[1], cell[2]]
         mirrored[axis] = box.min[axis] + box.max[axis] - cell[axis]
-        return {cell: mirrored, value}
+        return {cell: mirrored, ...held}
     })
     clear(draft, selection)
     return put(draft, flipped)
@@ -125,11 +142,11 @@ export const mirrorCells = (draft: Draft, selection: Selection, axis: Axis): Sel
     const values = snapshot(draft, selection)
     const copy = put(
         draft,
-        [...values].map(([index, value]) => {
+        [...values].map(([index, held]) => {
             const cell = cellOf(draft.volume, index)
             const mirrored: [number, number, number] = [cell[0], cell[1], cell[2]]
             mirrored[axis] = size - 1 - cell[axis]
-            return {cell: mirrored, value}
+            return {cell: mirrored, ...held}
         })
     )
     return new Set([...selection, ...copy])
@@ -144,9 +161,9 @@ export const duplicateCells = (draft: Draft, selection: Selection, delta: Cell):
     const values = snapshot(draft, selection)
     return put(
         draft,
-        [...values].map(([index, value]) => {
+        [...values].map(([index, held]) => {
             const [x, y, z] = cellOf(draft.volume, index)
-            return {cell: [x + delta[0], y + delta[1], z + delta[2]] as Cell, value}
+            return {cell: [x + delta[0], y + delta[1], z + delta[2]] as Cell, ...held}
         })
     )
 }
@@ -164,11 +181,11 @@ export const arrayCells = (
     for (let step = 1; step <= count; step += 1) {
         const copy = put(
             draft,
-            [...values].map(([index, value]) => {
+            [...values].map(([index, held]) => {
                 const [x, y, z] = cellOf(draft.volume, index)
                 return {
                     cell: [x + delta[0] * step, y + delta[1] * step, z + delta[2] * step] as Cell,
-                    value
+                    ...held
                 }
             })
         )
@@ -201,11 +218,12 @@ export const extrudeCells = (
 
     for (let i = 1; i <= depth; i += 1) {
         const at = out ? i : -(i - 1)
-        const cells = [...values].map(([index, value]) => {
+        const cells = [...values].map(([index, held]) => {
             const [x, y, z] = cellOf(draft.volume, index)
             return {
                 cell: [x + step[0] * at, y + step[1] * at, z + step[2] * at] as Cell,
-                value: out ? value : 0
+                value: out ? held.value : 0,
+                owner: out ? held.owner : 0
             }
         })
         face = put(draft, cells)
@@ -233,9 +251,12 @@ export const pasteCells = (
 ): Selection =>
     put(
         draft,
+        // A paste joins the object that is active, unlike a move, which carries its own. The
+        // artist chose where to put it; they did not choose to resurrect whatever owned it.
         cells.map(({offset, value}) => ({
             cell: [at[0] + offset[0], at[1] + offset[1], at[2] + offset[2]] as Cell,
-            value
+            value,
+            owner: draft.object
         }))
     )
 
