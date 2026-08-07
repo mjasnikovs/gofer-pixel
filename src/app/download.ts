@@ -23,6 +23,19 @@ const download = async (
     URL.revokeObjectURL(url)
 }
 
+/**
+ * The palette as a `.hex` file — `FEATURESET.md` §7's export half. Its import half is a file input
+ * in the panel, because reading a file is the browser's job and writing one is this file's.
+ */
+export const writePalette = (text: string): void => {
+    const url = URL.createObjectURL(new Blob([text], {type: 'text/plain'}))
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = 'palette.hex'
+    anchor.click()
+    URL.revokeObjectURL(url)
+}
+
 const fileName = (map: SheetMap): string => (map === 'color' ? 'sprites.png' : `sprites-${map}.png`)
 
 export const writeSheetMap = async (sheet: Sheet, map: SheetMap): Promise<void> => {

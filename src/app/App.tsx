@@ -1,5 +1,6 @@
 import {useCallback, useEffect, useMemo, useReducer} from 'react'
 import {canRemove, shownVolume} from '../doc/objects'
+import {toHexPalette} from '../doc/palette'
 import {selectionBounds} from '../doc/selection'
 import {canRadial} from '../doc/symmetry'
 import type {Raycaster} from '../render/gl'
@@ -8,7 +9,7 @@ import {Viewport} from '../viewport/Viewport'
 import type {OrbitEvent, ViewportPointer} from '../viewport/orbit'
 import {BrushPanel} from './BrushPanel'
 import {CamerasPanel} from './CamerasPanel'
-import {writeSheet} from './download'
+import {writePalette, writeSheet} from './download'
 import {ExportPanel} from './ExportPanel'
 import {Header} from './Header'
 import {ObjectsPanel} from './ObjectsPanel'
@@ -71,6 +72,26 @@ export const App = ({volume: source, name}: {volume: Volume; name: string}) => {
 
     const capture = useCallback(() => {
         dispatch({type: 'capture'})
+    }, [])
+
+    /*
+     * Reading a file is the one thing that needs an element rather than an action: a browser will
+     * only open a picker from a real click on a real `<input type=file>`. It is created, clicked
+     * and dropped rather than kept in the tree, because a hidden input that lives in the layout is
+     * one more thing for the bounding-box test to trip over.
+     */
+    const loadPalette = useCallback(() => {
+        const input = document.createElement('input')
+        input.type = 'file'
+        input.accept = '.hex,.txt,text/plain'
+        input.addEventListener('change', () => {
+            const file = input.files?.[0]
+            if (!file) return
+            void file.text().then(text => {
+                dispatch({type: 'palette-load', text})
+            })
+        })
+        input.click()
     }, [])
 
     /*
@@ -192,6 +213,30 @@ export const App = ({volume: source, name}: {volume: Volume; name: string}) => {
                         }}
                         onEmissive={value => {
                             dispatch({type: 'emissive', color: state.color, value})
+                        }}
+                        recent={state.recent}
+                        isLocked={state.paletteLocked}
+                        onLock={on => {
+                            dispatch({type: 'palette-lock', on})
+                        }}
+                        onAdd={() => {
+                            dispatch({type: 'palette-add'})
+                        }}
+                        onEyedropper={() => {
+                            dispatch({type: 'tool', tool: 'pick'})
+                        }}
+                        onPaletteColor={css => {
+                            dispatch({type: 'palette-color', color: state.color, css})
+                        }}
+                        onReplace={(from, to) => {
+                            dispatch({type: 'replace-color', from, to})
+                        }}
+                        onSelectColor={index => {
+                            dispatch({type: 'select-color', color: index})
+                        }}
+                        onLoad={loadPalette}
+                        onSave={() => {
+                            writePalette(toHexPalette(volume.palette))
                         }}
                     />
                 </div>

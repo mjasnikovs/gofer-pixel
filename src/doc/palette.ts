@@ -53,3 +53,75 @@ export const projectPalette = (
 export const firstColor = (volume: Volume): number => projectPalette(volume, 1)[0]?.index ?? 1
 
 export const colorCss = (volume: Volume, index: number): string => cssAt(volume.palette, index)
+
+/**
+ * Recent colours — `FEATURESET.md` §7.
+ *
+ * Most recent first, no duplicates, eight of them. Eight because that is one row of the swatch
+ * grid, and a "recent" list long enough to need scanning is the palette again.
+ */
+export const RECENT_COLORS = 8
+
+export const remember = (recent: readonly number[], index: number): readonly number[] => {
+    if (index === 0) return recent
+    return [index, ...recent.filter(entry => entry !== index)].slice(0, RECENT_COLORS)
+}
+
+/** Write one palette entry. Returns a new palette; the old one is left alone. */
+export const withColor = (palette: Uint8Array, index: number, css: string): Uint8Array => {
+    const next = new Uint8Array(palette)
+    const rgb = parseHex(css)
+    if (!rgb || index <= 0 || index > 255) return next
+    next.set([rgb[0], rgb[1], rgb[2], 255], index * 4)
+    return next
+}
+
+const parseHex = (css: string): readonly [number, number, number] | undefined => {
+    const digits = css.trim().replace(/^#/, '')
+    if (!/^[0-9a-fA-F]{6}$/.test(digits)) return undefined
+    return [
+        Number.parseInt(digits.slice(0, 2), 16),
+        Number.parseInt(digits.slice(2, 4), 16),
+        Number.parseInt(digits.slice(4, 6), 16)
+    ]
+}
+
+/**
+ * The palette as text, one `RRGGBB` a line — the `.hex` format Aseprite, Lospec and half the pixel
+ * art world already read and write.
+ *
+ * A `.png` strip is the other convention and this project could write one, having an encoder. It
+ * could not *read* one, having no decoder, and a palette you can export but not import is worse
+ * than one text file that goes both ways.
+ */
+export const toHexPalette = (palette: Uint8Array): string => {
+    const lines: string[] = []
+    for (let index = 1; index < 256; index += 1) lines.push(cssAt(palette, index).slice(1))
+    return `${lines.join('\n')}\n`
+}
+
+/**
+ * Read a `.hex` file back, filling from entry 1 on.
+ *
+ * A line that is not six hex digits is skipped rather than rejected, which is how the comments and
+ * headers that real palette files carry get past. Anything after entry 255 is dropped rather than
+ * wrapping onto entry 1 and quietly recolouring the model.
+ */
+export const fromHexPalette = (text: string, base: Uint8Array): Uint8Array => {
+    const palette = new Uint8Array(base)
+    let index = 1
+    for (const line of text.split(/\r?\n/)) {
+        const rgb = parseHex(line)
+        if (!rgb || index > 255) continue
+        palette.set([rgb[0], rgb[1], rgb[2], 255], index * 4)
+        index += 1
+    }
+    return palette
+}
+
+/** The first palette slot no voxel uses, for "add a colour". `0` when every slot is taken. */
+export const freeSlot = (volume: Volume): number => {
+    const used = usedColors(volume)
+    for (let index = 1; index < 256; index += 1) if (!used.has(index)) return index
+    return 0
+}

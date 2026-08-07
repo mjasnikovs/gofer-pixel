@@ -48,6 +48,8 @@ export interface RenderTarget {
     readonly ao: Uint8Array
     /** RGBA8 of the palette colour scaled by its emissive strength. Black and clear on a miss. */
     readonly emission: Uint8Array
+    /** Which object owns the voxel struck — `FEATURESET.md` §18's object ID. 0 on a miss. */
+    readonly object: Uint8Array
 }
 
 export const createTarget = (width: number, height: number): RenderTarget => ({
@@ -58,7 +60,8 @@ export const createTarget = (width: number, height: number): RenderTarget => ({
     depth: new Uint16Array(width * height),
     id: new Uint8Array(width * height),
     ao: new Uint8Array(width * height),
-    emission: new Uint8Array(width * height * 4)
+    emission: new Uint8Array(width * height * 4),
+    object: new Uint8Array(width * height)
 })
 
 /**
@@ -77,8 +80,8 @@ export const render = (
     into?: RenderTarget
 ): RenderTarget => {
     const target = into ?? createTarget(width, height)
-    const {sx, sy, sz, data, palette, emissive} = volume
-    const {color, normal, depth, id, ao, emission} = target
+    const {sx, sy, sz, data, palette, emissive, owner} = volume
+    const {color, normal, depth, id, ao, emission, object} = target
     // A miss writes nothing, so a reused target has to start empty or the last sprite shows
     // through this one's transparent pixels.
     color.fill(0)
@@ -87,6 +90,7 @@ export const render = (
     id.fill(0)
     ao.fill(0)
     emission.fill(0)
+    object.fill(0)
     const [fx, fy, fz] = basis.forward
     const [rx, ry, rz] = basis.right
     const [ux, uy, uz] = basis.up
@@ -176,6 +180,7 @@ export const render = (
                         Math.min(Math.max(t / depthRange, 0), 1) * 65535
                     )
                     id[row * width + px] = value
+                    object[row * width + px] = owner[(vz * sy + vy) * sx + vx] ?? 0
 
                     /*
                      * Where inside the cell the ray struck, along the face's own two axes. The

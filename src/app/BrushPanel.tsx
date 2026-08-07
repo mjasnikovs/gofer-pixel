@@ -4,7 +4,17 @@ import {Text} from '@astryxdesign/core/Text'
 import type {ReactNode} from 'react'
 import {colorCss, projectPalette, SWATCH_COLUMNS, type Swatch} from '../doc/palette'
 import type {Volume} from '../render/volume'
-import {CircleIcon, CubeIcon, MinusIcon, PickIcon, PlusIcon, RingIcon, SquareIcon} from './icons'
+import {
+    CircleIcon,
+    CubeIcon,
+    DownloadIcon,
+    MinusIcon,
+    PickIcon,
+    PlusIcon,
+    RingIcon,
+    SquareIcon,
+    UploadIcon
+} from './icons'
 import {SectionHead} from './SectionHead'
 import {FIGURES, type Figure} from '../doc/figures'
 import {BRUSH_KINDS, MAX_BRUSH, SHAPES, type Brush, type Shape} from './state'
@@ -47,14 +57,28 @@ const KIND_LABELS: Record<(typeof BRUSH_KINDS)[number], string> = {
     plane: 'Plane'
 }
 
+/**
+ * The palette grid, and the two things a modified click on a swatch means.
+ *
+ * Shift takes every voxel of that colour — `FEATURESET.md` §7's "select all voxels of a color",
+ * which has nowhere better to live than on the colour itself. Alt replaces the loaded colour with
+ * it everywhere, which is §7's "replace color globally". Both are said out loud in the label,
+ * because a modifier nobody can discover is not a feature.
+ */
 const Swatches = ({
     swatches,
     color,
-    onColor
+    loaded,
+    onColor,
+    onReplace,
+    onSelectColor
 }: {
     swatches: readonly Swatch[]
     color: number
+    loaded: number
     onColor: (index: number) => void
+    onReplace: (from: number, to: number) => void
+    onSelectColor: (index: number) => void
 }) => (
     <div
         className='swatches'
@@ -70,12 +94,19 @@ const Swatches = ({
                 aria-checked={swatch.index === color}
                 // The index is the name a screen reader can act on; "used by this model" is the
                 // fact the grid's ordering encodes, so it is said out loud rather than only shown.
-                aria-label={`Colour ${String(swatch.index)}${swatch.isUsed ? ', used by this model' : ''}`}
+                aria-label={
+                    `Colour ${String(swatch.index)}`
+                    + (swatch.isUsed ? ', used by this model' : '')
+                    + '. Shift-click to select every voxel of it, alt-click to replace the loaded'
+                    + ' colour with it.'
+                }
                 className='swatch'
                 data-selected={swatch.index === color || undefined}
                 style={{background: swatch.css}}
-                onClick={() => {
-                    onColor(swatch.index)
+                onClick={event => {
+                    if (event.shiftKey) onSelectColor(swatch.index)
+                    else if (event.altKey) onReplace(loaded, swatch.index)
+                    else onColor(swatch.index)
                 }}
             />
         ))}
@@ -88,7 +119,17 @@ export const BrushPanel = ({
     color,
     onBrush,
     onColor,
-    onEmissive
+    onEmissive,
+    recent,
+    isLocked,
+    onLock,
+    onAdd,
+    onEyedropper,
+    onPaletteColor,
+    onReplace,
+    onSelectColor,
+    onLoad,
+    onSave
 }: {
     volume: Volume
     brush: Brush
@@ -96,6 +137,16 @@ export const BrushPanel = ({
     onBrush: (brush: Partial<Brush>) => void
     onColor: (index: number) => void
     onEmissive: (value: number) => void
+    recent: readonly number[]
+    isLocked: boolean
+    onLock: (on: boolean) => void
+    onAdd: () => void
+    onEyedropper: () => void
+    onPaletteColor: (css: string) => void
+    onReplace: (from: number, to: number) => void
+    onSelectColor: (index: number) => void
+    onLoad: () => void
+    onSave: () => void
 }) => (
     <div className='panel'>
         <section className='section'>
@@ -219,12 +270,33 @@ export const BrushPanel = ({
         </section>
 
         <section className='section section-grows'>
-            <SectionHead title='Palette' />
+            <SectionHead title='Palette'>
+                <IconButton
+                    label='Load a palette'
+                    tooltip={isLocked ? 'The palette is locked' : 'Load a .hex palette'}
+                    icon={<UploadIcon />}
+                    size='sm'
+                    variant='ghost'
+                    isDisabled={isLocked}
+                    onClick={onLoad}
+                />
+                <IconButton
+                    label='Save the palette'
+                    tooltip='Save this palette as a .hex file'
+                    icon={<DownloadIcon />}
+                    size='sm'
+                    variant='ghost'
+                    onClick={onSave}
+                />
+            </SectionHead>
             <div className='section-body'>
                 <Swatches
                     swatches={projectPalette(volume)}
                     color={color}
                     onColor={onColor}
+                    onReplace={onReplace}
+                    onSelectColor={onSelectColor}
+                    loaded={color}
                 />
 
                 {/*
@@ -256,14 +328,51 @@ export const BrushPanel = ({
                     </button>
                 </div>
 
+                {/*
+                 * The last eight colours loaded, most recent first — `FEATURESET.md` §7. It is
+                 * one row of the swatch grid on purpose: a recent list long enough to need
+                 * scanning is the palette again.
+                 */}
+                {recent.length > 1 ?
+                    <div
+                        className='swatches recent-swatches'
+                        role='radiogroup'
+                        aria-label='Recent colours'
+                        style={{
+                            gridTemplateColumns: `repeat(${String(SWATCH_COLUMNS)}, minmax(0, 1fr))`
+                        }}
+                    >
+                        {recent.map(index => (
+                            <button
+                                key={index}
+                                type='button'
+                                role='radio'
+                                aria-checked={index === color}
+                                aria-label={`Recent colour ${String(index)}`}
+                                className='swatch'
+                                data-selected={index === color || undefined}
+                                style={{background: colorCss(volume, index)}}
+                                onClick={() => {
+                                    onColor(index)
+                                }}
+                            />
+                        ))}
+                    </div>
+                :   undefined}
+
                 <div className='palette-actions'>
                     <IconButton
                         label='Add a colour to the palette'
-                        tooltip='The palette comes from the .vox file — editing it needs an editable document'
+                        tooltip={
+                            isLocked ? 'The palette is locked' : (
+                                'Load the first unused palette slot, ready to be given a colour'
+                            )
+                        }
                         icon={<PlusIcon />}
                         size='sm'
                         variant='ghost'
-                        isDisabled
+                        isDisabled={isLocked}
+                        onClick={onAdd}
                     />
                     <IconButton
                         label='Pick a colour from the model'
@@ -271,8 +380,22 @@ export const BrushPanel = ({
                         icon={<PickIcon />}
                         size='sm'
                         variant='ghost'
-                        isDisabled
+                        onClick={onEyedropper}
                     />
+                    <span className='spacer' />
+                    <button
+                        type='button'
+                        role='switch'
+                        aria-checked={isLocked}
+                        aria-label='Lock the palette'
+                        className='symmetry-axis'
+                        data-on={isLocked || undefined}
+                        onClick={() => {
+                            onLock(!isLocked)
+                        }}
+                    >
+                        {isLocked ? 'LOCKED' : 'OPEN'}
+                    </button>
                 </div>
 
                 {/*
@@ -288,6 +411,32 @@ export const BrushPanel = ({
                     aria-label={`Loaded colour ${colorCss(volume, color)}`}
                 >
                     <span className='color-hue' />
+                </div>
+
+                {/*
+                 * The one place a palette entry can be given a new colour. A native colour input
+                 * rather than a hand-rolled wheel: the platform's picker is the one the artist's
+                 * eyedropper, their recent colours and their screen profile already know about,
+                 * and the field above stays the readout it was.
+                 */}
+                <div className='field-row'>
+                    <Text
+                        type='supporting'
+                        color='disabled'
+                    >
+                        Entry {color}
+                    </Text>
+                    <span className='spacer' />
+                    <input
+                        type='color'
+                        className='color-input'
+                        aria-label={`Colour of palette entry ${String(color)}`}
+                        disabled={isLocked}
+                        value={colorCss(volume, color)}
+                        onChange={event => {
+                            onPaletteColor(event.target.value)
+                        }}
+                    />
                 </div>
             </div>
         </section>

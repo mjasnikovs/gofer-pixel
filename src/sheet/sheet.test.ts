@@ -1,5 +1,6 @@
 import {expect, test} from 'bun:test'
 import {eightDirections} from '../doc/cameras'
+import {initialObjects} from '../doc/objects'
 import {readVox} from '../vox/vox-file'
 import {
     DEFAULT_COLUMNS,
@@ -23,6 +24,7 @@ const hash = (bytes: Uint8Array): string =>
  * about 30 ms of raycasting, and a fresh one per test would put a fifth of a second into a gate
  * whose whole point is that it costs nothing.
  */
+initialObjects(volume)
 const cameras = eightDirections(volume)
 const big = renderSheet(volume, cameras, 64)
 const plane = (sheet: Sheet, map: SheetMap): Uint8Array =>
@@ -63,7 +65,12 @@ test('every map of the sheet is byte-for-byte what it was', () => {
         depth: '8bfdc8195783092e',
         height: 'bfb88f409dae4a29',
         ao: 'bdc5da61f04cf05e',
-        emission: 'c2bf911997b4cc37'
+        emission: 'c2bf911997b4cc37',
+        index: 'ee584af307914d2e',
+        // Every voxel of `car.vox` belongs to the one object it opened as, so this is a silhouette
+        // of ones — which is the right answer and worth pinning, because a bug that left it blank
+        // would look exactly like a model with no objects in it.
+        object: '7324b890fc196f40'
     }
     for (const map of SHEET_MAPS) {
         expect(`${map}:${hash(plane(sheet, map))}`).toBe(`${map}:${golden[map] ?? ''}`)

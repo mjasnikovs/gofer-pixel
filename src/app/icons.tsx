@@ -293,3 +293,18 @@ export const EndIcon = () => (
         />
     </Svg>
 )
+
+/** A tray with an arrow going into it, and the same tray with the arrow coming out. */
+export const UploadIcon = () => (
+    <Svg>
+        <path d='M8 10V3M8 3 5.5 5.5M8 3l2.5 2.5' />
+        <path d='M3 10v2a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-2' />
+    </Svg>
+)
+
+export const DownloadIcon = () => (
+    <Svg>
+        <path d='M8 3v7M8 10 5.5 7.5M8 10l2.5-2.5' />
+        <path d='M3 10v2a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-2' />
+    </Svg>
+)

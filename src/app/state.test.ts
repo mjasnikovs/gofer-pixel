@@ -1,5 +1,6 @@
 import {expect, test} from 'bun:test'
 import {objectCells, shownVolume} from '../doc/objects'
+import {SHEET_MAPS} from '../sheet/sheet'
 import {basisFor} from '../render/camera'
 import {render} from '../render/raycast'
 import {MODE_NORMAL} from '../render/raycast.glsl'
@@ -643,7 +644,7 @@ test('a preset decides which maps get baked, and colour is always one of them', 
     expect(Object.keys(auto.sheet?.maps ?? {}).sort()).toEqual(['color', 'normal'])
 
     const every = reduce(reduce(fresh(), {type: 'preset', preset: 'Every map'}), {type: 'bake'})
-    expect(Object.keys(every.sheet?.maps ?? {})).toHaveLength(6)
+    expect(Object.keys(every.sheet?.maps ?? {})).toHaveLength(SHEET_MAPS.length)
 })
 
 test('a stroke joins the active object, and a new object is where the next one goes', () => {
@@ -739,6 +740,71 @@ test('focus fills the frame with the active object and leaves the angle alone', 
     // An empty object has no box, so there is nothing to focus on and nothing changes.
     const empty = reduce(state, {type: 'object', op: {kind: 'add'}})
     expect(reduce(empty, {type: 'focus'})).toBe(empty)
+})
+
+test('the loaded colour is remembered, by the swatch grid and by the eyedropper alike', () => {
+    const state = fresh()
+    expect(state.recent).toEqual([state.color])
+
+    const twice = reduce(reduce(state, {type: 'color', color: 40}), {type: 'color', color: 12})
+    expect(twice.recent).toEqual([12, 40, state.color])
+
+    // Picking a colour off the model is loading it, so it lands in the same list.
+    const {column, row} = onModel(state)
+    const picked = reduce(armed('pick'), at('down', column, row))
+    expect(picked.recent[0]).toBe(picked.color)
+})
+
+test('editing a palette entry changes what a colour is; replacing one moves voxels', () => {
+    const state = fresh()
+    const before = state.volume.data.slice()
+
+    const edited = reduce(state, {type: 'palette-color', color: state.color, css: '#123456'})
+    expect([...edited.volume.palette.subarray(state.color * 4, state.color * 4 + 3)]).toEqual([
+        0x12, 0x34, 0x56
+    ])
+    // Not a cell changed, so not an undo step — the same rule as the emissive flag.
+    expect(edited.volume.data).toEqual(before)
+    expect(edited.history.past).toHaveLength(0)
+    expect(edited.sheet).toBeUndefined()
+
+    const replaced = reduce(state, {type: 'replace-color', from: state.color, to: 200})
+    expect(replaced.history.past).toHaveLength(1)
+    expect(replaced.color).toBe(200)
+    expect(occupied(replaced.volume)).toBe(occupied(state.volume))
+    expect(reduce(replaced, {type: 'undo'}).volume.data).toEqual(before)
+    // Replacing a colour nothing uses changes nothing at all.
+    expect(reduce(state, {type: 'replace-color', from: 199, to: 200})).toBe(state)
+})
+
+test('a locked palette refuses every change to what a colour is, and no change to the model', () => {
+    const state = reduce(fresh(), {type: 'palette-lock', on: true})
+
+    expect(reduce(state, {type: 'palette-color', color: 1, css: '#ffffff'})).toBe(state)
+    expect(reduce(state, {type: 'palette-add'})).toBe(state)
+    expect(reduce(state, {type: 'palette-load', text: 'ff0000\n'})).toBe(state)
+
+    // Replacing a colour moves voxels between entries; it does not change an entry, so it stands.
+    expect(
+        reduce(state, {type: 'replace-color', from: state.color, to: 200}).history.past
+    ).toHaveLength(1)
+})
+
+test('adding a colour loads the first slot the model is not already using', () => {
+    const state = fresh()
+    const added = reduce(state, {type: 'palette-add'})
+    expect(added.color).toBeGreaterThan(0)
+    expect([...state.volume.data]).not.toContain(added.color)
+    expect(added.recent[0]).toBe(added.color)
+})
+
+test('loading a palette replaces the colours and leaves every voxel where it was', () => {
+    const state = fresh()
+    const loaded = reduce(state, {type: 'palette-load', text: 'ff0000\n00ff00\n0000ff\n'})
+    expect([...loaded.volume.palette.subarray(4, 8)]).toEqual([255, 0, 0, 255])
+    expect([...loaded.volume.palette.subarray(12, 16)]).toEqual([0, 0, 255, 255])
+    expect(loaded.volume.data).toBe(state.volume.data)
+    expect(loaded.sheet).toBeUndefined()
 })
 
 test('the chrome settings move without touching the render or the sheet', () => {

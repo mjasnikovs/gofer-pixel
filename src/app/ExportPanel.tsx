@@ -19,7 +19,9 @@ const MAP_LABELS: Record<SheetMap, string> = {
     depth: 'depth',
     height: 'height',
     ao: 'occlusion',
-    emission: 'emission'
+    emission: 'emission',
+    index: 'palette index',
+    object: 'object id'
 }
 
 /**

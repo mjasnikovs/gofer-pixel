@@ -40,8 +40,24 @@ export const HEIGHT_IS_DEPTH = true
 /** Four across is what a sheet of eight directions wants to be; it is a layout, not a constraint. */
 export const DEFAULT_COLUMNS = 4
 
-/** Which maps a sheet carries, in the order the export panel lists them. */
-export const SHEET_MAPS = ['color', 'normal', 'depth', 'height', 'ao', 'emission'] as const
+/**
+ * Which maps a sheet carries, in the order the export panel lists them.
+ *
+ * `index` and `object` are the two that are data rather than pictures: the palette index and the
+ * owning object, written into the red channel with a solid alpha. They close `FEATURESET.md` §18's
+ * "object/material ID" and §7's "optional indexed-color output" at once, because in a document
+ * whose colours are palette entries those two questions have the same shape of answer.
+ */
+export const SHEET_MAPS = [
+    'color',
+    'normal',
+    'depth',
+    'height',
+    'ao',
+    'emission',
+    'index',
+    'object'
+] as const
 export type SheetMap = (typeof SHEET_MAPS)[number]
 
 export const sheetPlane = (sheet: Sheet, map: SheetMap): Uint8Array | undefined => sheet.maps[map]
@@ -90,13 +106,21 @@ export const renderSheet = (
             into[at + 3] = 255
         }
 
+        const channel = (into: Uint8Array | undefined, at: number, value: number): void => {
+            if (!into) return
+            into[at] = value
+            into[at + 3] = 255
+        }
+
         for (let row = 0; row < cell; row += 1) {
             const from = row * cell * 4
             const to = ((oy + row) * width + ox) * 4
             planes.color?.set(target.color.subarray(from, from + cell * 4), to)
             planes.normal?.set(target.normal.subarray(from, from + cell * 4), to)
             planes.emission?.set(target.emission.subarray(from, from + cell * 4), to)
-            if (!planes.depth && !planes.height && !planes.ao) continue
+            if (!planes.depth && !planes.height && !planes.ao && !planes.index && !planes.object) {
+                continue
+            }
 
             for (let column = 0; column < cell; column += 1) {
                 const here = row * cell + column
@@ -107,6 +131,10 @@ export const renderSheet = (
                 grey(planes.depth, at, near8)
                 grey(planes.height, at, 255 - near8)
                 grey(planes.ao, at, target.ao[here] ?? 0)
+                // Not grey: an id is a number, and spreading it over three channels would invite
+                // an engine to read it as a colour and resample it.
+                channel(planes.index, at, target.id[here] ?? 0)
+                channel(planes.object, at, target.object[here] ?? 0)
             }
         }
     })

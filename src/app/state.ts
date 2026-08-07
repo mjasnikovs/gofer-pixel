@@ -35,7 +35,7 @@ import {
     type Objects
 } from '../doc/objects'
 import {EMPTY_HISTORY, record, redo, undo, type History} from '../doc/history'
-import {firstColor} from '../doc/palette'
+import {firstColor, freeSlot, fromHexPalette, remember, withColor} from '../doc/palette'
 import {
     cellOf,
     EMPTY_SELECTION,
@@ -63,6 +63,7 @@ import {
     moveCells,
     paintCells,
     pasteCells,
+    remapColor,
     rotateCells
 } from '../doc/transform'
 import {basisFor, createCamera, type Camera} from '../render/camera'
@@ -274,6 +275,18 @@ export interface AppState {
     readonly brush: Brush
     /** 1-based index into `volume.palette`, the `.vox` format's own convention. */
     readonly color: number
+    /** The last few colours loaded, most recent first — `FEATURESET.md` §7. */
+    readonly recent: readonly number[]
+    /**
+     * Whether the palette refuses to be edited.
+     *
+     * It guards the entries, not the model: a locked palette still draws, fills and replaces
+     * colours, because those move voxels between entries rather than changing what an entry is.
+     * The thing being protected is a palette an artist has tuned and does not want a stray drag on
+     * a colour field to undo — and a palette edit is deliberately not in the undo history, which is
+     * exactly why it needs a lock instead.
+     */
+    readonly paletteLocked: boolean
     readonly grid: boolean
     readonly snap: boolean
     readonly workspace: 'model' | 'render'
@@ -312,6 +325,11 @@ export type AppAction =
     | {type: 'brush'; brush: Partial<Brush>}
     | {type: 'color'; color: number}
     | {type: 'emissive'; color: number; value: number}
+    | {type: 'palette-color'; color: number; css: string}
+    | {type: 'palette-lock'; on: boolean}
+    | {type: 'palette-add'}
+    | {type: 'palette-load'; text: string}
+    | {type: 'replace-color'; from: number; to: number}
     | {type: 'grid'; on: boolean}
     | {type: 'snap'; on: boolean}
     | {type: 'workspace'; workspace: 'model' | 'render'}
@@ -329,6 +347,7 @@ export type AppAction =
 export const PRESETS = [
     {name: 'Sprite Sheet (Auto)', maps: ['color', 'normal']},
     {name: 'Godot 8-direction', maps: ['color', 'normal', 'emission']},
+    {name: 'Indexed colour', maps: ['color', 'index']},
     {name: 'Every map', maps: [...SHEET_MAPS]}
 ] as const satisfies readonly {name: string; maps: readonly SheetMap[]}[]
 
@@ -372,6 +391,8 @@ export const initialState = (volume: Volume): AppState => {
         tool: 'draw',
         brush: {kind: 'voxel', size: 2, shape: 'square', figure: 'free'},
         color: firstColor(volume),
+        recent: [firstColor(volume)],
+        paletteLocked: false,
         grid: true,
         snap: true,
         workspace: 'model',
@@ -435,7 +456,11 @@ const beginStroke = (state: AppState, event: ViewportPointer): AppState => {
     if (!hit) return state
 
     // Pick is not an edit and does not open a stroke; it loads the colour and gets out of the way.
-    if (tool === 'pick') return hit.value === 0 ? state : {...state, color: hit.value}
+    if (tool === 'pick') {
+        return hit.value === 0 ?
+                state
+            :   {...state, color: hit.value, recent: remember(state.recent, hit.value)}
+    }
 
     if (tool === 'fill') {
         const draft = open(state)
@@ -1072,7 +1097,56 @@ export const reduce = (state: AppState, action: AppAction): AppState => {
         }
 
         case 'color':
-            return {...state, color: action.color}
+            return {...state, color: action.color, recent: remember(state.recent, action.color)}
+
+        /*
+         * Editing a palette entry, and the four things that are *not* the same as it: replacing a
+         * colour moves voxels between entries; adding takes an unused slot; loading a file replaces
+         * the lot; and the lock stops the first three of those from being a stray drag.
+         *
+         * None of them are undo steps, for the reason `emissive` is not: history holds cell diffs,
+         * and folding a second kind of change into a format built for one is how an undo stack
+         * starts lying. `replace-color` *is* an undo step, because it moves voxels.
+         */
+        case 'palette-color': {
+            if (state.paletteLocked) return state
+            const palette = withColor(state.volume.palette, action.color, action.css)
+            return {...state, volume: {...state.volume, palette}, sheet: undefined}
+        }
+
+        case 'palette-lock':
+            return {...state, paletteLocked: action.on}
+
+        case 'palette-add': {
+            if (state.paletteLocked) return state
+            const slot = freeSlot(state.volume)
+            // Every slot in use is not an error; it is a palette that is full, and 255 colours is
+            // more than any pixel artist has asked for.
+            return slot === 0 ? state : (
+                    {...state, color: slot, recent: remember(state.recent, slot)}
+                )
+        }
+
+        case 'palette-load': {
+            if (state.paletteLocked) return state
+            const palette = fromHexPalette(action.text, state.volume.palette)
+            return {...state, volume: {...state.volume, palette}, sheet: undefined}
+        }
+
+        case 'replace-color': {
+            const draft = open(state)
+            if (remapColor(draft, action.from, action.to) === 0) return state
+            const edit = commitEdit(draft)
+            if (!edit) return state
+            return {
+                ...state,
+                volume: draft.volume,
+                color: action.to,
+                recent: remember(state.recent, action.to),
+                history: record(state.history, edit),
+                sheet: undefined
+            }
+        }
 
         /*
          * Which palette entries glow — the one part of `FEATURESET.md` §20 that survives, because

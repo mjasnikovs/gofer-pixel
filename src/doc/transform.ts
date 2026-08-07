@@ -265,6 +265,28 @@ export const deleteCells = (draft: Draft, selection: Selection): Selection => {
     return EMPTY_SELECTION
 }
 
+/**
+ * Replace one palette index with another, everywhere — `FEATURESET.md` §7.
+ *
+ * Not the same thing as editing a palette entry's colour, and the difference is the whole reason
+ * both exist: editing an entry changes what that colour *is*, and every voxel using it follows;
+ * this moves voxels from one entry to another and leaves both entries alone. One is a change to
+ * the palette, the other is an edit to the model, and only this one is in the undo history.
+ */
+export const remapColor = (draft: Draft, from: number, to: number): number => {
+    if (from === 0 || to === 0 || from === to) return 0
+    const {sx, sy, data} = draft.volume
+    let changed = 0
+    for (let index = 0; index < data.length; index += 1) {
+        if (data[index] !== from) continue
+        const z = Math.floor(index / (sx * sy))
+        const rest = index - z * sx * sy
+        writeOwned(draft, rest % sx, Math.floor(rest / sx), z, to, draft.volume.owner[index] ?? 0)
+        changed += 1
+    }
+    return changed
+}
+
 /** Recolour without moving anything — what a palette swap does to a selection. */
 export const paintCells = (draft: Draft, selection: Selection, color: number): Selection => {
     for (const index of selection) {
