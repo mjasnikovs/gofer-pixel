@@ -1002,12 +1002,13 @@ body,
 }
 
 /*
- * The block the click would make: the loaded colour, at a quarter strength, wireframed in accent.
+ * Write, and the default the other four kinds override: the block the press would make, in the
+ * loaded colour at a quarter strength, wireframed in accent.
  *
- * The fill is `currentColor` and `App.tsx` sets that to the colour being drawn with, so the
- * proposal is the paint the artist chose rather than a generic highlight — a preview in some other
- * hue answers "where" but not "with what". Accent stays on the wire, which is what says the block
- * is not there yet.
+ * The fill is `currentColor` and `ViewportOverlay.tsx` sets that from `hover.paint`, so the proposal
+ * is the paint the press would actually use rather than a generic highlight — a preview in some
+ * other hue answers "where" but not "with what". Accent stays on the wire, which is what says the
+ * block is not there yet.
  */
 .brush-ghost-fill {
     fill: currentColor;
@@ -1020,14 +1021,56 @@ body,
 }
 
 /*
- * Erase is the same block read backwards. The viewport is already drawing the hole — `App.tsx`
- * takes the cells out of the grid it hands the renderer — so the wash here is the *background*
- * showing through, and its job is only to say that the gap under the wireframe is a proposal
- * rather than a gap in the model.
+ * The other four promises. One rule per *kind*, not per tool: Move and Rotate both pick voxels up
+ * and have no business looking different before the press. See `HoverKind` in `state.ts`.
  */
-.brush-ghost[data-tool='erase'] .brush-ghost-fill {
+
+/*
+ * Clear. The same block read backwards. The viewport is already drawing the hole — `App.tsx` takes
+ * the cells out of the grid it hands the renderer — so the wash here is the *background* showing
+ * through, and its job is only to say that the gap under the wireframe is a proposal rather than a
+ * gap in the model.
+ */
+.brush-ghost[data-kind='clear'] .brush-ghost-fill {
     fill: var(--color-background-body);
     opacity: 0.35;
+}
+
+/*
+ * Recolour. The render is already showing the new paint over the whole region, so a wash on top of
+ * it would tint the very colour the artist is being asked to judge. The outline is all that is
+ * left to add, and what it adds is the one thing the render cannot say on its own: that this paint
+ * is a proposal and where it stops.
+ */
+.brush-ghost[data-kind='recolour'] .brush-ghost-fill {
+    fill: none;
+}
+
+.brush-ghost[data-kind='recolour'] .brush-ghost-outline {
+    stroke-width: 2;
+}
+
+/*
+ * Sample. Nothing is written, so nothing is filled — a block of paint would promise a write that is
+ * not coming. The colour it would take is already on screen underneath, which is the point of
+ * pointing at it; the outline only has to say *which* voxel, so it is drawn heavier than the rest.
+ */
+.brush-ghost[data-kind='sample'] .brush-ghost-fill {
+    fill: none;
+}
+
+.brush-ghost[data-kind='sample'] .brush-ghost-outline {
+    stroke-width: 2.5;
+}
+
+/*
+ * Grab. Nothing changes yet; these are the voxels the gesture is about to take hold of. Accent at a
+ * fifth strength rather than the loaded paint, because it is the same statement `.selection-box`
+ * makes a moment later and the two should be recognisably the same colour of idea.
+ */
+.brush-ghost[data-kind='grab'] .brush-ghost-fill {
+    fill: var(--color-accent);
+    opacity: 0.18;
 }
 
 /* Nothing would be written here: inert, and dashed so it cannot be mistaken for a live outline. */

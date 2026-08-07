@@ -5,11 +5,12 @@ import {SHEET_MAPS} from '../sheet/sheet'
 import {basisFor} from '../render/camera'
 import {render} from '../render/raycast'
 import {MODE_NORMAL} from '../render/raycast.glsl'
-import {voxelAt, voxelIndex, type Volume} from '../render/volume'
+import {createVolume, voxelAt, voxelIndex, type Volume} from '../render/volume'
 import type {ViewportPointer} from '../viewport/orbit'
 import {readVox} from '../vox/vox-file'
 import {
     allPresets,
+    GHOST_CELLS,
     initialState,
     MAX_BRUSH,
     presetMaps,
@@ -1110,7 +1111,12 @@ test('the outline re-aims when the brush changes, without the mouse moving', () 
     // Nothing but the brush changed, and the outline is already the new footprint.
     const bigger = reduce(aimed, {type: 'brush', brush: {size: 3}})
     expect(bigger.hover?.cells).toHaveLength(9)
-    expect(reduce(aimed, {type: 'tool', tool: 'move'}).hover).toBeUndefined()
+
+    // Arming a tool that is not about the brush re-aims too, and the answer stops being a footprint:
+    // Move takes hold of the one voxel under the cursor, whatever the brush is set to.
+    const grabbing = reduce(bigger, {type: 'tool', tool: 'move'})
+    expect(grabbing.hover?.kind).toBe('grab')
+    expect(grabbing.hover?.cells).toHaveLength(1)
 })
 
 test('nothing is outlined while a gesture owns the pointer, or once it has left', () => {
@@ -1166,4 +1172,137 @@ test('with erase armed the viewport is handed the hole, and every other tool the
     const drawing = reduce(armed('draw'), at('move', column, row))
     expect(previewVolume(drawing, drawing.volume)).toBe(drawing.volume)
     expect(previewVolume(reduce(aimed, {type: 'unaim'}), aimed.volume)).toBe(aimed.volume)
+
+    // Sampling and grabbing change no voxels at all, so neither may touch the grid either.
+    for (const tool of ['pick', 'move', 'rotate', 'scale', 'clone'] as const) {
+        const idle = reduce(armed(tool), at('move', column, row))
+        expect(idle.hover).toBeDefined()
+        expect(previewVolume(idle, idle.volume)).toBe(idle.volume)
+    }
+})
+
+test('every tool that does something says what, before the press', () => {
+    const live: readonly Tool[] = [
+        'draw',
+        'erase',
+        'fill',
+        'pick',
+        'move',
+        'rotate',
+        'scale',
+        'clone'
+    ]
+    const {column, row} = onModel(fresh())
+
+    for (const tool of live) {
+        const aimed = reduce(armed(tool), at('move', column, row))
+        const hover = aimed.hover
+        if (!hover) throw new Error(`${tool} has an answer with the pointer on the model`)
+        // Either the cells to draw one cube each for, or a box standing in for too many of them.
+        expect(hover.cells.length > 0 || hover.bounds !== undefined).toBe(true)
+        expect(hover.blocked).toBe(false)
+    }
+
+    // Measure is not built, and a preview of a gesture that does not exist is the worst lie of all.
+    expect(reduce(armed('measure'), at('move', column, row)).hover).toBeUndefined()
+})
+
+test('the five kinds say what happens to the voxels, not which button is lit', () => {
+    const {column, row} = onModel(fresh())
+    const kindOf = (tool: Tool): string | undefined =>
+        reduce(armed(tool), at('move', column, row)).hover?.kind
+
+    expect(kindOf('draw')).toBe('write')
+    expect(kindOf('erase')).toBe('clear')
+    expect(kindOf('fill')).toBe('recolour')
+    expect(kindOf('pick')).toBe('sample')
+    // Four tools, one promise: these voxels are about to be taken hold of.
+    for (const tool of ['move', 'rotate', 'scale', 'clone'] as const)
+        expect(kindOf(tool)).toBe('grab')
+})
+
+test('Fill outlines the region it floods, and the viewport is handed the new paint', () => {
+    const state = armed('fill')
+    const {column, row} = onModel(state)
+    const aimed = reduce(state, at('move', column, row))
+    const hover = aimed.hover
+    if (!hover?.region) throw new Error('the pointer is over the model')
+
+    // More than the one cell the ray landed on: the whole point is that a flood is not a footprint.
+    expect(hover.region.size).toBeGreaterThan(1)
+
+    // Exactly the cells the press recolours — not an approximation of them.
+    const filled = reduce(reduce(aimed, at('down', column, row)), at('up', column, row))
+    const edit = filled.history.past[0]
+    if (!edit) throw new Error('the press wrote something')
+    expect(new Set(edit.at)).toEqual(new Set(hover.region))
+
+    // And the render is showing the answer, because a recolour cannot be drawn over: every one of
+    // those cells already carries the new paint before the button goes down.
+    const preview = previewVolume(aimed, aimed.volume)
+    expect(preview).not.toBe(aimed.volume)
+    for (const index of hover.region) expect(preview.data[index]).toBe(aimed.color)
+    expect(occupied(preview)).toBe(occupied(aimed.volume))
+})
+
+test('Pick proposes the colour it would take, not the one already loaded', () => {
+    const state = armed('pick')
+    const {column, row} = onModel(state)
+    const aimed = reduce(state, at('move', column, row))
+    const hover = aimed.hover
+    if (!hover) throw new Error('the pointer is over the model')
+
+    // The paint on the proposal is what the press loads. Drawing the *current* colour there would
+    // say "this goes here", and Pick puts nothing anywhere.
+    const picked = reduce(reduce(aimed, at('down', column, row)), at('up', column, row))
+    expect(hover.paint).toBe(picked.color)
+    expect(hover.paint).not.toBe(state.color)
+
+    // Aim at it again with that colour loaded and the press would do nothing, which is `blocked`.
+    expect(reduce(picked, at('move', column, row)).hover?.blocked).toBe(true)
+})
+
+test('the grab tools outline what the press would take hold of', () => {
+    const {column, row} = onModel(fresh())
+
+    for (const tool of ['move', 'rotate', 'scale', 'clone'] as const) {
+        const aimed = reduce(armed(tool), at('move', column, row))
+        const hover = aimed.hover
+        if (!hover?.region) throw new Error(`${tool} has an answer with the pointer on the model`)
+
+        // The press, and the selection it leaves behind. Outlined has to be exactly selected.
+        const pressed = reduce(aimed, at('down', column, row))
+        expect(pressed.selection).toEqual(hover.region)
+    }
+})
+
+test('a footprint too large to draw arrives as a box instead', () => {
+    // Alt with a grab tool takes the whole object, which on `car.vox` is 478 voxels — just under the
+    // cap, so it still comes through cell by cell and the cap is not firing by accident.
+    const {column, row} = onModel(fresh())
+    const grabbed = reduce(armed('move'), {
+        type: 'pointer',
+        event: {...at('move', column, row).event, alt: true}
+    })
+    expect(grabbed.hover?.region?.size).toBeGreaterThan(1)
+    expect(grabbed.hover?.cells.length).toBe(grabbed.hover?.region?.size)
+
+    /*
+     * A solid block of one paint, which is what a fill cannot be allowed to draw a wireframe of. The
+     * region is still the whole truth and the box still says where it is; only the per-cell list —
+     * the one thing that costs 10 µs a cell to draw — is dropped.
+     */
+    const block = createVolume(12, 12, 12, volume.palette)
+    block.data.fill(1)
+    const big = initialState(block)
+    const spot = onModel(big)
+    const hover = reduce(
+        reduce(big, {type: 'tool', tool: 'fill'}),
+        at('move', spot.column, spot.row)
+    ).hover
+    if (!hover) throw new Error('the pointer is over the block')
+    expect(hover.region?.size).toBe(12 * 12 * 12)
+    expect(hover.region?.size).toBeGreaterThan(GHOST_CELLS)
+    expect(hover.cells).toHaveLength(0)
+    expect(hover.bounds).toEqual({min: [0, 0, 0], max: [11, 11, 11]})
 })

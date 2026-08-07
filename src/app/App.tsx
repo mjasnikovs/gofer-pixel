@@ -87,7 +87,8 @@ export const App = ({
      */
     const shown = useMemo(() => shownVolume(volume, state.objects), [volume, state.objects])
 
-    // What the viewport draws — see `previewVolume`. Erase shows its hole before the press.
+    // What the viewport draws — see `previewVolume`. Erase shows its hole and Fill its new paint
+    // before the press, because neither change is visible from the outside of a block.
     const drawn = useMemo(() => previewVolume(state, shown), [state, shown])
 
     const onOrbit = useCallback((event: OrbitEvent, height: number) => {
@@ -394,8 +395,6 @@ export const App = ({
                         volume={shown}
                         camera={state.orbit.camera}
                         hover={state.hover}
-                        tool={state.tool}
-                        color={state.color}
                     />
                     <SelectionBox
                         volume={shown}

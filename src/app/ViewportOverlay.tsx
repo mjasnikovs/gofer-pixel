@@ -139,14 +139,25 @@ export const GroundGrid = ({volume, camera}: {volume: Volume; camera: Camera}) =
 }
 
 /**
- * The block the next click makes or unmakes: the real voxels, in three dimensions, translucent and
- * wireframed — the answer to the question this window could not answer before, which is *what* the
- * press is about to do rather than merely where the pointer is.
+ * The block the next press makes, unmakes, repaints or takes hold of: the real voxels, in three
+ * dimensions, translucent and wireframed — the answer to the question this window could not answer
+ * before, which is *what* the press is about to do rather than merely where the pointer is.
  *
- * The cells come from the state, which got them from the same `strokeCells` the stroke writes with,
- * so this cannot promise a footprint the edit will not deliver.
+ * Every tool on the rail that does anything gets one, and they all get it the same way. What differs
+ * is `kind`, which is a promise about the voxels rather than a name for the button: `write` adds,
+ * `clear` removes, `recolour` repaints, `sample` takes a colour away, `grab` picks voxels up. Two
+ * tools making the same promise look the same, and `app.css` is where each promise gets its paint.
  *
- * Two paths, and neither is a picture of the other:
+ * The cells come from the state, which got them from the same functions the press runs —
+ * `strokeCells`, `connected`, `pressSelection` — so this cannot promise a footprint the edit will
+ * not deliver.
+ *
+ * Above `GHOST_CELLS` the state hands over an empty `cells` and a `bounds`, and the box is drawn
+ * instead. A flood fill can be the whole grid; two million wireframed cubes is not a preview, it is
+ * a hang. What the box loses is the shape, which for a region that large was never legible anyway,
+ * and for `recolour` the shape is on screen regardless — the viewport is rendering the new paint.
+ *
+ * Two paths for the per-cell form, and neither is a picture of the other:
  *
  * - **Skin.** Each cell contributes only the faces that have no neighbour in the footprint and that
  *   point at the camera. That is the outside of the block, and no interior face is ever drawn — so
@@ -158,10 +169,10 @@ export const GroundGrid = ({volume, camera}: {volume: Volume; camera: Camera}) =
  * The back edges show through, deliberately. This is a proposal, not a solid, and a wireframe box
  * that hides its own far side reads as a surface decal rather than as a volume.
  *
- * `blocked` is the case that was silent before: the footprint is off the grid, or locked, or
- * already exactly what the click would write, so the press will do nothing at all. It is drawn
- * dashed and inert rather than in a new colour, because "this does nothing" is the absence of an
- * action and should not look like a second kind of action.
+ * `blocked` is the case that was silent before: the footprint is off the grid, or locked, or already
+ * exactly what the press would write, or — for Pick — the colour is the one already loaded. The
+ * press will do nothing at all. It is drawn dashed and inert rather than in a new colour, because
+ * "this does nothing" is the absence of an action and should not look like a second kind of action.
  */
 /** The three axes, and for each the two it spreads over. Typed so indexing a cell stays a number. */
 type Axis3 = 0 | 1 | 2
@@ -187,19 +198,22 @@ const FLAT: ReadonlySet<number> = new Set([0b0000, 0b1111, 0b0011, 0b1100, 0b010
 export const BrushGhost = ({
     volume,
     camera,
-    hover,
-    tool,
-    color
+    hover
 }: {
     volume: Volume
     camera: Camera
-    hover: {cells: readonly Cell[]; blocked: boolean} | undefined
-    /** Erase is drawn as a hole being opened, Draw as a block being added. See `app.css`. */
-    tool: string
-    /** The loaded palette index. The block is previewed in the paint it would be made of. */
-    color: number
+    hover: GhostHover | undefined
 }) => {
-    if (!hover || hover.cells.length === 0) return undefined
+    if (!hover) return undefined
+    if (hover.cells.length === 0) {
+        return (
+            <GhostBox
+                volume={volume}
+                camera={camera}
+                hover={hover}
+            />
+        )
+    }
     const {right, up, forward, center} = basisFor(camera, volume, 1)
     const project = (p: Vec3): string => {
         const d: Vec3 = [p[0] - center[0], p[1] - center[1], p[2] - center[2]]
@@ -322,18 +336,13 @@ export const BrushGhost = ({
         for (const [x, y] of feet) drop.push(`M${project([x, y, z0])}L${project([x, y, 0])}`)
     }
 
-    // The fill inherits this — see `.brush-ghost-fill`. A preview in a colour the click would not
-    // use says where the block goes and lies about what it is.
-    const at = color * 4
-    const paint = `rgb(${String(volume.palette[at] ?? 255)} ${String(volume.palette[at + 1] ?? 255)} ${String(volume.palette[at + 2] ?? 255)})`
-
     const half = camera.zoom / 2
     return (
         <svg
             className='brush-ghost overlay-plane'
             data-blocked={hover.blocked || undefined}
-            data-tool={tool}
-            style={{color: paint}}
+            data-kind={hover.kind}
+            style={{color: paintOf(volume, hover.paint)}}
             viewBox={`${String(-half)} ${String(-half)} ${String(camera.zoom)} ${String(camera.zoom)}`}
             preserveAspectRatio='xMidYMid slice'
             aria-hidden='true'
@@ -351,6 +360,92 @@ export const BrushGhost = ({
             <path
                 className='brush-ghost-outline'
                 d={wire.join('')}
+                fill='none'
+                vectorEffect='non-scaling-stroke'
+            />
+        </svg>
+    )
+}
+
+/**
+ * What the state hands the ghost. The shape rather than `Hover` itself, so the overlay depends on
+ * the four fields it draws from and not on the twenty the reducer keeps.
+ */
+export interface GhostHover {
+    readonly kind: string
+    /** Empty when the footprint is over `GHOST_CELLS`; `bounds` is the answer then. */
+    readonly cells: readonly Cell[]
+    readonly bounds: {min: Cell; max: Cell} | undefined
+    /** Palette index, or `undefined` for a proposal that puts no paint anywhere. */
+    readonly paint: number | undefined
+    readonly blocked: boolean
+}
+
+/**
+ * The colour the proposal would be made of, as CSS. `.brush-ghost-fill` inherits it — a preview in a
+ * colour the press would not use says where the block goes and lies about what it is.
+ *
+ * `undefined` means the kind puts no paint anywhere — Erase, and the four that only take hold of
+ * voxels. Those fall back to the theme, which is what their rules in `app.css` are written against.
+ */
+const paintOf = (volume: Volume, index: number | undefined): string | undefined => {
+    if (index === undefined) return undefined
+    const at = index * 4
+    const [r, g, b] = [
+        volume.palette[at] ?? 255,
+        volume.palette[at + 1] ?? 255,
+        volume.palette[at + 2] ?? 255
+    ]
+    return `rgb(${String(r)} ${String(g)} ${String(b)})`
+}
+
+/**
+ * The same proposal, reduced to its box, for a footprint too large to draw one cube each.
+ *
+ * Twelve edges of the integer bounds, projected with the live basis — the same drawing `SelectionBox`
+ * makes, because it is answering the same question about a region of the same kind. It carries the
+ * ghost's own `data-kind` and `data-blocked` so a capped preview is still the colour of the promise
+ * it is making, and it does not repeat the shadow: the drop lines exist to say how high a small
+ * floating block is, and a region this size is not floating anywhere.
+ */
+const GhostBox = ({volume, camera, hover}: {volume: Volume; camera: Camera; hover: GhostHover}) => {
+    const {bounds} = hover
+    if (!bounds) return undefined
+    const {right, up, center} = basisFor(camera, volume, 1)
+    const project = (p: Vec3): {x: number; y: number} => {
+        const d: Vec3 = [p[0] - center[0], p[1] - center[1], p[2] - center[2]]
+        return {x: dot(d, right), y: -dot(d, up)}
+    }
+    const {min, max} = bounds
+    const flat: {x: number; y: number}[] = []
+    for (let i = 0; i < 8; i += 1) {
+        flat.push(
+            project([
+                (i & 1) === 0 ? min[0] : max[0] + 1,
+                ((i >> 1) & 1) === 0 ? min[1] : max[1] + 1,
+                ((i >> 2) & 1) === 0 ? min[2] : max[2] + 1
+            ])
+        )
+    }
+
+    const half = camera.zoom / 2
+    return (
+        <svg
+            className='brush-ghost overlay-plane'
+            data-blocked={hover.blocked || undefined}
+            data-kind={hover.kind}
+            style={{color: paintOf(volume, hover.paint)}}
+            viewBox={`${String(-half)} ${String(-half)} ${String(camera.zoom)} ${String(camera.zoom)}`}
+            preserveAspectRatio='xMidYMid slice'
+            aria-hidden='true'
+        >
+            <path
+                className='brush-ghost-outline'
+                d={BOX_EDGES.map(
+                    ([from, to]) =>
+                        `M${String(flat[from]?.x ?? 0)} ${String(flat[from]?.y ?? 0)}`
+                        + `L${String(flat[to]?.x ?? 0)} ${String(flat[to]?.y ?? 0)}`
+                ).join('')}
                 fill='none'
                 vectorEffect='non-scaling-stroke'
             />

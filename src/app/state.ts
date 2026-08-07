@@ -16,7 +16,15 @@ import {
     ISOMETRIC_PITCH,
     type NamedCamera
 } from '../doc/cameras'
-import {beginEdit, commitEdit, fillRegion, strokeCells, writeCells, type Draft} from '../doc/edits'
+import {
+    beginEdit,
+    commitEdit,
+    connected,
+    fillRegion,
+    strokeCells,
+    writeCells,
+    type Draft
+} from '../doc/edits'
 import {figureCells} from '../doc/figures'
 import {
     addObject,
@@ -128,6 +136,30 @@ const WRITES: ReadonlySet<Tool> = new Set<Tool>(['draw', 'erase', 'fill', 'pick'
  * `FEATURESET.md` §39 is explicit that the rail should not grow one.
  */
 const SELECTS: ReadonlySet<Tool> = new Set<Tool>(['move', 'rotate', 'scale', 'clone'])
+
+/**
+ * Every tool that does something with the left button, and therefore every tool that owes the artist
+ * a picture of what that something is before they commit to it.
+ *
+ * Measure is the only one missing, because it is not built: arming it leaves the button to the
+ * camera, and previewing a gesture that does not exist would be the worst lie of the lot.
+ */
+const AIMS: ReadonlySet<Tool> = new Set<Tool>([...WRITES, ...SELECTS])
+
+/**
+ * How many cells the overlay will draw one cube each for, before it gives up and draws the box.
+ *
+ * Measured, in `bun test` under happy-dom, by rendering `BrushGhost` at sizes from 64 to 14 000
+ * cells: the cost is linear at 10 µs a cell from 500 cells up, so 512 is about 5 ms — one pointer
+ * move's worth, and the number stays honest on the slow side of the 14× spread `CLAUDE.md` records
+ * for a busy GPU.
+ *
+ * 512 is also exactly the largest brush there is, a `MAX_BRUSH` cube, so the brush panel on its own
+ * can never push the ghost over. What does push it over is a flood fill, a whole object, or that
+ * same cube under eight-way symmetry — answers that are a region rather than a footprint, and that
+ * read better as a box than as four thousand wireframed cubes would.
+ */
+export const GHOST_CELLS = 512
 
 /**
  * What the floating bar over a selection can do — `FEATURESET.md` §9, plus delete and recolour.
@@ -253,16 +285,40 @@ export interface Stroke {
 }
 
 /**
+ * What kind of change the press would be, which is what the overlay draws it as.
+ *
+ * The kind rather than the tool, because eight tools make five kinds of promise and the overlay
+ * should be answering "what is about to happen here" rather than "which button is lit". Two tools
+ * that do the same thing to the voxels — Move and Rotate both pick a selection up — have no
+ * business looking different before the press.
+ */
+export type HoverKind =
+    /** Voxels appear, in the loaded colour. Draw. */
+    | 'write'
+    /** Voxels go. Erase. */
+    | 'clear'
+    /** Voxels that are already there change colour. Fill. */
+    | 'recolour'
+    /** Nothing changes in the grid; a colour comes back out of it. Pick. */
+    | 'sample'
+    /** Nothing changes yet; these are the voxels the gesture takes hold of. Move, Rotate, Scale, Clone. */
+    | 'grab'
+
+/**
  * Where the next click would land, computed on every pointer move that is not already a gesture.
  *
- * It is not a hint and not an approximation: `cells` comes out of the same `strokeCells` and the
- * same symmetry maps that `beginStroke` writes with, so the outline on screen cannot disagree with
- * the edit it is previewing. Without it the artist aims a one-voxel brush at a 3-pixel voxel and
- * finds out where it went afterwards — and finds out nothing at all when the answer is `blocked`.
+ * It is not a hint and not an approximation: every tool's answer comes out of the same function the
+ * press itself uses — `strokeCells` and the symmetry maps for Draw and Erase, `connected` for Fill,
+ * `pressSelection` for the four that take hold of voxels — so the outline on screen cannot disagree
+ * with the edit it is previewing. Without it the artist aims a one-voxel brush at a 3-pixel voxel
+ * and finds out where it went afterwards — and finds out nothing at all when the answer is
+ * `blocked`.
  */
 export interface Hover {
     /** The cell the click would write into: in front of the face for Draw, the voxel for the rest. */
     readonly cell: Cell
+    /** What the press would do to the voxels below, which is what the overlay draws. */
+    readonly kind: HoverKind
     /** The face the ray struck, which is what a flat brush lies in. */
     readonly face: number
     /**
@@ -274,12 +330,37 @@ export interface Hover {
      * plane, arrived at from the two directions the tools approach it from.
      */
     readonly surface: number
-    /** Every cell the click would write, mirrors included. May be empty when all of them are off-grid. */
+    /**
+     * Every cell the press acts on, mirrors included, as triples — which is what the overlay draws
+     * one cube per. May be empty because all of them are off-grid, and may be empty because there
+     * are more than `GHOST_CELLS` of them; `region` and `bounds` are the answer in that case.
+     *
+     * Triples rather than the flat indices `region` uses, because a brush hanging over the edge of
+     * the grid has cells at negative coordinates and no index can hold one. That overhang is
+     * exactly what `blocked` is reporting, so it has to survive as far as the screen.
+     */
     readonly cells: readonly Offset[]
     /**
-     * The click would write nothing — the brush is entirely off the grid, which is what happens on
-     * any face flush with the volume's boundary. A press there is silent, so the outline has to say
-     * it before the press rather than after.
+     * The same answer as flat cell indices, for the tools whose answer has no size limit: a fill can
+     * be the whole grid and a grab can be a whole object. Undefined for Draw, Erase and Pick, whose
+     * footprint is the brush and is never larger than `MAX_BRUSH` cubed.
+     *
+     * Indices rather than triples so a two-million-cell region costs one integer each instead of one
+     * array each, and so `previewVolume` can write it straight into the grid.
+     */
+    readonly region: Selection | undefined
+    /** The integer box the whole answer occupies, so a footprint too big to draw still says where it is. */
+    readonly bounds: {min: Cell; max: Cell} | undefined
+    /**
+     * The palette index the proposal should be drawn in, or `undefined` for the kinds that put no
+     * paint anywhere. Draw and Fill propose the loaded colour; Pick proposes the colour it would
+     * take *out* of the model, which is not the loaded one and must not be drawn as though it were.
+     */
+    readonly paint: number | undefined
+    /**
+     * The press would change nothing — the brush is entirely off the grid, the voxels are locked, or
+     * they already hold exactly what is about to be written. A press there is silent, so the outline
+     * has to say it before the press rather than after.
      */
     readonly blocked: boolean
 }
@@ -620,36 +701,156 @@ const wouldWrite = (
 /**
  * The grid the *viewport* draws, which is not always the grid the document holds.
  *
- * With Erase armed, the cells under the cursor come out before the frame is cast, so the artist
- * sees the hole they are about to open. It is worth a grid copy per pointer move — the same bill a
- * stroke already pays — because erasing into a solid, evenly coloured block is otherwise invisible:
- * measured on `car.vox`, up to 18 of 41 erases left the clicked pixel byte for byte identical, the
- * voxel exposed behind carrying the same palette entry and the same face.
+ * Two of the five hover kinds change voxels that are already there, and a change to a voxel that is
+ * already there cannot be shown by drawing a block over it — the block would be covering the very
+ * pixels whose change is the point. So those two are rendered: the grid handed to the viewport is
+ * the document with the proposal already applied.
  *
- * Only Erase. Draw's new voxels sit in empty space, where the translucent block in `BrushGhost`
- * already reads correctly, and painting them into the render would make a proposal look like a fact.
+ * - **`clear`.** Erasing into a solid, evenly coloured block is otherwise invisible: measured on
+ *   `car.vox`, up to 18 of 41 erases left the clicked pixel byte for byte identical, the voxel
+ *   exposed behind carrying the same palette entry and the same face.
+ * - **`recolour`.** A fill's whole answer is *which* voxels change, and that answer is a region the
+ *   artist has no other way to see. An outline round two thousand cells says where; only the paint
+ *   says what.
+ *
+ * It costs a grid copy per pointer move, which is the same bill a stroke already pays.
+ *
+ * `write` is deliberately not here. Draw's new voxels sit in empty space, where the translucent
+ * block in `BrushGhost` already reads correctly, and painting them into the render would make a
+ * proposal look like a fact. `sample` and `grab` change no voxels at all.
  */
 export const previewVolume = (state: AppState, shown: Volume): Volume => {
     const {hover} = state
-    if (!hover || state.tool !== 'erase' || hover.blocked) return shown
-    const data = new Uint8Array(shown.data)
-    for (const [x, y, z] of hover.cells) {
-        if (x < 0 || y < 0 || z < 0) continue
-        if (x >= shown.sx || y >= shown.sy || z >= shown.sz) continue
-        data[voxelIndex(shown, x, y, z)] = 0
+    if (!hover || hover.blocked) return shown
+    if (hover.kind === 'clear') {
+        const data = new Uint8Array(shown.data)
+        for (const [x, y, z] of hover.cells) {
+            if (x < 0 || y < 0 || z < 0) continue
+            if (x >= shown.sx || y >= shown.sy || z >= shown.sz) continue
+            data[voxelIndex(shown, x, y, z)] = 0
+        }
+        return {...shown, data}
     }
-    return {...shown, data}
+    if (hover.kind === 'recolour' && hover.region) {
+        const data = new Uint8Array(shown.data)
+        /*
+         * Indices, straight in — the region was flooded over the document, which has these same
+         * dimensions, so no index can be out of range.
+         *
+         * Only into cells that are still occupied here. The fill floods the whole document, hidden
+         * objects included, but `shown` has emptied those out; writing paint into one would make a
+         * hidden voxel appear, which is a bigger lie than not previewing a change nobody can see.
+         */
+        for (const index of hover.region) if (data[index] !== 0) data[index] = state.color
+        return {...shown, data}
+    }
+    return shown
 }
 
 const withHover = (state: AppState, hover: Hover | undefined): AppState =>
     state.hover === undefined && hover === undefined ? state : {...state, hover}
 
 /**
- * Where the next click would land, decided by the same reasoning `beginStroke` uses.
+ * Which voxels a press with a selecting tool takes hold of — `FEATURESET.md` §31's four gestures,
+ * plus the surface patch a pull grabs.
  *
- * Every branch below is the one two functions down, deliberately: which cell Draw aims at, which
- * face orients the brush, what a plane lock and slice mode override. The preview is worth having
- * only for as long as it cannot be more optimistic than the edit.
+ * One function, called twice: by `beginSelect` when the button goes down, and by `hoverAt` a moment
+ * earlier so the artist sees the answer first. Two copies of this reasoning would be two chances for
+ * the outline to promise a selection the press does not make, and the whole point of the outline is
+ * that it cannot.
+ */
+const pressSelection = (
+    state: AppState,
+    volume: Volume,
+    hit: {x: number; y: number; z: number; face: number},
+    event: {clicks: number; alt: boolean}
+): Selection => {
+    /*
+     * The Scale tool pulls a surface. What it grabs is the patch under the cursor rather than the
+     * standing selection, because a pull is aimed at a face and the artist is pointing at one.
+     */
+    if (state.tool === 'scale') {
+        return facePatch(volume, hit.x, hit.y, hit.z, FACE_STEP[hit.face] ?? [0, 0, 0])
+    }
+    /*
+     * Pressing on a voxel that is *already* selected keeps the whole selection instead of collapsing
+     * it to one cell, which is what makes a rubber-banded group draggable.
+     */
+    const already = state.selection.has(voxelIndex(state.volume, hit.x, hit.y, hit.z))
+    // Alt means the *named* object, not the connected solid: with a list of objects to point at,
+    // `FEATURESET.md` §31's "modifier-click = whole object" has an exact answer, and two pieces of
+    // one object that do not touch are still one object.
+    const owned = ownerAt(state.volume, hit.x, hit.y, hit.z)
+    return (
+        event.clicks >= 2 ? selectConnectedColor(volume, hit.x, hit.y, hit.z)
+        : event.alt && owned !== 0 ? objectCells(state.volume, owned)
+        : event.alt ? selectObject(volume, hit.x, hit.y, hit.z)
+        : already ? state.selection
+        : selectVoxel(volume, hit.x, hit.y, hit.z)
+    )
+}
+
+/**
+ * The last region a hover computed, so the pointer moving inside one voxel does not re-flood it.
+ *
+ * Fill and the grab tools answer with a traversal rather than with a footprint, and a traversal is
+ * not free: measured, a 128³ grid of a single colour is 487 ms to flood, of which 200 ms is building
+ * the `Set` — so running one per pointer move would be a two-frames-a-second editor on any document
+ * that is mostly one paint. A realistic model is microseconds, but "realistic" is not a guarantee.
+ *
+ * The pointer is in one place at a time, so one entry is the whole cache. `reduce` stays pure: this
+ * returns only what recomputing would have returned, and the key holds the identity of every input
+ * the answer is derived from, so anything changing is a miss.
+ */
+interface AimKey {
+    readonly tool: Tool
+    readonly seed: number
+    readonly volume: Volume
+    readonly objects: Objects
+    readonly selection: Selection
+    readonly slice: number | undefined
+    readonly plane: Axis | undefined
+    readonly camera: Camera
+    readonly color: number
+    readonly alt: boolean
+    readonly clicks: number
+    readonly face: number
+}
+
+interface AimAnswer {
+    readonly region: Selection
+    readonly cells: readonly Offset[]
+    readonly bounds: {min: Cell; max: Cell} | undefined
+    readonly blocked: boolean
+}
+
+let aimed: {key: AimKey; answer: AimAnswer} | undefined
+
+const sameAim = (a: AimKey, b: AimKey): boolean =>
+    a.tool === b.tool
+    && a.seed === b.seed
+    && a.volume === b.volume
+    && a.objects === b.objects
+    && a.selection === b.selection
+    && a.slice === b.slice
+    && a.plane === b.plane
+    && a.camera === b.camera
+    && a.color === b.color
+    && a.alt === b.alt
+    && a.clicks === b.clicks
+    && a.face === b.face
+
+/** A region as triples, but only when there are few enough for the overlay to draw one cube each. */
+const drawable = (volume: Volume, region: Selection): readonly Offset[] =>
+    region.size > GHOST_CELLS ? [] : [...region].map(index => cellOf(volume, index))
+
+/**
+ * Where the next click would land, decided by the same reasoning the press itself uses.
+ *
+ * Every branch below is one from `beginStroke` or `beginSelect`, deliberately: which cell Draw aims
+ * at, which face orients the brush, what a plane lock and slice mode override, which grid a fill
+ * floods and which one a grab selects on. The preview is worth having only for as long as it cannot
+ * be more optimistic than the edit.
  *
  * It reads `aim` — the last place the pointer was seen — rather than an event, so that changing the
  * brush, the colour, the tool or the model re-aims without the artist having to jiggle the mouse.
@@ -662,7 +863,7 @@ const hoverAt = (state: AppState): AppState => {
     // chased an orbit would be aiming at a picture that is still moving.
     if (state.stroke || state.drag || state.band) return withHover(state, undefined)
     if (state.orbit.gesture !== undefined) return withHover(state, undefined)
-    if (!WRITES.has(state.tool)) return withHover(state, undefined)
+    if (!AIMS.has(state.tool)) return withHover(state, undefined)
     if (event.height <= 0 || event.width <= 0) return withHover(state, undefined)
     const volume = visible(state)
     const basis = basisFor(state.orbit.camera, volume, event.height)
@@ -671,24 +872,11 @@ const hoverAt = (state: AppState): AppState => {
 
     const outward = state.tool === 'draw' && !event.alt
     const cell: Cell = outward ? hit.place : [hit.x, hit.y, hit.z]
-    // The floor is a surface to draw on, and nothing to erase, recolour or take a colour from.
+    // The floor is a surface to draw on, and nothing to erase, recolour, sample or take hold of.
     if (!outward && hit.value === 0) return withHover(state, undefined)
 
     const axis = state.plane ?? faceAxis(hit.face)
     const face = state.plane === undefined ? hit.face : axis * 2 + 1
-    /*
-     * Fill and Pick do not stamp a footprint, so showing them one would be a lie about the size of
-     * what is coming. They get the single cell the ray landed on, which is all either of them acts
-     * on — the region a fill would flood is the fill's own answer and costs a traversal per move.
-     */
-    const cells =
-        state.tool === 'fill' || state.tool === 'pick' ?
-            [cell]
-        :   mirrored(state, strokeCells(state.brush, face, cell, cell))
-    const value = state.tool === 'erase' ? 0 : state.color
-    const locked = lockedIds(state.objects)
-    const blocked =
-        state.tool === 'pick' ? false : !cells.some(spot => wouldWrite(state, locked, spot, value))
     /*
      * The struck face, as a plane. Face codes pair up odd-negative, even-positive, so a `+` face
      * sits at the far side of the voxel it belongs to and at the near side of the cell in front of
@@ -696,7 +884,135 @@ const hoverAt = (state: AppState): AppState => {
      */
     const positive = face % 2 === 0
     const surface = cell[axis] + (positive === outward ? 0 : 1)
-    return withHover(state, {cell, face, surface, cells, blocked})
+    const at = {cell, face, surface}
+    const locked = lockedIds(state.objects)
+
+    // Pick reads the model and writes nothing, so it proposes the colour it would take out rather
+    // than the one that is loaded — and it is blocked when that colour is already the loaded one,
+    // which is the one press with this tool that genuinely does nothing.
+    if (state.tool === 'pick') {
+        return withHover(state, {
+            ...at,
+            kind: 'sample',
+            cells: [cell],
+            region: undefined,
+            bounds: {min: cell, max: cell},
+            paint: hit.value,
+            blocked: hit.value === state.color
+        })
+    }
+
+    if (state.tool === 'draw' || state.tool === 'erase') {
+        const cells = mirrored(state, strokeCells(state.brush, face, cell, cell))
+        const value = state.tool === 'erase' ? 0 : state.color
+        return withHover(state, {
+            ...at,
+            kind: state.tool === 'erase' ? 'clear' : 'write',
+            // The whole footprint, off-grid cells included — `blocked` is exactly the report that
+            // some of them are, so it is asked before anything is trimmed.
+            blocked: !cells.some(spot => wouldWrite(state, locked, spot, value)),
+            cells: cells.length > GHOST_CELLS ? [] : cells,
+            region: undefined,
+            bounds: footprintBox(cells),
+            paint: state.tool === 'erase' ? undefined : state.color
+        })
+    }
+
+    /*
+     * Fill and the four grab tools answer with a traversal. Both go through the cache, and both run
+     * the traversal against the grid the press will run it against — which is not the same grid for
+     * the two of them, and getting that wrong is how a preview starts lying:
+     *
+     * - **Fill** floods the *document*. `beginStroke` opens a draft over `state.volume`, so a fill
+     *   crosses into hidden objects and out of the current slice, and a preview that stopped at the
+     *   visible surface would under-promise.
+     * - **Grab** selects on the *visible* grid, because a rubber band and a click both mean "what I
+     *   can see", and `beginSelect` picks against `visible(state)` for that reason.
+     */
+    const seed = voxelIndex(state.volume, hit.x, hit.y, hit.z)
+    const key: AimKey = {
+        tool: state.tool,
+        seed,
+        volume: state.volume,
+        objects: state.objects,
+        selection: state.selection,
+        slice: state.slice,
+        plane: state.plane,
+        camera: state.orbit.camera,
+        color: state.color,
+        alt: event.alt,
+        clicks: event.clicks,
+        face: hit.face
+    }
+    const answer =
+        aimed && sameAim(aimed.key, key) ?
+            aimed.answer
+        :   solveRegion(state, volume, hit, event, locked)
+    aimed = {key, answer}
+
+    return withHover(state, {
+        ...at,
+        kind: state.tool === 'fill' ? 'recolour' : 'grab',
+        cells: answer.cells,
+        region: answer.region,
+        bounds: answer.bounds,
+        paint: state.tool === 'fill' ? state.color : undefined,
+        blocked: answer.blocked
+    })
+}
+
+/** The box a list of offsets occupies, off-grid ends included. `undefined` for an empty list. */
+const footprintBox = (cells: readonly Offset[]): {min: Cell; max: Cell} | undefined => {
+    if (cells.length === 0) return undefined
+    let [x0, y0, z0] = [Infinity, Infinity, Infinity]
+    let [x1, y1, z1] = [-Infinity, -Infinity, -Infinity]
+    for (const [x, y, z] of cells) {
+        x0 = Math.min(x0, x)
+        y0 = Math.min(y0, y)
+        z0 = Math.min(z0, z)
+        x1 = Math.max(x1, x)
+        y1 = Math.max(y1, y)
+        z1 = Math.max(z1, z)
+    }
+    return {min: [x0, y0, z0], max: [x1, y1, z1]}
+}
+
+/** The expensive half of `hoverAt`, split out so the cache above has one thing to guard. */
+const solveRegion = (
+    state: AppState,
+    volume: Volume,
+    hit: {x: number; y: number; z: number; face: number},
+    event: {clicks: number; alt: boolean},
+    locked: ReadonlySet<number>
+): AimAnswer => {
+    if (state.tool === 'fill') {
+        // `fillRegion` is this traversal plus a write, over the document. Same seed, same grid.
+        const region = connected(state.volume, hit.x, hit.y, hit.z)
+        return {
+            region,
+            cells: drawable(state.volume, region),
+            bounds: selectionBounds(state.volume, region),
+            // A region that is already the loaded colour, or entirely locked, recolours to nothing.
+            blocked: !someCell(state.volume, region, spot =>
+                wouldWrite(state, locked, spot, state.color)
+            )
+        }
+    }
+    const region = pressSelection(state, volume, hit, event)
+    return {
+        region,
+        cells: drawable(state.volume, region),
+        bounds: selectionBounds(state.volume, region),
+        // Nothing under the cursor to take hold of. A grab writes nothing by itself, so there is no
+        // other way for it to be silent.
+        blocked: region.size === 0
+    }
+}
+
+/** `Array.some` over a region, without expanding two million indices into two million arrays. */
+const someCell = (volume: Volume, region: Selection, ok: (cell: Cell) => boolean): boolean => {
+    for (const index of region) if (ok(cellOf(volume, index))) return true
+    return false
 }
 
 const beginStroke = (state: AppState, event: ViewportPointer): AppState => {
@@ -836,12 +1152,8 @@ const beginSelect = (state: AppState, event: ViewportPointer): AppState => {
         }
     }
 
-    /*
-     * The Scale tool pulls a surface. What it grabs is the patch under the cursor rather than the
-     * standing selection, because a pull is aimed at a face and the artist is pointing at one.
-     */
     if (state.tool === 'scale') {
-        const patch = facePatch(volume, hit.x, hit.y, hit.z, FACE_STEP[hit.face] ?? [0, 0, 0])
+        const patch = pressSelection(state, volume, hit, event)
         return {
             ...state,
             selection: patch,
@@ -864,21 +1176,8 @@ const beginSelect = (state: AppState, event: ViewportPointer): AppState => {
      * the pointer then moves, that is what gets carried — so moving one voxel is one gesture rather
      * than click, then aim again, then drag. A press that never moves writes nothing and commits
      * nothing, because the move only fires when the cell under the cursor changes.
-     *
-     * Pressing on a voxel that is *already* selected keeps the whole selection instead of collapsing
-     * it to one cell, which is what makes a rubber-banded group draggable.
      */
-    const already = state.selection.has(voxelIndex(state.volume, hit.x, hit.y, hit.z))
-    // Alt now means the *named* object, not the connected solid: with a list of objects to point
-    // at, `FEATURESET.md` §31's "modifier-click = whole object" has an exact answer, and two
-    // pieces of one object that do not touch are still one object.
-    const owned = ownerAt(state.volume, hit.x, hit.y, hit.z)
-    const selection =
-        event.clicks >= 2 ? selectConnectedColor(volume, hit.x, hit.y, hit.z)
-        : event.alt && owned !== 0 ? objectCells(state.volume, owned)
-        : event.alt ? selectObject(volume, hit.x, hit.y, hit.z)
-        : already ? state.selection
-        : selectVoxel(volume, hit.x, hit.y, hit.z)
+    const selection = pressSelection(state, volume, hit, event)
 
     const axis = faceAxis(hit.face)
     return {
@@ -1628,7 +1927,10 @@ const AIMED_AT: readonly (keyof AppState)[] = [
     'orbit',
     'stroke',
     'drag',
-    'band'
+    'band',
+    // The grab tools read it: a press on a voxel that is already selected keeps the whole selection
+    // rather than collapsing to that one cell, so what is outlined changes when the selection does.
+    'selection'
 ]
 
 export const reduce = (state: AppState, action: AppAction): AppState => {
