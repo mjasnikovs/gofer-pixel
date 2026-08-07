@@ -499,6 +499,12 @@ body,
     padding: 0 12px 12px;
 }
 
+/* The tile being dragged along the strip, so the artist can see which cell they are moving. */
+.view-tile[data-dragging] {
+    opacity: 0.5;
+    outline: 1px dashed var(--color-accent-default);
+}
+
 /* ---- objects ---- */
 
 .object-body {

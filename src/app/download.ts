@@ -1,4 +1,5 @@
 import {encodePng} from '../image/png'
+import type {SheetMetadata} from '../sheet/metadata'
 import {sheetPlane, type Sheet, type SheetMap} from '../sheet/sheet'
 
 /**
@@ -27,13 +28,47 @@ const download = async (
  * The palette as a `.hex` file — `FEATURESET.md` §7's export half. Its import half is a file input
  * in the panel, because reading a file is the browser's job and writing one is this file's.
  */
-export const writePalette = (text: string): void => {
-    const url = URL.createObjectURL(new Blob([text], {type: 'text/plain'}))
+const writeText = (name: string, text: string, type: string): void => {
+    const url = URL.createObjectURL(new Blob([text], {type}))
     const anchor = document.createElement('a')
     anchor.href = url
-    anchor.download = 'palette.hex'
+    anchor.download = name
     anchor.click()
     URL.revokeObjectURL(url)
+}
+
+export const writePalette = (text: string): void => {
+    writeText('palette.hex', text, 'text/plain')
+}
+
+/** `FEATURESET.md` §37's metadata JSON, next to the sheet it describes. */
+export const writeMetadata = (metadata: SheetMetadata): void => {
+    writeText('sprites.json', JSON.stringify(metadata, undefined, 4), 'application/json')
+}
+
+/**
+ * One sprite, cut out of the baked sheet — `FEATURESET.md` §17.
+ *
+ * Cut rather than re-rendered, so the file the artist gets for one camera is byte-for-byte the
+ * cell they were looking at in the sheet. Rendering it again would only be probably identical.
+ */
+export const writeSprite = async (sheet: Sheet, index: number, name: string): Promise<void> => {
+    const plane = sheet.maps.color
+    if (!plane) return
+    const stride = sheet.cell + sheet.padding
+    const ox = sheet.padding + (index % sheet.columns) * stride
+    const oy = sheet.padding + Math.floor(index / sheet.columns) * stride
+    const cut = new Uint8Array(sheet.cell * sheet.cell * 4)
+    for (let row = 0; row < sheet.cell; row += 1) {
+        const from = ((oy + row) * sheet.width + ox) * 4
+        cut.set(plane.subarray(from, from + sheet.cell * 4), row * sheet.cell * 4)
+    }
+    await download(
+        `${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}.png`,
+        sheet.cell,
+        sheet.cell,
+        cut
+    )
 }
 
 const fileName = (map: SheetMap): string => (map === 'color' ? 'sprites.png' : `sprites-${map}.png`)

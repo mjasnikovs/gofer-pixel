@@ -1,6 +1,7 @@
 import {expect, test} from 'bun:test'
 import {eightDirections} from '../doc/cameras'
 import {initialObjects} from '../doc/objects'
+import {sheetMetadata} from './metadata'
 import {readVox} from '../vox/vox-file'
 import {
     DEFAULT_COLUMNS,
@@ -143,4 +144,45 @@ test('a sheet of one camera is one cell, not a row of blanks', () => {
     const [first] = cameras
     const sheet = renderSheet(volume, first ? [first] : [], 32)
     expect([sheet.width, sheet.height, sheet.columns, sheet.rows]).toEqual([32, 32, 1, 1])
+})
+
+test('padding sits between the cells and around the outside', () => {
+    const padded = renderSheet(volume, cameras, 32, ['color'], 2)
+    // Four across, two down, two pixels between and two more all the way round.
+    expect([padded.width, padded.height]).toEqual([4 * 34 + 2, 2 * 34 + 2])
+    expect(padded.padding).toBe(2)
+
+    // The gutters are transparent: nothing bled into them and nothing was drawn there.
+    const colour = sheetColor(padded)
+    for (let column = 0; column < padded.width; column += 1) {
+        expect(colour[column * 4 + 3]).toBe(0)
+    }
+    for (let row = 0; row < padded.height; row += 1) {
+        expect(colour[(row * padded.width + 33) * 4 + 3]).toBe(0)
+    }
+})
+
+test('the metadata places every sprite, names it, and pivots on the model rather than the art', () => {
+    const meta = sheetMetadata(volume, cameras, big, true)
+    expect(meta.sprites).toHaveLength(8)
+    expect(meta.sprites[0]?.name).toBe('Front')
+    expect(meta.cell).toBe(64)
+    expect(meta.maps).toContain('color')
+
+    // Cells are laid out in list order, and the entry says where each one actually is.
+    expect(meta.sprites[0]).toMatchObject({x: 0, y: 0})
+    expect(meta.sprites[4]).toMatchObject({x: 0, y: 64})
+
+    // No pan and no zoom difference across the ring, so every sprite pivots on the same pixel.
+    expect(
+        new Set(meta.sprites.map(entry => `${String(entry.pivotX)},${String(entry.pivotY)}`)).size
+    ).toBe(1)
+
+    // The bounds are the opaque box, so they are inside the cell and not the whole of it.
+    for (const entry of meta.sprites) {
+        if (!entry.bounds) throw new Error('every sprite of car.vox has artwork in it')
+        expect(entry.bounds.width).toBeLessThanOrEqual(64)
+        expect(entry.bounds.width).toBeGreaterThan(0)
+    }
+    expect(sheetMetadata(volume, cameras, big, false).sprites[0]?.bounds).toBeUndefined()
 })

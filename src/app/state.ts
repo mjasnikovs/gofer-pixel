@@ -235,11 +235,19 @@ export interface AppState {
     readonly cameras: readonly NamedCamera[]
     /** Which stored camera the viewport is currently showing, if it still matches one. */
     readonly selected: string | undefined
+    /** The camera being dragged along the views strip, if one is — `FEATURESET.md` §16. */
+    readonly dragging: string | undefined
     readonly orbit: OrbitState
     /** Which of the four maps the viewport draws — the same enum the shader takes. */
     readonly map: number
     /** Edge of one sprite in the sheet, in pixels. */
     readonly cell: number
+    /** Transparent pixels between cells and around the sheet — `FEATURESET.md` §16. */
+    readonly padding: number
+    /** Whether the metadata JSON carries each sprite's opaque box — `FEATURESET.md` §37. */
+    readonly bounds: boolean
+    /** Presets the artist saved, on top of the built-in ones — `FEATURESET.md` §38. */
+    readonly presets: readonly {name: string; maps: readonly SheetMap[]}[]
     /**
      * Edge of the sprite the Renders panel previews, in pixels — `FEATURESET.md` §15.
      *
@@ -330,6 +338,12 @@ export type AppAction =
     | {type: 'map'; map: number}
     | {type: 'cell'; cell: number}
     | {type: 'preview'; size: number}
+    | {type: 'padding'; padding: number}
+    | {type: 'bounds'; on: boolean}
+    | {type: 'save-preset'; name: string; maps: readonly SheetMap[]}
+    | {type: 'drop-preset'; name: string}
+    | {type: 'reorder-camera'; id: string; to: number}
+    | {type: 'drag-camera'; id: string | undefined}
     | {type: 'bake'}
     | {type: 'written'}
     | {type: 'tool'; tool: Tool}
@@ -362,8 +376,13 @@ export const PRESETS = [
     {name: 'Every map', maps: [...SHEET_MAPS]}
 ] as const satisfies readonly {name: string; maps: readonly SheetMap[]}[]
 
-export const presetMaps = (name: string): readonly SheetMap[] =>
-    PRESETS.find(entry => entry.name === name)?.maps ?? PRESETS[0].maps
+export const presetMaps = (state: AppState, name: string): readonly SheetMap[] =>
+    [...PRESETS, ...state.presets].find(entry => entry.name === name)?.maps ?? PRESETS[0].maps
+
+/** Built-in and saved, in the order the selector lists them. */
+export const allPresets = (
+    state: AppState
+): readonly {name: string; maps: readonly SheetMap[]}[] => [...PRESETS, ...state.presets]
 
 /**
  * The three-quarter view, not the front one. A straight-on elevation of a voxel model is a
@@ -380,12 +399,16 @@ export const initialState = (volume: Volume): AppState => {
         volume,
         cameras,
         selected: first?.id,
+        dragging: undefined,
         orbit: {
             camera: first?.camera ?? createCamera(volume, 0, ISOMETRIC_PITCH),
             gesture: undefined
         },
         map: MODE_COLOR,
         cell: 64,
+        padding: 0,
+        bounds: false,
+        presets: [],
         preview: 64,
         sheet: undefined,
         exporting: false,
@@ -1092,6 +1115,52 @@ export const reduce = (state: AppState, action: AppAction): AppState => {
         case 'preview':
             return {...state, preview: action.size}
 
+        case 'padding':
+            return {...state, padding: Math.max(0, Math.round(action.padding)), sheet: undefined}
+
+        case 'bounds':
+            // Only the JSON changes, so the baked sheet is still good.
+            return {...state, bounds: action.on}
+
+        /*
+         * A preset the artist saved — `FEATURESET.md` §38. Saving over one that exists replaces it,
+         * because two presets with one name is a list nobody can use, and the artist who typed the
+         * same name twice meant the second one.
+         */
+        case 'save-preset': {
+            const name = action.name.trim()
+            if (name === '' || PRESETS.some(entry => entry.name === name)) return state
+            const kept = state.presets.filter(entry => entry.name !== name)
+            return {...state, presets: [...kept, {name, maps: action.maps}], preset: name}
+        }
+
+        case 'drop-preset': {
+            const presets = state.presets.filter(entry => entry.name !== action.name)
+            if (presets.length === state.presets.length) return state
+            return {
+                ...state,
+                presets,
+                preset: state.preset === action.name ? PRESETS[0].name : state.preset
+            }
+        }
+
+        /*
+         * Reordering the camera list is reordering the *sheet*: the cells are laid out in list
+         * order, so this is `FEATURESET.md` §16's "drag to reorder" and it invalidates the bake.
+         */
+        case 'drag-camera':
+            return {...state, dragging: action.id}
+
+        case 'reorder-camera': {
+            const from = state.cameras.findIndex(({id}) => id === action.id)
+            if (from < 0 || from === action.to) return state
+            const cameras = [...state.cameras]
+            const [taken] = cameras.splice(from, 1)
+            if (!taken) return state
+            cameras.splice(Math.max(0, Math.min(cameras.length, action.to)), 0, taken)
+            return {...state, cameras, sheet: undefined}
+        }
+
         case 'bake':
             return {
                 ...state,
@@ -1102,7 +1171,8 @@ export const reduce = (state: AppState, action: AppAction): AppState => {
                     visible(state),
                     state.cameras,
                     state.cell,
-                    presetMaps(state.preset)
+                    presetMaps(state, state.preset),
+                    state.padding
                 )
             }
 

@@ -11,7 +11,8 @@ import {writeSheetMap} from './download'
 import {GearIcon} from './icons'
 import {SectionHead} from './SectionHead'
 import {Thumbnail} from './Thumbnail'
-import {PRESETS} from './state'
+/** A texel each side is what stops a sampler bleeding one sprite into the next; four is generous. */
+const PADDINGS = [0, 1, 2, 4] as const
 
 const MAP_LABELS: Record<SheetMap, string> = {
     color: 'colour',
@@ -45,18 +46,34 @@ export const ExportPanel = ({
     cell,
     sheet,
     preset,
+    presets,
+    padding,
+    bounds,
     onPreset,
     onCell,
-    onExport
+    onExport,
+    onPadding,
+    onBounds,
+    onSprites,
+    onMetadata,
+    onSavePreset
 }: {
     volume: Volume
     cameras: readonly NamedCamera[]
     cell: number
     sheet: Sheet | undefined
     preset: string
+    presets: readonly {name: string; maps: readonly SheetMap[]}[]
+    padding: number
+    bounds: boolean
     onPreset: (preset: string) => void
     onCell: (cell: number) => void
     onExport: () => void
+    onPadding: (padding: number) => void
+    onBounds: (on: boolean) => void
+    onSprites: () => void
+    onMetadata: () => void
+    onSavePreset: () => void
 }) => (
     <section className='section section-grows'>
         <SectionHead title='Export preset'>
@@ -86,17 +103,67 @@ export const ExportPanel = ({
                     size='sm'
                     width='100%'
                     value={preset}
-                    options={PRESETS.map(entry => ({value: entry.name, label: entry.name}))}
+                    options={presets.map(entry => ({value: entry.name, label: entry.name}))}
                     onChange={onPreset}
                 />
                 <IconButton
-                    label='Preset settings'
-                    tooltip='Preset settings'
+                    label='Save these maps as a preset'
+                    tooltip='Save the maps this preset writes under a new name'
                     icon={<GearIcon />}
                     size='sm'
                     variant='ghost'
-                    isDisabled
+                    onClick={onSavePreset}
                 />
+            </div>
+
+            {/*
+             * Padding and collision bounds — `FEATURESET.md` §16 and §37. Padding is in the same
+             * row as the switch that decides whether the JSON carries a box, because the two are
+             * the whole of "what shape does the engine get" and neither needs a section.
+             */}
+            <div className='field-row'>
+                <Text
+                    type='supporting'
+                    color='disabled'
+                >
+                    Padding
+                </Text>
+                <span className='spacer' />
+                <span
+                    className='symmetry-row'
+                    role='radiogroup'
+                    aria-label='Padding between sprites'
+                >
+                    {PADDINGS.map(size => (
+                        <button
+                            key={size}
+                            type='button'
+                            role='radio'
+                            aria-checked={size === padding}
+                            aria-label={`${String(size)} pixels of padding`}
+                            className='symmetry-axis'
+                            data-on={size === padding || undefined}
+                            onClick={() => {
+                                onPadding(size)
+                            }}
+                        >
+                            {size}
+                        </button>
+                    ))}
+                </span>
+                <button
+                    type='button'
+                    role='switch'
+                    aria-checked={bounds}
+                    aria-label='Write collision bounds into the metadata'
+                    className='symmetry-axis'
+                    data-on={bounds || undefined}
+                    onClick={() => {
+                        onBounds(!bounds)
+                    }}
+                >
+                    BOX
+                </button>
             </div>
 
             <div className='checker export-grid'>
@@ -116,8 +183,9 @@ export const ExportPanel = ({
                 color='disabled'
             >
                 {sheet ?
-                    `Written: ${String(sheet.width)} × ${String(sheet.height)}, ${String(sheet.columns)} across`
-                :   `${String(cameras.length)} sprites at ${String(cell)} px — colour and normal`}
+                    `Written: ${String(sheet.width)} × ${String(sheet.height)}, `
+                    + `${String(sheet.columns)} across`
+                :   `${String(cameras.length)} sprites at ${String(cell)} px`}
             </Text>
         </div>
 
@@ -142,8 +210,12 @@ export const ExportPanel = ({
                         }
                     })),
                     {type: 'divider'},
-                    {label: 'Individual sprites (not built)', isDisabled: true},
-                    {label: 'Metadata JSON (not built)', isDisabled: true}
+                    {
+                        label: 'Download every sprite separately',
+                        isDisabled: !sheet,
+                        onClick: onSprites
+                    },
+                    {label: 'Download metadata JSON', isDisabled: !sheet, onClick: onMetadata}
                 ]}
             />
         </div>

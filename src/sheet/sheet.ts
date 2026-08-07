@@ -19,6 +19,8 @@ export interface Sheet {
     readonly cell: number
     readonly columns: number
     readonly rows: number
+    /** Transparent pixels between cells and around the edge — `FEATURESET.md` §16. */
+    readonly padding: number
     /**
      * Only the maps that were asked for, colour always among them.
      *
@@ -65,17 +67,27 @@ export const sheetPlane = (sheet: Sheet, map: SheetMap): Uint8Array | undefined 
 /** The colour sheet, which every sheet has: it is what the preview and the packing are made of. */
 export const sheetColor = (sheet: Sheet): Uint8Array => sheet.maps.color ?? new Uint8Array(0)
 
+/**
+ * Padding is transparent and goes between the cells *and* around the outside.
+ *
+ * Around the outside as well, because the reason to pad at all is that a renderer sampling a
+ * sprite's edge texel bleeds into its neighbour — and the sheet's own border is a neighbour as far
+ * as clamping and mipmapping are concerned.
+ */
 export const renderSheet = (
     volume: Volume,
     cameras: readonly NamedCamera[],
     cell: number,
     wanted: readonly SheetMap[] = SHEET_MAPS,
+    padding = 0,
     columns = DEFAULT_COLUMNS
 ): Sheet => {
     const across = Math.max(1, Math.min(columns, cameras.length || 1))
     const rows = Math.max(1, Math.ceil(cameras.length / across))
-    const width = across * cell
-    const height = rows * cell
+    const pad = Math.max(0, Math.round(padding))
+    const stride = cell + pad
+    const width = across * stride + pad
+    const height = rows * stride + pad
     const asked = new Set<SheetMap>([...wanted, 'color'])
     const planes: Partial<Record<SheetMap, Uint8Array>> = {}
     for (const map of SHEET_MAPS) {
@@ -95,8 +107,8 @@ export const renderSheet = (
         const basis = basisFor(camera, volume, cell)
         render(volume, basis, cell, cell, target)
         const near = basis.dist - spread * 0.5
-        const ox = (index % across) * cell
-        const oy = Math.floor(index / across) * cell
+        const ox = pad + (index % across) * stride
+        const oy = pad + Math.floor(index / across) * stride
 
         const grey = (into: Uint8Array | undefined, at: number, value: number): void => {
             if (!into) return
@@ -139,5 +151,5 @@ export const renderSheet = (
         }
     })
 
-    return {width, height, cell, columns: across, rows, maps: planes}
+    return {width, height, cell, columns: across, rows, padding: pad, maps: planes}
 }

@@ -1,6 +1,7 @@
 import {useCallback, useEffect, useMemo, useReducer} from 'react'
 import {canRemove, shownVolume} from '../doc/objects'
 import {toHexPalette} from '../doc/palette'
+import {sheetMetadata} from '../sheet/metadata'
 import {selectionBounds} from '../doc/selection'
 import {canRadial} from '../doc/symmetry'
 import type {Raycaster} from '../render/gl'
@@ -9,7 +10,7 @@ import {Viewport} from '../viewport/Viewport'
 import type {OrbitEvent, ViewportPointer} from '../viewport/orbit'
 import {BrushPanel} from './BrushPanel'
 import {CamerasPanel} from './CamerasPanel'
-import {writePalette, writeSheet} from './download'
+import {writeMetadata, writePalette, writeSheet, writeSprite} from './download'
 import {ExportPanel} from './ExportPanel'
 import {Header} from './Header'
 import {ObjectsPanel} from './ObjectsPanel'
@@ -19,7 +20,7 @@ import {Timeline} from './Timeline'
 import {GridPanel, ToolRail} from './ToolRail'
 import {AxisGizmo, GroundGrid, HintBar, SelectionBox, ViewCube} from './ViewportOverlay'
 import {ViewsStrip} from './ViewsStrip'
-import {initialState, presetMaps, reduce, TOOLS} from './state'
+import {allPresets, initialState, presetMaps, reduce, TOOLS} from './state'
 import {handle} from './handle'
 
 /**
@@ -107,7 +108,7 @@ export const App = ({volume: source, name}: {volume: Volume; name: string}) => {
     useEffect(() => {
         if (state.sheet && state.exporting) {
             dispatch({type: 'written'})
-            void writeSheet(state.sheet, presetMaps(state.preset))
+            void writeSheet(state.sheet, presetMaps(state, state.preset))
         }
     }, [state.sheet, state.exporting, state.preset])
 
@@ -313,10 +314,24 @@ export const App = ({volume: source, name}: {volume: Volume; name: string}) => {
                     volume={shown}
                     cameras={state.cameras}
                     selected={state.selected}
+                    dragging={state.dragging}
                     onSelect={id => {
                         dispatch({type: 'select', id})
                     }}
                     onCapture={capture}
+                    onDragStart={id => {
+                        dispatch({type: 'drag-camera', id})
+                    }}
+                    onDragOver={to => {
+                        if (state.dragging !== undefined) {
+                            dispatch({type: 'reorder-camera', id: state.dragging, to})
+                        }
+                    }}
+                    onDragEnd={() => {
+                        if (state.dragging !== undefined) {
+                            dispatch({type: 'drag-camera', id: undefined})
+                        }
+                    }}
                 />
 
                 <div className='panel app-rail'>
@@ -376,6 +391,9 @@ export const App = ({volume: source, name}: {volume: Volume; name: string}) => {
                         cell={state.cell}
                         sheet={state.sheet}
                         preset={state.preset}
+                        presets={allPresets(state)}
+                        padding={state.padding}
+                        bounds={state.bounds}
                         onPreset={preset => {
                             dispatch({type: 'preset', preset})
                         }}
@@ -383,6 +401,33 @@ export const App = ({volume: source, name}: {volume: Volume; name: string}) => {
                             dispatch({type: 'cell', cell})
                         }}
                         onExport={onExport}
+                        onPadding={padding => {
+                            dispatch({type: 'padding', padding})
+                        }}
+                        onBounds={on => {
+                            dispatch({type: 'bounds', on})
+                        }}
+                        onSprites={() => {
+                            if (!state.sheet) return
+                            for (const [index, entry] of state.cameras.entries()) {
+                                void writeSprite(state.sheet, index, entry.name)
+                            }
+                        }}
+                        onMetadata={() => {
+                            if (!state.sheet) return
+                            writeMetadata(
+                                sheetMetadata(shown, state.cameras, state.sheet, state.bounds)
+                            )
+                        }}
+                        onSavePreset={() => {
+                            const chosen = globalThis.prompt('Name this preset')
+                            if (chosen === null) return
+                            dispatch({
+                                type: 'save-preset',
+                                name: chosen,
+                                maps: presetMaps(state, state.preset)
+                            })
+                        }}
                     />
                 </div>
             </div>

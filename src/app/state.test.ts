@@ -7,7 +7,15 @@ import {MODE_NORMAL} from '../render/raycast.glsl'
 import {voxelAt, type Volume} from '../render/volume'
 import type {ViewportPointer} from '../viewport/orbit'
 import {readVox} from '../vox/vox-file'
-import {initialState, MAX_BRUSH, reduce, type AppState, type Tool} from './state'
+import {
+    allPresets,
+    initialState,
+    MAX_BRUSH,
+    presetMaps,
+    reduce,
+    type AppState,
+    type Tool
+} from './state'
 
 const volume = readVox(
     new Uint8Array(await Bun.file(new URL('../assets/car.vox', import.meta.url)).arrayBuffer())
@@ -853,6 +861,67 @@ test('loading a palette replaces the colours and leaves every voxel where it was
     expect([...loaded.volume.palette.subarray(12, 16)]).toEqual([0, 0, 255, 255])
     expect(loaded.volume.data).toBe(state.volume.data)
     expect(loaded.sheet).toBeUndefined()
+})
+
+test('dragging a view along the strip reorders the sheet it packs', () => {
+    const state = fresh()
+    const names = (next: AppState): string[] => next.cameras.map(({name}) => name)
+
+    const held = reduce(state, {type: 'drag-camera', id: 'dir-0'})
+    expect(held.dragging).toBe('dir-0')
+
+    const moved = reduce(held, {type: 'reorder-camera', id: 'dir-0', to: 2})
+    expect(names(moved).slice(0, 3)).toEqual(['Front Right', 'Right', 'Front'])
+    // The bake is laid out in list order, so a reorder is a different sheet.
+    expect(
+        reduce(reduce(state, {type: 'bake'}), {type: 'reorder-camera', id: 'dir-0', to: 2}).sheet
+    ).toBeUndefined()
+
+    // Dropping it where it already is changes nothing at all.
+    expect(reduce(moved, {type: 'reorder-camera', id: 'dir-0', to: 2})).toBe(moved)
+    expect(reduce(moved, {type: 'reorder-camera', id: 'nope', to: 0})).toBe(moved)
+})
+
+test('padding changes the sheet it is baked into and nothing else', () => {
+    const tight = reduce(reduce(fresh(), {type: 'preset', preset: 'Every map'}), {type: 'bake'})
+    const loose = reduce(
+        reduce(reduce(fresh(), {type: 'preset', preset: 'Every map'}), {
+            type: 'padding',
+            padding: 2
+        }),
+        {type: 'bake'}
+    )
+    expect(loose.sheet?.width).toBeGreaterThan(tight.sheet?.width ?? 0)
+    expect(loose.sheet?.cell).toBe(tight.sheet?.cell as never)
+    expect(reduce(tight, {type: 'padding', padding: 1}).sheet).toBeUndefined()
+
+    // Collision bounds are a fact about the JSON, so the baked sheet is still good.
+    expect(reduce(tight, {type: 'bounds', on: true}).sheet).toBe(tight.sheet)
+})
+
+test('a saved preset joins the list and can be taken back out of it', () => {
+    const state = fresh()
+    const saved = reduce(state, {type: 'save-preset', name: 'My rig', maps: ['color', 'ao']})
+    expect(saved.preset).toBe('My rig')
+    expect(allPresets(saved).map(entry => entry.name)).toContain('My rig')
+    expect(presetMaps(saved, 'My rig')).toEqual(['color', 'ao'])
+    expect(Object.keys(reduce(saved, {type: 'bake'}).sheet?.maps ?? {}).sort()).toEqual([
+        'ao',
+        'color'
+    ])
+
+    // A built-in name is not available, and a blank one is not a name.
+    expect(reduce(state, {type: 'save-preset', name: 'Every map', maps: ['color']})).toBe(state)
+    expect(reduce(state, {type: 'save-preset', name: '  ', maps: ['color']})).toBe(state)
+
+    // Saving the same name twice replaces rather than doubling.
+    const again = reduce(saved, {type: 'save-preset', name: 'My rig', maps: ['color']})
+    expect(again.presets).toHaveLength(1)
+
+    const dropped = reduce(again, {type: 'drop-preset', name: 'My rig'})
+    expect(dropped.presets).toHaveLength(0)
+    expect(dropped.preset).toBe('Sprite Sheet (Auto)')
+    expect(reduce(dropped, {type: 'drop-preset', name: 'My rig'})).toBe(dropped)
 })
 
 test('the chrome settings move without touching the render or the sheet', () => {
