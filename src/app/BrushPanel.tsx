@@ -87,13 +87,15 @@ export const BrushPanel = ({
     brush,
     color,
     onBrush,
-    onColor
+    onColor,
+    onEmissive
 }: {
     volume: Volume
     brush: Brush
     color: number
     onBrush: (brush: Partial<Brush>) => void
     onColor: (index: number) => void
+    onEmissive: (value: number) => void
 }) => (
     <div className='panel'>
         <section className='section'>
@@ -224,6 +226,35 @@ export const BrushPanel = ({
                     color={color}
                     onColor={onColor}
                 />
+
+                {/*
+                 * Whether the loaded colour glows — the one material property this editor has, and
+                 * it exists because `FEATURESET.md` §18 promises an emission map. On or off rather
+                 * than a strength slider: a strength is a lighting decision, and the engine on the
+                 * other end of the map is the thing making those.
+                 */}
+                <div className='field-row'>
+                    <Text
+                        type='supporting'
+                        color='disabled'
+                    >
+                        Emissive
+                    </Text>
+                    <span className='spacer' />
+                    <button
+                        type='button'
+                        role='switch'
+                        aria-checked={(volume.emissive[color] ?? 0) > 0}
+                        aria-label='This colour glows'
+                        className='symmetry-axis'
+                        data-on={(volume.emissive[color] ?? 0) > 0 || undefined}
+                        onClick={() => {
+                            onEmissive((volume.emissive[color] ?? 0) > 0 ? 0 : 255)
+                        }}
+                    >
+                        {(volume.emissive[color] ?? 0) > 0 ? 'ON' : 'OFF'}
+                    </button>
+                </div>
 
                 <div className='palette-actions'>
                     <IconButton

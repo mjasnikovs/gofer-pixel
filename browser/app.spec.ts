@@ -171,7 +171,7 @@ test('the depth view is a grey ramp and the voxel view is flat palette colour', 
      * handle, which is what the handle is for.
      */
     await page.evaluate(() => {
-        window.goferPixel.dispatch({type: 'map', map: 5})
+        window.goferPixel.dispatch({type: 'map', map: 7})
     })
     const ids = await viewportSummary(page)
     // car.vox has a handful of materials, and no face lighting means one colour per material.

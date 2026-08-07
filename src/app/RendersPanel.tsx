@@ -1,7 +1,13 @@
 import {SegmentedControl, SegmentedControlItem} from '@astryxdesign/core/SegmentedControl'
 import {Text} from '@astryxdesign/core/Text'
 import type {NamedCamera} from '../doc/cameras'
-import {MODE_COLOR, MODE_DEPTH_VIEW, MODE_NORMAL} from '../render/raycast.glsl'
+import {
+    MODE_AO,
+    MODE_COLOR,
+    MODE_DEPTH_VIEW,
+    MODE_EMISSION,
+    MODE_NORMAL
+} from '../render/raycast.glsl'
 import type {Volume} from '../render/volume'
 import {SectionHead} from './SectionHead'
 import {Thumbnail} from './Thumbnail'
@@ -14,16 +20,17 @@ import {Thumbnail} from './Thumbnail'
  * had already filled. That is `docs/featureset.png` §5 falling out of the raycaster rather than
  * being built.
  *
- * AO and emission are drawn and disabled. Both are promised by `docs/FEATURESET.md` §18 and neither
- * exists yet — AO needs a second trace per hit, emission needs the per-colour emissive flag that
- * §20 keeps as its single exception. A tab that renders a plausible grey square instead would be
- * the one lie this panel cannot afford, because the whole claim being made is that the maps line up
- * with the colour sprite.
+ * All five come off the same ray, so they are aligned by construction rather than by a later
+ * resampling step — `docs/FEATURESET.md` §18 falling out of the raycaster rather than being built.
+ * Occlusion is the one that costs anything: eight neighbour reads at the hit, interpolated to where
+ * inside the cell the ray landed.
  */
 const MAPS = [
     {value: MODE_COLOR, label: 'Color'},
     {value: MODE_NORMAL, label: 'Normal'},
-    {value: MODE_DEPTH_VIEW, label: 'Depth'}
+    {value: MODE_DEPTH_VIEW, label: 'Depth'},
+    {value: MODE_AO, label: 'AO'},
+    {value: MODE_EMISSION, label: 'Emission'}
 ]
 
 export const RendersPanel = ({
@@ -56,16 +63,6 @@ export const RendersPanel = ({
                         label={label}
                     />
                 ))}
-                <SegmentedControlItem
-                    value='ao'
-                    label='AO'
-                    isDisabled
-                />
-                <SegmentedControlItem
-                    value='emission'
-                    label='Emission'
-                    isDisabled
-                />
             </SegmentedControl>
 
             <div className='checker render-preview'>

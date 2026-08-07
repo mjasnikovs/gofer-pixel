@@ -94,7 +94,7 @@ test('one click bakes the sheet the export writes, at the size the panel says', 
 
     expect(handle.state?.sheet?.width).toBe(256)
     expect(handle.state?.sheet?.height).toBe(128)
-    expect(handle.state?.sheet?.color.length).toBe(256 * 128 * 4)
+    expect(handle.state?.sheet?.maps.color?.length).toBe(256 * 128 * 4)
     expect(mounted.host.textContent).toContain('Written: 256 × 128')
 
     // The grid above the button is the sheet's own cells, so it has to hold one per camera at the

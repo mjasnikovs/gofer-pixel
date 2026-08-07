@@ -48,7 +48,7 @@ import {FACE_STEP} from '../render/faces'
 import {pick, pickPlane, pickRay} from '../render/pick'
 import {MODE_COLOR} from '../render/raycast.glsl'
 import {voxelIndex, type Volume} from '../render/volume'
-import {renderSheet, type Sheet} from '../sheet/sheet'
+import {renderSheet, SHEET_MAPS, type Sheet, type SheetMap} from '../sheet/sheet'
 import {
     apply as applyOrbit,
     type OrbitEvent,
@@ -268,6 +268,7 @@ export type AppAction =
     | {type: 'tool'; tool: Tool}
     | {type: 'brush'; brush: Partial<Brush>}
     | {type: 'color'; color: number}
+    | {type: 'emissive'; color: number; value: number}
     | {type: 'grid'; on: boolean}
     | {type: 'snap'; on: boolean}
     | {type: 'workspace'; workspace: 'model' | 'render'}
@@ -275,10 +276,21 @@ export type AppAction =
     | {type: 'fps'; fps: number}
 
 /**
- * The export presets of `docs/editor.png`. A preset is a name for a set of export choices; only the
- * first one is wired to anything, and the selector says so by disabling the rest.
+ * The export presets of `docs/editor.png` — `FEATURESET.md` §38.
+ *
+ * A preset is a name for a set of export choices, and the choice that matters today is which maps
+ * get written. All six come off one render and cost nothing to *have*; what they cost is six PNG
+ * encodes and six files in the downloads folder, and most engines want two. Godot's 2D lighting
+ * reads a normal map and adds emission on top, so that preset writes three.
  */
-export const PRESETS = ['Sprite Sheet (Auto)', 'Individual Sprites', 'Godot 8-direction'] as const
+export const PRESETS = [
+    {name: 'Sprite Sheet (Auto)', maps: ['color', 'normal']},
+    {name: 'Godot 8-direction', maps: ['color', 'normal', 'emission']},
+    {name: 'Every map', maps: [...SHEET_MAPS]}
+] as const satisfies readonly {name: string; maps: readonly SheetMap[]}[]
+
+export const presetMaps = (name: string): readonly SheetMap[] =>
+    PRESETS.find(entry => entry.name === name)?.maps ?? PRESETS[0].maps
 
 /**
  * The three-quarter view, not the front one. A straight-on elevation of a voxel model is a
@@ -318,7 +330,7 @@ export const initialState = (volume: Volume): AppState => {
         grid: true,
         snap: true,
         workspace: 'model',
-        preset: PRESETS[0],
+        preset: PRESETS[0].name,
         fps: 24,
         frame: 1
     }
@@ -889,7 +901,12 @@ export const reduce = (state: AppState, action: AppAction): AppState => {
             return {
                 ...state,
                 exporting: true,
-                sheet: renderSheet(state.volume, state.cameras, state.cell)
+                sheet: renderSheet(
+                    state.volume,
+                    state.cameras,
+                    state.cell,
+                    presetMaps(state.preset)
+                )
             }
 
         case 'written':
@@ -907,6 +924,20 @@ export const reduce = (state: AppState, action: AppAction): AppState => {
 
         case 'color':
             return {...state, color: action.color}
+
+        /*
+         * Which palette entries glow — the one part of `FEATURESET.md` §20 that survives, because
+         * §18's emission map needs something to say what is in it.
+         *
+         * Not an undo step. History holds cell diffs, and this changes no cell: it changes what a
+         * colour *is*, the same way editing the palette would. Folding a second kind of change into
+         * a diff format built for one is how an undo stack starts lying.
+         */
+        case 'emissive': {
+            const emissive = new Uint8Array(state.volume.emissive)
+            emissive[action.color] = action.value
+            return {...state, volume: {...state.volume, emissive}, sheet: undefined}
+        }
 
         case 'grid':
             return {...state, grid: action.on}

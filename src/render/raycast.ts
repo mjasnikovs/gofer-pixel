@@ -1,3 +1,4 @@
+import {aoAt, faceCorners} from './ao'
 import type {Basis} from './camera'
 import {
     FACE_LIGHT,
@@ -43,6 +44,10 @@ export interface RenderTarget {
     readonly depth: Uint16Array
     /** The palette index struck. 0 on a miss, which is what makes it the hit mask too. */
     readonly id: Uint8Array
+    /** Ambient occlusion, `255` fully open and `0` fully closed. `0` on a miss. */
+    readonly ao: Uint8Array
+    /** RGBA8 of the palette colour scaled by its emissive strength. Black and clear on a miss. */
+    readonly emission: Uint8Array
 }
 
 export const createTarget = (width: number, height: number): RenderTarget => ({
@@ -51,7 +56,9 @@ export const createTarget = (width: number, height: number): RenderTarget => ({
     color: new Uint8Array(width * height * 4),
     normal: new Uint8Array(width * height * 4),
     depth: new Uint16Array(width * height),
-    id: new Uint8Array(width * height)
+    id: new Uint8Array(width * height),
+    ao: new Uint8Array(width * height),
+    emission: new Uint8Array(width * height * 4)
 })
 
 /**
@@ -70,14 +77,16 @@ export const render = (
     into?: RenderTarget
 ): RenderTarget => {
     const target = into ?? createTarget(width, height)
-    const {sx, sy, sz, data, palette} = volume
-    const {color, normal, depth, id} = target
+    const {sx, sy, sz, data, palette, emissive} = volume
+    const {color, normal, depth, id, ao, emission} = target
     // A miss writes nothing, so a reused target has to start empty or the last sprite shows
     // through this one's transparent pixels.
     color.fill(0)
     normal.fill(0)
     depth.fill(0)
     id.fill(0)
+    ao.fill(0)
+    emission.fill(0)
     const [fx, fy, fz] = basis.forward
     const [rx, ry, rz] = basis.right
     const [ux, uy, uz] = basis.up
@@ -162,10 +171,45 @@ export const render = (
                     normal[at + 1] = FACE_NORMAL[n + 1] ?? 128
                     normal[at + 2] = FACE_NORMAL[n + 2] ?? 128
                     normal[at + 3] = 255
+                    const t = enter + walked
                     depth[row * width + px] = Math.floor(
-                        Math.min(Math.max((enter + walked) / depthRange, 0), 1) * 65535
+                        Math.min(Math.max(t / depthRange, 0), 1) * 65535
                     )
                     id[row * width + px] = value
+
+                    /*
+                     * Where inside the cell the ray struck, along the face's own two axes. The
+                     * occlusion is interpolated to that point, which is what keeps a face from
+                     * reading as one flat tone at four pixels to the voxel.
+                     *
+                     * Written out per face rather than indexed through `FACE_UV`, because the
+                     * obvious `const hit = [hx - vx, …]` allocates an array for every opaque pixel
+                     * of every sprite in the window. That one line took the seven-window UI test
+                     * from 0.2 s to 7 s — the inside of this loop is the hottest code in the app
+                     * and it must not allocate.
+                     */
+                    const hx = ox + fx * t - vx
+                    const hy = oy + fy * t - vy
+                    const hz = oz + fz * t - vz
+                    const fu = face <= 2 ? hy : hx
+                    const fv = face <= 4 ? hz : hy
+                    ao[row * width + px] = aoAt(
+                        faceCorners(volume, vx, vy, vz, face),
+                        fu < 0 ? 0
+                        : fu > 1 ? 1
+                        : fu,
+                        fv < 0 ? 0
+                        : fv > 1 ? 1
+                        : fv
+                    )
+
+                    const glow = emissive[value] ?? 0
+                    if (glow !== 0) {
+                        emission[at] = Math.floor(((palette[swatch] ?? 0) * glow) / 255)
+                        emission[at + 1] = Math.floor(((palette[swatch + 1] ?? 0) * glow) / 255)
+                        emission[at + 2] = Math.floor(((palette[swatch + 2] ?? 0) * glow) / 255)
+                    }
+                    emission[at + 3] = 255
                     break
                 }
                 if (maxX < maxY && maxX < maxZ) {

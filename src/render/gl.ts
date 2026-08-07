@@ -81,9 +81,11 @@ export const createRaycaster = (canvas: HTMLCanvasElement): Raycaster => {
 
     const volumeTexture = gl.createTexture()
     const paletteTexture = gl.createTexture()
+    const emissiveTexture = gl.createTexture()
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1)
     gl.uniform1i(at('uVolume'), 0)
     gl.uniform1i(at('uPalette'), 1)
+    gl.uniform1i(at('uEmissive'), 2)
 
     let frames = 0
     const landed = new Uint8Array(4)
@@ -124,6 +126,15 @@ export const createRaycaster = (canvas: HTMLCanvasElement): Raycaster => {
             gl.UNSIGNED_BYTE,
             volume.palette
         )
+
+        // Its own texture rather than the palette's spare alpha channel: a `.vox` palette's alpha
+        // already means transparency, and one array quietly meaning two things is how a document
+        // format grows a bug nobody can see.
+        gl.activeTexture(gl.TEXTURE2)
+        gl.bindTexture(gl.TEXTURE_2D, emissiveTexture)
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, 256, 1, 0, gl.RED, gl.UNSIGNED_BYTE, volume.emissive)
 
         gl.uniform3f(at('uDim'), volume.sx, volume.sy, volume.sz)
     }

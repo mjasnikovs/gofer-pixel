@@ -1,4 +1,5 @@
-import {FACE_LIGHT, FACE_NORMAL_RGB} from './faces'
+import {AO_STEP} from './ao'
+import {FACE_LIGHT, FACE_NORMAL_RGB, FACE_STEP, FACE_UV} from './faces'
 import {BIG, MAX_STEPS} from './raycast'
 
 /**
@@ -21,19 +22,21 @@ import {BIG, MAX_STEPS} from './raycast'
 /**
  * What a draw writes into the RGBA8 framebuffer. One draw per map.
  *
- * Modes 0–3 are the exporter's four maps, byte for byte — they are what the parity test compares
+ * Modes 0–5 are the exporter's six maps, byte for byte — they are what the parity test compares
  * against `RenderTarget`, so their encodings are fixed and cannot be chosen for how they look.
  * Two of them are data rather than pictures: depth is a 16-bit value split across two channels,
  * which on screen is a mess of contour stripes as the low byte wraps, and a voxel id is a palette
- * index, which on screen is a red ramp. Modes 4 and 5 draw those same two quantities for a human.
- * Nothing exports them.
+ * index, which on screen is a red ramp. The last two modes draw those same two quantities for a
+ * human. Nothing exports them.
  */
 export const MODE_COLOR = 0
 export const MODE_NORMAL = 1
 export const MODE_DEPTH = 2
 export const MODE_ID = 3
-export const MODE_DEPTH_VIEW = 4
-export const MODE_ID_VIEW = 5
+export const MODE_AO = 4
+export const MODE_EMISSION = 5
+export const MODE_DEPTH_VIEW = 6
+export const MODE_ID_VIEW = 7
 
 export const VERTEX_SHADER = `#version 300 es
 in vec2 aCorner;
@@ -46,6 +49,8 @@ const glslFloat = (value: number): string =>
 
 const lightTable = Array.from(FACE_LIGHT, glslFloat).join(', ')
 const normalTable = FACE_NORMAL_RGB.map(rgb => `vec3(${rgb.map(glslFloat).join(', ')})`).join(', ')
+const stepTable = FACE_STEP.map(step => `ivec3(${step.map(String).join(', ')})`).join(', ')
+const uvTable = FACE_UV.map(uv => `ivec2(${uv.map(String).join(', ')})`).join(', ')
 
 export const FRAGMENT_SHADER = `#version 300 es
 precision highp float;
@@ -54,6 +59,7 @@ precision highp usampler3D;
 
 uniform usampler3D uVolume;
 uniform sampler2D uPalette;
+uniform sampler2D uEmissive;
 uniform vec3 uForward;
 uniform vec3 uRight;
 uniform vec3 uUp;
@@ -72,6 +78,38 @@ const float BIG = ${glslFloat(BIG)};
 const int MAX_STEPS = ${String(MAX_STEPS)};
 const float LIGHT[7] = float[7](${lightTable});
 const vec3 NORMAL[7] = vec3[7](${normalTable});
+const ivec3 STEP[7] = ivec3[7](${stepTable});
+const ivec2 UV[7] = ivec2[7](${uvTable});
+const float AO_STEP = ${glslFloat(AO_STEP)};
+
+/** Mirror of \`ao.ts\`. One is not the other's proof — the parity test is. */
+bool solidAt(ivec3 cell){
+    if (any(lessThan(cell, ivec3(0))) || any(greaterThanEqual(vec3(cell), uDim))) return false;
+    return texelFetch(uVolume, cell, 0).r != 0u;
+}
+
+float aoCorner(bool s1, bool s2, bool d){
+    if (s1 && s2) return 0.0;
+    return 3.0 - float(s1) - float(s2) - float(d);
+}
+
+float occlusion(ivec3 cell, int face, float fu, float fv){
+    ivec3 front = cell + STEP[face];
+    ivec2 uv = UV[face];
+    ivec3 du = ivec3(0); du[uv.x] = 1;
+    ivec3 dv = ivec3(0); dv[uv.y] = 1;
+    bool left = solidAt(front - du);
+    bool right = solidAt(front + du);
+    bool down = solidAt(front - dv);
+    bool up = solidAt(front + dv);
+    float c00 = aoCorner(left, down, solidAt(front - du - dv));
+    float c10 = aoCorner(right, down, solidAt(front + du - dv));
+    float c01 = aoCorner(left, up, solidAt(front - du + dv));
+    float c11 = aoCorner(right, up, solidAt(front + du + dv));
+    float bottom = c00 + (c10 - c00) * fu;
+    float top = c01 + (c11 - c01) * fu;
+    return floor((bottom + (top - bottom) * fv) * AO_STEP + 0.5);
+}
 
 void main(){
     float px = gl_FragCoord.x - 0.5;
@@ -126,6 +164,15 @@ void main(){
                 fragColor = vec4(floor(d / 256.0) / 255.0, floor(mod(d, 256.0)) / 255.0, 0.0, 1.0);
             } else if (uMode == ${String(MODE_ID)}) {
                 fragColor = vec4(float(value) / 255.0, 0.0, 0.0, 1.0);
+            } else if (uMode == ${String(MODE_AO)}) {
+                vec3 hitAt = org + f * (enter + walked) - cell;
+                ivec2 uv = UV[face];
+                float shade = occlusion(
+                    ivec3(cell), face, clamp(hitAt[uv.x], 0.0, 1.0), clamp(hitAt[uv.y], 0.0, 1.0));
+                fragColor = vec4(vec3(shade / 255.0), 1.0);
+            } else if (uMode == ${String(MODE_EMISSION)}) {
+                float glow = floor(texelFetch(uEmissive, ivec2(int(value), 0), 0).r * 255.0 + 0.5);
+                fragColor = vec4(floor(rgb * glow / 255.0) / 255.0, 1.0);
             } else if (uMode == ${String(MODE_DEPTH_VIEW)}) {
                 // Stretched across the volume's own diagonal rather than across the depth range:
                 // the model occupies a sliver of that range, and the sliver would be one flat grey.

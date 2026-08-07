@@ -15,6 +15,7 @@ interface WireVolume {
     sz: number
     data: number[]
     palette: number[]
+    emissive?: number[]
 }
 
 let raycaster: Raycaster | undefined
@@ -38,7 +39,8 @@ const gpuRender = async (
             sy: wire.sy,
             sz: wire.sz,
             data: new Uint8Array(wire.data),
-            palette: new Uint8Array(wire.palette)
+            palette: new Uint8Array(wire.palette),
+            emissive: Uint8Array.from(wire.emissive ?? new Array<number>(256).fill(0))
         }
         raycaster.setVolume(volume)
         loaded = key

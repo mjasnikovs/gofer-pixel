@@ -16,7 +16,7 @@ import {Timeline} from './Timeline'
 import {GridPanel, ToolRail} from './ToolRail'
 import {AxisGizmo, GroundGrid, HintBar, SelectionBox, ViewCube} from './ViewportOverlay'
 import {ViewsStrip} from './ViewsStrip'
-import {initialState, reduce, TOOLS} from './state'
+import {initialState, presetMaps, reduce, TOOLS} from './state'
 import {handle} from './handle'
 
 /**
@@ -77,9 +77,9 @@ export const App = ({volume: source, name}: {volume: Volume; name: string}) => {
     useEffect(() => {
         if (state.sheet && state.exporting) {
             dispatch({type: 'written'})
-            void writeSheet(state.sheet)
+            void writeSheet(state.sheet, presetMaps(state.preset))
         }
-    }, [state.sheet, state.exporting])
+    }, [state.sheet, state.exporting, state.preset])
 
     // The mockup's `C`, and the two shortcuts nobody looks up. A shortcut that only exists in the
     // hint bar's caption is a caption.
@@ -179,6 +179,9 @@ export const App = ({volume: source, name}: {volume: Volume; name: string}) => {
                         }}
                         onColor={color => {
                             dispatch({type: 'color', color})
+                        }}
+                        onEmissive={value => {
+                            dispatch({type: 'emissive', color: state.color, value})
                         }}
                     />
                 </div>

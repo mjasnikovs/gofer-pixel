@@ -2,7 +2,13 @@ import {useMemo} from 'react'
 import type {Basis, Camera} from '../render/camera'
 import {basisFor} from '../render/camera'
 import {render, type RenderTarget} from '../render/raycast'
-import {MODE_COLOR, MODE_DEPTH_VIEW, MODE_NORMAL} from '../render/raycast.glsl'
+import {
+    MODE_AO,
+    MODE_COLOR,
+    MODE_DEPTH_VIEW,
+    MODE_EMISSION,
+    MODE_NORMAL
+} from '../render/raycast.glsl'
 import {volumeDiagonal, type Volume} from '../render/volume'
 import {PixelCanvas} from './PixelCanvas'
 
@@ -27,6 +33,20 @@ const depthPixels = (target: RenderTarget, basis: Basis, volume: Volume): Uint8A
         out.set([grey, grey, grey, 255], i * 4)
     }
     return out
+}
+
+/** One byte per pixel to RGBA grey, transparent where the ray missed. */
+const greyPixels = (values: Uint8Array, id: Uint8Array): Uint8Array => {
+    const pixels = new Uint8Array(values.length * 4)
+    for (let i = 0; i < values.length; i += 1) {
+        if ((id[i] ?? 0) === 0) continue
+        const shade = values[i] ?? 0
+        pixels[i * 4] = shade
+        pixels[i * 4 + 1] = shade
+        pixels[i * 4 + 2] = shade
+        pixels[i * 4 + 3] = 255
+    }
+    return pixels
 }
 
 /**
@@ -57,6 +77,8 @@ const spriteFor = (volume: Volume, camera: Camera, size: number, map: number): U
     const pixels =
         map === MODE_NORMAL ? target.normal
         : map === MODE_DEPTH_VIEW ? depthPixels(target, basis, volume)
+        : map === MODE_AO ? greyPixels(target.ao, target.id)
+        : map === MODE_EMISSION ? target.emission
         : target.color
     cache.set(key, pixels)
     return pixels

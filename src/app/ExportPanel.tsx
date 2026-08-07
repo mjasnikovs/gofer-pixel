@@ -5,13 +5,22 @@ import {SegmentedControl, SegmentedControlItem} from '@astryxdesign/core/Segment
 import {Selector} from '@astryxdesign/core/Selector'
 import {Text} from '@astryxdesign/core/Text'
 import type {NamedCamera} from '../doc/cameras'
-import type {Sheet} from '../sheet/sheet'
+import {SHEET_MAPS, type Sheet, type SheetMap} from '../sheet/sheet'
 import type {Volume} from '../render/volume'
-import {writeColorSheet, writeNormalSheet} from './download'
+import {writeSheetMap} from './download'
 import {GearIcon} from './icons'
 import {SectionHead} from './SectionHead'
 import {Thumbnail} from './Thumbnail'
 import {PRESETS} from './state'
+
+const MAP_LABELS: Record<SheetMap, string> = {
+    color: 'colour',
+    normal: 'normal',
+    depth: 'depth',
+    height: 'height',
+    ao: 'occlusion',
+    emission: 'emission'
+}
 
 /**
  * The export half of `docs/editor.png`: a preset, the sprites that preset would write, and the one
@@ -75,11 +84,7 @@ export const ExportPanel = ({
                     size='sm'
                     width='100%'
                     value={preset}
-                    options={PRESETS.map((entry, index) => ({
-                        value: entry,
-                        label: entry,
-                        disabled: index > 0
-                    }))}
+                    options={PRESETS.map(entry => ({value: entry.name, label: entry.name}))}
                     onChange={onPreset}
                 />
                 <IconButton
@@ -125,20 +130,15 @@ export const ExportPanel = ({
                 label='More export options'
                 size='md'
                 items={[
-                    {
-                        label: 'Download colour sheet only',
-                        isDisabled: !sheet,
+                    ...SHEET_MAPS.map((map: SheetMap) => ({
+                        label: `Download ${MAP_LABELS[map]} sheet only`,
+                        // A map the preset did not ask for was never baked, so there is no file to
+                        // write; the menu says so rather than quietly doing nothing.
+                        isDisabled: !sheet?.maps[map],
                         onClick: () => {
-                            if (sheet) void writeColorSheet(sheet)
+                            if (sheet) void writeSheetMap(sheet, map)
                         }
-                    },
-                    {
-                        label: 'Download normal sheet only',
-                        isDisabled: !sheet,
-                        onClick: () => {
-                            if (sheet) void writeNormalSheet(sheet)
-                        }
-                    },
+                    })),
                     {type: 'divider'},
                     {label: 'Individual sprites (not built)', isDisabled: true},
                     {label: 'Metadata JSON (not built)', isDisabled: true}

@@ -55,6 +55,22 @@ export const FACE_NORMAL_RGB: readonly (readonly [number, number, number])[] = [
 export const FACE_NORMAL = new Uint8Array(FACE_NORMAL_RGB.flat())
 
 /**
+ * The two axes a face spreads over, as axis indices. The third is the face's own.
+ *
+ * Used to walk the neighbourhood in front of a face for ambient occlusion, and to orient a flat
+ * brush. Both backends read it, and the shader's copy is generated from this one.
+ */
+export const FACE_UV: readonly (readonly [number, number])[] = [
+    [0, 1], // unused
+    [1, 2],
+    [1, 2],
+    [0, 2],
+    [0, 2],
+    [0, 1],
+    [0, 1]
+]
+
+/**
  * The face as a step: from the voxel that was struck to the empty cell in front of it.
  *
  * This is the whole of "hover empty space → Draw adds voxels" (`FEATURESET.md` §4). A draw tool

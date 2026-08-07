@@ -16,6 +16,15 @@ export interface Volume {
     readonly data: Uint8Array
     /** 256 RGBA entries. Entry 0 is never read. */
     readonly palette: Uint8Array
+    /**
+     * How brightly each palette entry glows, `0 … 255`, one byte per entry.
+     *
+     * The only part of `FEATURESET.md` §20 that survives its own postponement, and it survives
+     * because §18 promises an emission map and an emission map needs something to say which voxels
+     * are in it. Rough and metallic have no meaning without a lighting model, and this editor
+     * deliberately does not have one.
+     */
+    readonly emissive: Uint8Array
 }
 
 export const createVolume = (sx: number, sy: number, sz: number, palette?: Uint8Array): Volume => ({
@@ -23,7 +32,8 @@ export const createVolume = (sx: number, sy: number, sz: number, palette?: Uint8
     sy,
     sz,
     data: new Uint8Array(sx * sy * sz),
-    palette: palette ?? new Uint8Array(256 * 4)
+    palette: palette ?? new Uint8Array(256 * 4),
+    emissive: new Uint8Array(256)
 })
 
 export const voxelIndex = ({sx, sy}: Volume, x: number, y: number, z: number): number =>

@@ -618,6 +618,33 @@ test('copy and paste put the block back one voxel up, selected and ready to drag
     expect(reduce(bare, {type: 'copy'})).toBe(bare)
 })
 
+test('marking a colour emissive lights it in the emission map and nowhere else', () => {
+    const state = fresh()
+    const glowing = reduce(state, {type: 'emissive', color: state.color, value: 255})
+
+    expect(glowing.volume.emissive[state.color]).toBe(255)
+    // A colour is not a cell, so it is not an undo step and the grid is untouched.
+    expect(glowing.history.past).toHaveLength(0)
+    expect(glowing.volume.data).toBe(state.volume.data)
+    // It is a new volume all the same, or nothing downstream would notice.
+    expect(glowing.volume).not.toBe(state.volume)
+    expect(state.volume.emissive[state.color]).toBe(0)
+
+    const baked = reduce(reduce(glowing, {type: 'preset', preset: 'Every map'}), {type: 'bake'})
+    const emission = baked.sheet?.maps.emission ?? new Uint8Array(0)
+    let lit = 0
+    for (let i = 0; i < emission.length; i += 4) if ((emission[i] ?? 0) > 0) lit += 1
+    expect(lit).toBeGreaterThan(0)
+})
+
+test('a preset decides which maps get baked, and colour is always one of them', () => {
+    const auto = reduce(fresh(), {type: 'bake'})
+    expect(Object.keys(auto.sheet?.maps ?? {}).sort()).toEqual(['color', 'normal'])
+
+    const every = reduce(reduce(fresh(), {type: 'preset', preset: 'Every map'}), {type: 'bake'})
+    expect(Object.keys(every.sheet?.maps ?? {})).toHaveLength(6)
+})
+
 test('the chrome settings move without touching the render or the sheet', () => {
     const baked = reduce(fresh(), {type: 'bake'})
     const after = reduce(

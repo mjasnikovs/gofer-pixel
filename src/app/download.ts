@@ -1,5 +1,5 @@
 import {encodePng} from '../image/png'
-import type {Sheet} from '../sheet/sheet'
+import {sheetPlane, type Sheet, type SheetMap} from '../sheet/sheet'
 
 /**
  * Handing a rendered buffer to the operating system.
@@ -23,16 +23,27 @@ const download = async (
     URL.revokeObjectURL(url)
 }
 
-export const writeColorSheet = async (sheet: Sheet): Promise<void> => {
-    await download('sprites.png', sheet.width, sheet.height, sheet.color)
+const fileName = (map: SheetMap): string => (map === 'color' ? 'sprites.png' : `sprites-${map}.png`)
+
+export const writeSheetMap = async (sheet: Sheet, map: SheetMap): Promise<void> => {
+    const plane = sheetPlane(sheet, map)
+    // A map the sheet was not baked with has no file. The panel only offers the ones it has.
+    if (!plane) return
+    await download(fileName(map), sheet.width, sheet.height, plane)
 }
 
-export const writeNormalSheet = async (sheet: Sheet): Promise<void> => {
-    await download('sprites-normal.png', sheet.width, sheet.height, sheet.normal)
-}
-
-/** Both sheets, on the click that baked them — the artist asked for an export, not for a preview. */
-export const writeSheet = async (sheet: Sheet): Promise<void> => {
-    await writeColorSheet(sheet)
-    await writeNormalSheet(sheet)
+/**
+ * The maps a preset asks for, on the click that baked them.
+ *
+ * All six come off one render and cost nothing extra to *have*; what they cost is six PNG encodes
+ * and six files in the artist's downloads folder, and most engines want two of them. Which two —
+ * or four — is exactly what a preset is for (`FEATURESET.md` §38), and the menu next to the button
+ * writes any single one on its own.
+ */
+export const writeSheet = async (sheet: Sheet, maps: readonly SheetMap[]): Promise<void> => {
+    // Encoded together rather than one after another. Each one is a `CompressionStream`, and a
+    // second stream started only after the first has fully drained waits on the platform's task
+    // queue rather than on any work — under happy-dom that wait was a second and a half, which the
+    // UI test paid twice.
+    await Promise.all(maps.map(map => writeSheetMap(sheet, map)))
 }

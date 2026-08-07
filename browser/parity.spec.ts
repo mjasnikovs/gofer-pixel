@@ -1,6 +1,13 @@
 import {expect, test, type Page} from '@playwright/test'
 import {basisFor, type Camera} from '../src/render/camera'
-import {MODE_COLOR, MODE_DEPTH, MODE_ID, MODE_NORMAL} from '../src/render/raycast.glsl'
+import {
+    MODE_AO,
+    MODE_COLOR,
+    MODE_DEPTH,
+    MODE_EMISSION,
+    MODE_ID,
+    MODE_NORMAL
+} from '../src/render/raycast.glsl'
 import {render} from '../src/render/raycast'
 import {createVolume, setVoxel, type Volume} from '../src/render/volume'
 
@@ -39,6 +46,9 @@ const testVolume = (): Volume => {
         volume.palette[i * 4 + 1] = (i * 53 + 90) % 256
         volume.palette[i * 4 + 2] = (i * 101 + 160) % 256
         volume.palette[i * 4 + 3] = 255
+        // A third of the palette glows, at a strength that is not a round number, so the emission
+        // map has both lit and unlit voxels in it and cannot pass by being uniformly black.
+        volume.emissive[i] = i % 3 === 0 ? (i * 7 + 40) % 256 : 0
     }
     return volume
 }
@@ -49,7 +59,8 @@ const wire = {
     sy: volume.sy,
     sz: volume.sz,
     data: Array.from(volume.data),
-    palette: Array.from(volume.palette)
+    palette: Array.from(volume.palette),
+    emissive: Array.from(volume.emissive)
 }
 
 const CAMERAS: {name: string; camera: Camera}[] = [
@@ -84,18 +95,23 @@ for (const {name, camera} of CAMERAS) {
         await page.goto('/browser/harness.html')
         const cpu = render(volume, basisFor(camera, volume, H), W, H)
 
-        const [colour, normal, depth, ids] = await Promise.all([
+        const [colour, normal, depth, ids, ao, emission] = await Promise.all([
             gpu(page, camera, MODE_COLOR),
             gpu(page, camera, MODE_NORMAL),
             gpu(page, camera, MODE_DEPTH),
-            gpu(page, camera, MODE_ID)
+            gpu(page, camera, MODE_ID),
+            gpu(page, camera, MODE_AO),
+            gpu(page, camera, MODE_EMISSION)
         ])
 
         let opaque = 0
         let colourDiffers = 0
         let normalDiffers = 0
         let idDiffers = 0
+        let emissionDiffers = 0
         let worstDepth = 0
+        let worstAo = 0
+        let litPixels = 0
         for (let row = 0; row < H; row += 1) {
             for (let px = 0; px < W; px += 1) {
                 const here = row * W + px
@@ -109,6 +125,13 @@ for (const {name, camera} of CAMERAS) {
                 if ((cpu.id[here] ?? 0) !== ids[there * 4]) idDiffers += 1
                 const theirs = (depth[there * 4] ?? 0) * 256 + (depth[there * 4 + 1] ?? 0)
                 worstDepth = Math.max(worstDepth, Math.abs((cpu.depth[here] ?? 0) - theirs))
+                worstAo = Math.max(worstAo, Math.abs((cpu.ao[here] ?? 0) - (ao[there * 4] ?? 0)))
+                for (let byte = 0; byte < 3; byte += 1) {
+                    if (cpu.emission[here * 4 + byte] !== emission[there * 4 + byte]) {
+                        emissionDiffers += 1
+                    }
+                }
+                if ((cpu.emission[here * 4] ?? 0) > 0) litPixels += 1
             }
         }
 
@@ -119,6 +142,17 @@ for (const {name, camera} of CAMERAS) {
         expect(idDiffers).toBe(0)
         // Depth is the one map with a rounding step in it: 1/65535 is 0.003 of a voxel.
         expect(worstDepth).toBeLessThanOrEqual(1)
+        expect(emissionDiffers).toBe(0)
+        // A model where nothing glows would pass the emission comparison by being blank.
+        expect(litPixels).toBeGreaterThan(100)
+        /*
+         * Occlusion is the second map with a rounding step, and a coarser one: it interpolates
+         * between four corner levels using where inside the cell the ray struck, which is a float
+         * the two backends compute at different widths. One level is 85, so a tolerance of 2 is
+         * 2.4 % of a step — it cannot hide a corner counted differently, which is what would
+         * actually be wrong.
+         */
+        expect(worstAo).toBeLessThanOrEqual(2)
     })
 }
 
