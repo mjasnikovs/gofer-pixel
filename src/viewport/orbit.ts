@@ -48,12 +48,16 @@ export interface ViewportPointer {
     readonly button: number
     readonly shift: boolean
     readonly alt: boolean
+    /** Control or Command: add what this press picks to the selection instead of replacing it. */
+    readonly ctrl: boolean
     /**
-     * The browser's own click count, straight off `MouseEvent.detail`.
+     * How many presses this one is the last of.
      *
-     * A double-click is therefore a fact the platform reports, not something this app times. That
-     * matters twice over: the testing law forbids waiting for a duration, and a hand-rolled
-     * double-click threshold would disagree with the one the artist set in their desktop.
+     * Counted by the viewport, not read off the event: `PointerEvent.detail` is 0 on `pointerdown`
+     * by specification, and reading it there made every double-click a single one for as long as
+     * the tool existed. The count has to come from the press, because a selection is taken on the
+     * press so that the same gesture can carry on into a drag — `click` and `dblclick`, which do
+     * carry the platform's count, both arrive too late to be that.
      */
     readonly clicks: number
 }

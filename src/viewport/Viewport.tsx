@@ -20,7 +20,8 @@ import type {OrbitEvent, ViewportPointer} from './orbit'
  */
 const report = (
     type: ViewportPointer['type'],
-    event: ReactPointerEvent<HTMLDivElement>
+    event: ReactPointerEvent<HTMLDivElement>,
+    clicks = 1
 ): ViewportPointer => {
     const host = event.currentTarget
     const box = host.getBoundingClientRect()
@@ -33,9 +34,27 @@ const report = (
         button: event.button,
         shift: event.shiftKey,
         alt: event.altKey,
-        clicks: event.detail
+        // Command as well as Control, so the shortcut is the one the artist's other apps use.
+        ctrl: event.ctrlKey || event.metaKey,
+        clicks
     }
 }
+
+/**
+ * How near and how soon a second press has to land to be a double-click.
+ *
+ * Counted here rather than read off the event, because `PointerEvent.detail` is 0 on `pointerdown`
+ * by specification — the browser's own click counter lives on `click` and `dblclick`, and this
+ * viewport cannot use those: a selection has to be taken on the press, so that the same gesture can
+ * carry on into a drag. Reading `detail` silently made every double-click a single one, and no test
+ * outside a browser could see it, because happy-dom and the reducer's own tests both hand the
+ * count in.
+ *
+ * 500 ms is the platform default on every desktop this runs on, and four pixels is the slack a hand
+ * needs to press twice without the mouse having moved on purpose.
+ */
+const DOUBLE_MS = 500
+const DOUBLE_PX = 4
 
 export const Viewport = ({
     volume,
@@ -79,6 +98,8 @@ export const Viewport = ({
     // away while the old one is still mounted.
     const glRef = useRef<{canvas: HTMLCanvasElement; raycaster: Raycaster} | undefined>(undefined)
     const failureRef = useRef<HTMLDivElement>(null)
+    /** The last press, so the next one can tell whether it is the second of a pair. */
+    const clicksRef = useRef({time: 0, x: 0, y: 0, clicks: 0})
     const [size, setSize] = useState<{width: number; height: number}>({width: 0, height: 0})
 
     // The canvas is sized in device pixels so a voxel edge lands on a pixel edge, capped at 2×
@@ -175,7 +196,19 @@ export const Viewport = ({
             }}
             onPointerDown={event => {
                 event.currentTarget.setPointerCapture(event.pointerId)
-                onPointer(report('down', event))
+                const last = clicksRef.current
+                const repeated =
+                    event.timeStamp - last.time <= DOUBLE_MS
+                    && Math.abs(event.clientX - last.x) <= DOUBLE_PX
+                    && Math.abs(event.clientY - last.y) <= DOUBLE_PX
+                const clicks = repeated ? last.clicks + 1 : 1
+                clicksRef.current = {
+                    time: event.timeStamp,
+                    x: event.clientX,
+                    y: event.clientY,
+                    clicks
+                }
+                onPointer(report('down', event, clicks))
             }}
             onPointerMove={event => {
                 onPointer(report('move', event))

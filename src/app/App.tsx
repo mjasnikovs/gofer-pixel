@@ -320,6 +320,7 @@ export const App = ({
                         volume={volume}
                         brush={state.brush}
                         color={state.color}
+                        tool={state.tool}
                         onBrush={brush => {
                             dispatch({type: 'brush', brush})
                         }}

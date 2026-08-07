@@ -19,6 +19,9 @@ produce pixels.
    **Its do-not-build list has been superseded by `docs/TASKS.md`**: editing, selection, transforms
    and the remaining output maps were on it because they proved nothing about the architecture, and
    they are now the product.
+6. `docs/VALIDATE.md` — how to find out whether a gesture actually works, and the paste-able prompt
+   for it. Read it before saying a tool does or does not do something: `bun test` cannot see the
+   input layer, and three bugs in one session hid there.
 
 ## The rebuild
 

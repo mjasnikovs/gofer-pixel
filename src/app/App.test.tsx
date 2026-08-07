@@ -191,6 +191,51 @@ test('arming a tool and loading a colour reach the document, not just the panel'
     await unmount(mounted)
 })
 
+test('the brush row goes dead for the tools that do not read it, and comes back for the ones that do', async () => {
+    const mounted = await mount()
+    const shapes = (): HTMLElement[] => [
+        ...mounted.host.querySelectorAll<HTMLElement>('[aria-label="Brush shape"] .shape')
+    ]
+    const figures = (): HTMLElement[] => [
+        ...mounted.host.querySelectorAll<HTMLElement>('[aria-label="Figure"] .shape')
+    ]
+    // The four shapes and the five figures of the two rows, so a silent renaming cannot pass here.
+    expect(shapes()).toHaveLength(4)
+    expect(figures()).toHaveLength(5)
+    expect(shapes()[0]?.getAttribute('aria-disabled')).toBeNull()
+
+    await act(async () => {
+        control(mounted.host, 'Move').click()
+    })
+    expect(handle.state?.tool).toBe('move')
+    expect(control(mounted.host, 'Smaller brush').getAttribute('aria-disabled')).toBe('true')
+    expect(control(mounted.host, 'Larger brush').getAttribute('aria-disabled')).toBe('true')
+    for (const button of [...shapes(), ...figures()]) {
+        expect(button.getAttribute('aria-disabled')).toBe('true')
+        // The label says which tool is the reason, not merely that the control is off.
+        expect(button.getAttribute('aria-label')).toContain('Move does not use the brush')
+    }
+
+    // Greyed and inert, not greyed and still wired: a click on the ring changes nothing.
+    const before = handle.state?.brush
+    await act(async () => {
+        shapes()[2]?.click()
+        figures()[3]?.click()
+    })
+    expect(handle.state?.brush).toEqual(before as never)
+
+    await act(async () => {
+        control(mounted.host, 'Draw').click()
+    })
+    expect(shapes()[2]?.getAttribute('aria-disabled')).toBeNull()
+    await act(async () => {
+        shapes()[2]?.click()
+    })
+    expect(handle.state?.brush.shape).toBe('ring')
+
+    await unmount(mounted)
+})
+
 test('the undo button undoes, and greys itself out when there is nothing left', async () => {
     const mounted = await mount()
     // Nothing has happened yet, so both are off — and Astryx keeps a tooltipped control focusable

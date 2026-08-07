@@ -367,6 +367,24 @@ body,
     color: var(--color-icon-accent);
 }
 
+/*
+ * A shape or figure the armed tool does not read. Dimmed and kept focusable rather than `disabled`,
+ * the same way a dead tool is, so a keyboard can still land on it and hear which tool to arm. The
+ * selected one still shows through, because the brush has not changed — only its audience has.
+ */
+.shape[aria-disabled='true'] {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.shape[aria-disabled='true']:hover {
+    color: var(--color-icon-secondary);
+}
+
+.shape[aria-disabled='true'][data-selected]:hover {
+    color: var(--color-icon-accent);
+}
+
 .swatches {
     display: grid;
     gap: 3px;

@@ -57,8 +57,8 @@ const HINTS: Record<Tool, string> = {
     erase: 'Clear the voxels under the brush',
     fill: 'Flood the connected region of one colour',
     pick: 'Load the colour of the voxel under the cursor',
-    move: 'Drag out a selection, then drag it to move it',
-    rotate: 'Turn the selection a quarter at a time',
+    move: 'Drag out a selection, then drag it to move it. Ctrl-click adds to it',
+    rotate: 'Grab a face and drag sideways to turn the selection 90°',
     scale: 'Pull a face of the selection to extrude it',
     clone: 'Drag a selection to leave a copy behind',
     measure: 'Not built yet — the left button still turns the view'

@@ -1,49 +1,15 @@
 import {expect, test, type Page} from '@playwright/test'
+import {frames, ready} from './driver'
 
 /**
- * The four things about the running app that genuinely cannot be checked outside a browser: a real
- * GPU frame, a real pointer with capture, real layout boxes (happy-dom returns zeros from
- * `getBoundingClientRect`), and a clean console.
+ * The things about the running app that genuinely cannot be checked outside a browser: a real GPU
+ * frame, a real pointer with capture, real layout boxes (happy-dom returns zeros from
+ * `getBoundingClientRect`), and a clean console. The nine tools under a real mouse live next door
+ * in `gestures.spec.ts`.
  *
  * Nothing here waits for a duration. `renderNow` resolves when the frame has landed and every
  * assertion is against a value read straight out of the app, never against a screenshot.
  */
-
-interface Handle {
-    raycaster: {frames: number; renderNow: (basis: unknown, mode?: number) => Promise<number>}
-    state: {
-        cameras: unknown[]
-        selected: string | undefined
-        sheet: {width: number; height: number} | undefined
-        volume: {data: Uint8Array}
-        history: {past: unknown[]}
-        orbit: {camera: {zoom: number}}
-    }
-    dispatch: (action: unknown) => void
-    firstFrame: Promise<void>
-}
-
-declare global {
-    interface Window {
-        goferPixel: Handle
-    }
-}
-
-/**
- * Await the first frame, not the first paint.
- *
- * Waiting for a thumbnail to appear is waiting for the wrong thing: React commits the camera list
- * on its first render, but the viewport cannot draw until a `ResizeObserver` has told it how big it
- * is, which lands a beat later. Reading the canvas at that point returned an empty buffer about one
- * run in five. `firstFrame` is the event that was missing, and adding it was part of the fix.
- */
-const ready = async (page: Page): Promise<void> => {
-    await page.goto('/')
-    await page.evaluate(() => window.goferPixel.firstFrame)
-}
-
-const frames = (page: Page): Promise<number> =>
-    page.evaluate(() => window.goferPixel.raycaster.frames)
 
 test('the app boots, the viewport draws, and the console stays clean', async ({page}) => {
     const noise: string[] = []
@@ -125,6 +91,37 @@ test('a left drag with Draw armed writes voxels and lands them on the GPU', asyn
 
     await page.keyboard.press('Control+z')
     expect(await filled()).toBe(was)
+})
+
+/**
+ * A real double-click, which is a thing only a browser has.
+ *
+ * `PointerEvent.detail` is 0 on `pointerdown` by specification, so reading the click count off the
+ * event made every double-click a single one — and nothing outside a browser could see it, because
+ * the reducer's tests hand the count in and happy-dom never dispatches a pointer press at all. The
+ * count is kept in the viewport now, and this is the test that would have caught it.
+ */
+test('a double-click takes the connected colour, not one voxel', async ({page}) => {
+    await ready(page)
+    const box = await page.locator('[data-testid="viewport"]').boundingBox()
+    if (!box) throw new Error('the viewport has no box')
+    const selected = (): Promise<number> =>
+        page.evaluate(() => window.goferPixel.state.selection.size)
+
+    await page.evaluate(() => {
+        window.goferPixel.dispatch({type: 'tool', tool: 'move'})
+    })
+    const centre = {x: box.x + box.width / 2, y: box.y + box.height / 2}
+
+    await page.mouse.click(centre.x, centre.y)
+    expect(await selected()).toBe(1)
+
+    await page.mouse.dblclick(centre.x, centre.y)
+    expect(await selected()).toBeGreaterThan(1)
+
+    // A press somewhere else is a fresh count, not the third of a run.
+    await page.mouse.click(centre.x + 40, centre.y + 24)
+    expect(await selected()).toBe(1)
 })
 
 /**

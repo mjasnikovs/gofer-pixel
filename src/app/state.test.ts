@@ -16,6 +16,8 @@ import {
     presetMaps,
     previewVolume,
     reduce,
+    TOOLS,
+    USES_BRUSH,
     type AppState,
     type Tool
 } from './state'
@@ -44,6 +46,7 @@ const at = (
         button: 0,
         shift: false,
         alt: false,
+        ctrl: false,
         clicks: 1,
         ...over
     }
@@ -245,6 +248,79 @@ test('the brush size is bounded by the document, not by the stepper', () => {
     expect(reduce(state, {type: 'brush', brush: {size: 0}}).brush.size).toBe(1)
     // A partial update leaves the rest of the brush alone.
     expect(reduce(state, {type: 'brush', brush: {shape: 'cube'}}).brush.size).toBe(state.brush.size)
+})
+
+/**
+ * Which tools actually read the brush.
+ *
+ * The panel greys Size, Shape and Figure out for the other seven, and that claim was made from
+ * reading the code. This is the claim measured: the footprint the outline promises is the footprint
+ * the press writes, so a tool whose outline does not change when the brush does is a tool the brush
+ * does not reach. Fill floods a region, Pick samples one voxel, and the four grab tools work on a
+ * selection — none of them has a footprint to widen.
+ */
+test('the brush reaches Draw and Erase and no other tool', () => {
+    const {column, row} = onModel(fresh())
+    const footprint = (tool: Tool, size: number): number | undefined => {
+        const armedWith = {...armed(tool), brush: {...fresh().brush, size}}
+        return reduce(armedWith, at('move', column, row)).hover?.cells.length
+    }
+
+    for (const tool of TOOLS) {
+        const one = footprint(tool, 1)
+        const five = footprint(tool, 5)
+        if (USES_BRUSH.has(tool)) {
+            expect(one, `${tool} at size 1`).toBe(1)
+            expect(five, `${tool} at size 5`).toBe(25)
+        } else {
+            expect(five, `${tool} must ignore the brush`).toBe(one)
+        }
+    }
+
+    // Measure is the one tool with no outline at all, because it is not built.
+    expect(footprint('measure', 1)).toBeUndefined()
+    // And the shape reaches the same two: a round size-5 brush is fewer cells than a square one.
+    const round = {
+        ...armed('draw'),
+        brush: {size: 5, shape: 'circle', figure: 'free'} as const
+    }
+    expect(reduce(round, at('move', column, row)).hover?.cells.length).toBeLessThan(25)
+})
+
+/**
+ * Every control in the palette half of the Brush panel, and the fact that none of them is tool-bound.
+ *
+ * They stay live under all nine tools on purpose — shift-clicking a swatch selects every voxel of a
+ * colour, which is most useful with Move armed, and the entry editor, the emissive switch and the
+ * lock change the document rather than the next stroke. A dead control in this list would look
+ * exactly like a live one, which is why each is asserted to change something.
+ */
+test('every palette control reaches the document', () => {
+    const state = fresh()
+
+    expect(reduce(state, {type: 'color', color: 9}).color).toBe(9)
+    expect(
+        reduce(state, {type: 'select-color', color: state.color}).selection.size
+    ).toBeGreaterThan(0)
+    expect(reduce(state, {type: 'replace-color', from: 1, to: 9}).volume).not.toBe(state.volume)
+    expect(
+        reduce(state, {type: 'emissive', color: state.color, value: 255}).volume.emissive[
+            state.color
+        ]
+    ).toBe(255)
+    expect(reduce(state, {type: 'palette-lock', on: true}).paletteLocked).toBe(true)
+    expect(reduce(state, {type: 'palette-add'}).color).not.toBe(state.color)
+
+    const recoloured = reduce(state, {type: 'palette-color', color: state.color, css: '#123456'})
+    expect([...recoloured.volume.palette]).not.toEqual([...state.volume.palette])
+
+    // The one control that is meant to be inert, and only under the lock.
+    const locked = reduce(state, {type: 'palette-lock', on: true})
+    const refused = reduce(locked, {type: 'palette-color', color: state.color, css: '#123456'})
+    expect([...refused.volume.palette]).toEqual([...locked.volume.palette])
+
+    // The eyedropper button is an arming button, not a fourth kind of colour edit.
+    expect(reduce(state, {type: 'tool', tool: 'pick'}).tool).toBe('pick')
 })
 
 test('drawing adds voxels, and one stroke is one undo step', () => {
@@ -450,6 +526,103 @@ test('with move armed a click selects, a double-click takes the colour, alt take
     for (const index of one.selection) expect(grown.selection.has(index)).toBe(true)
     expect(reduce(one, {type: 'shrink-selection'}).selection.size).toBe(0)
     expect(reduce(grown, {type: 'clear-selection'}).selection.size).toBe(0)
+})
+
+test('the rotate tool turns what it grabbed, a quarter for every drag of the hand', () => {
+    /*
+     * A 4 × 3 × 2 bar in the middle of a roomy grid, rather than the car: it is unequal along all
+     * three axes, so a quarter turn about *any* of them both changes the model and still fits —
+     * which is what lets the test assert a turn happened without knowing which face got grabbed.
+     */
+    const bar = createVolume(16, 16, 16, volume.palette)
+    for (let z = 6; z < 8; z += 1) {
+        for (let y = 6; y < 9; y += 1) {
+            for (let x = 5; x < 9; x += 1) bar.data[voxelIndex(bar, x, y, z)] = 1
+        }
+    }
+    // One corner knocked out, so the bar is chiral. A solid box turns to the same set of cells
+    // whichever way it goes round, and a test on a solid box cannot tell left from right.
+    bar.data[voxelIndex(bar, 8, 8, 7)] = 0
+    const state = reduce(initialState(bar), {type: 'tool', tool: 'rotate'})
+    const {column, row} = onModel(state)
+
+    // The press is Move's press. What differs is what the drag then does with what it took.
+    const down = reduce(state, at('down', column, row, {clicks: 2}))
+    expect(down.drag?.kind).toBe('turn')
+    expect(down.selection.size).toBeGreaterThan(1)
+    expect(down.volume).toBe(state.volume)
+
+    // Less than a quarter's worth of hand is not a turn — and must not be a nudge either, which is
+    // the whole bug this replaces: Rotate used to slide the voxels sideways like Move.
+    const short = reduce(down, at('move', column + 20, row))
+    expect(short.volume).toBe(state.volume)
+    expect(short.selection).toBe(down.selection)
+
+    const turned = reduce(down, at('move', column + 48, row))
+    expect(turned.volume).not.toBe(state.volume)
+    // A quarter turn is a bijection: it lands as many voxels as it lifted, or it does not land.
+    expect(turned.selection.size).toBe(down.selection.size)
+    expect(occupied(turned.volume)).toBe(occupied(state.volume))
+
+    // Replayed from the start of the gesture, so dragging back is not a second turn on the first.
+    expect(reduce(turned, at('move', column, row)).volume).toBe(state.volume)
+
+    /*
+     * One quarter per drag, however far the hand goes. Counting a quarter per 48 px made a long
+     * drag walk through four turns back to the start, which on screen was a flicker between two
+     * pictures. Every distance past the threshold has to be the same single turn.
+     */
+    for (const far of [96, 160, 320]) {
+        expect(reduce(down, at('move', column + far, row)).volume.data).toEqual(turned.volume.data)
+    }
+    // And the other way is the other way, not the same turn again.
+    const other = reduce(down, at('move', column - 96, row))
+    expect(other.volume.data).not.toEqual(turned.volume.data)
+    expect(occupied(other.volume)).toBe(occupied(state.volume))
+
+    const done = reduce(turned, at('up', column + 48, row))
+    expect(done.drag).toBeUndefined()
+    expect(done.history.past).toHaveLength(1)
+})
+
+test('Control adds to the selection instead of replacing it', () => {
+    const state = armed('move')
+    const {column, row} = onModel(state)
+
+    const one = reduce(state, at('down', column, row))
+    expect(one.selection.size).toBe(1)
+
+    // A second pixel that lands on a *different* voxel, found by walking away from the first until
+    // the press picks something else. A voxel is several pixels wide at this size, so a fixed
+    // offset either hits the same cell or falls off the model depending on the camera.
+    let apart = {column, row}
+    for (let step = 1; step < 24; step += 1) {
+        const spot = {column: column + step, row: row + step}
+        const {selection} = reduce(one, at('down', spot.column, spot.row))
+        if (selection.size === 1 && !selection.has([...one.selection][0] ?? -1)) {
+            apart = spot
+            break
+        }
+    }
+    expect(apart.column).not.toBe(column)
+
+    // A plain press somewhere else replaces — which is what every editor does, and what leaves an
+    // artist assembling two arms and a head out of separate clicks with no way to do it.
+    const elsewhere = reduce(one, at('down', apart.column, apart.row))
+    expect(elsewhere.selection.size).toBe(1)
+    expect(elsewhere.selection).not.toEqual(one.selection)
+
+    const both = reduce(one, at('down', apart.column, apart.row, {ctrl: true}))
+    expect(both.selection.size).toBe(2)
+    for (const index of one.selection) expect(both.selection.has(index)).toBe(true)
+
+    // It stacks with the other two: Control-double-click adds a whole colour.
+    const plusColour = reduce(both, at('down', column, row, {ctrl: true, clicks: 2}))
+    expect(plusColour.selection.size).toBeGreaterThan(both.selection.size)
+    for (const index of both.selection) expect(plusColour.selection.has(index)).toBe(true)
+
+    // Control on an empty selection is an ordinary press, not a special case that has to be typed.
+    expect(reduce(state, at('down', column, row, {ctrl: true})).selection.size).toBe(1)
 })
 
 test('a rubber band over air selects the surface under it, and a click on air deselects', () => {

@@ -138,6 +138,16 @@ const WRITES: ReadonlySet<Tool> = new Set<Tool>(['draw', 'erase', 'fill', 'pick'
 const SELECTS: ReadonlySet<Tool> = new Set<Tool>(['move', 'rotate', 'scale', 'clone'])
 
 /**
+ * The tools that read the brush — its size, its shape and its figure.
+ *
+ * Only the two that stamp a footprint. Fill floods a region, Pick samples one voxel, and the four
+ * grab tools work on a selection; none of them consults the brush, so the panel greys those three
+ * controls out rather than letting the artist set a size that quietly does nothing. Exported so the
+ * panel and the stroke below cannot drift apart about which tools those are.
+ */
+export const USES_BRUSH: ReadonlySet<Tool> = new Set<Tool>(['draw', 'erase'])
+
+/**
  * Every tool that does something with the left button, and therefore every tool that owes the artist
  * a picture of what that something is before they commit to it.
  *
@@ -208,7 +218,7 @@ const KEEPS_COUNT: ReadonlySet<TransformOp['kind']> = new Set(['move', 'rotate',
  * rate, which is far cheaper than the alternative being wrong.
  */
 export interface Drag {
-    readonly kind: 'move' | 'clone' | 'extrude'
+    readonly kind: 'move' | 'clone' | 'extrude' | 'turn'
     /** The document and the selection as they were when the pointer went down. */
     readonly volume: Volume
     readonly selection: Selection
@@ -217,7 +227,10 @@ export interface Drag {
     readonly axis: number
     readonly layer: number
     readonly face: number
-    /** Pointer position at the start, for the extrude drag, which measures along the normal. */
+    /**
+     * Pointer position at the start, for the two drags that measure the hand rather than the grid:
+     * the extrude, which projects onto the normal, and the turn, which counts sideways pixels.
+     */
     readonly x: number
     readonly y: number
 }
@@ -763,7 +776,7 @@ const pressSelection = (
     state: AppState,
     volume: Volume,
     hit: {x: number; y: number; z: number; face: number},
-    event: {clicks: number; alt: boolean}
+    event: {clicks: number; alt: boolean; ctrl: boolean}
 ): Selection => {
     /*
      * The Scale tool pulls a surface. What it grabs is the patch under the cursor rather than the
@@ -781,13 +794,27 @@ const pressSelection = (
     // `FEATURESET.md` §31's "modifier-click = whole object" has an exact answer, and two pieces of
     // one object that do not touch are still one object.
     const owned = ownerAt(state.volume, hit.x, hit.y, hit.z)
-    return (
+    const picked =
         event.clicks >= 2 ? selectConnectedColor(volume, hit.x, hit.y, hit.z)
         : event.alt && owned !== 0 ? objectCells(state.volume, owned)
         : event.alt ? selectObject(volume, hit.x, hit.y, hit.z)
-        : already ? state.selection
+        : already && !event.ctrl ? state.selection
         : selectVoxel(volume, hit.x, hit.y, hit.z)
-    )
+
+    /*
+     * Control adds — `FEATURESET.md` §39's selection, built one piece at a time.
+     *
+     * Without it a selection can only ever be one click's worth: a press outside what is selected
+     * replaces it, which is what every editor does and what an artist assembling two arms and a
+     * head out of separate clicks has no answer to. It stacks with the other two, so
+     * Control-double-click adds a whole colour and Control-Alt-click adds a whole object.
+     *
+     * Shift would be the usual key and it is spoken for: Shift always pans, whatever is armed, and
+     * a modifier that means "add" over the model and "move the camera" two pixels off it is a
+     * modifier nobody can trust.
+     */
+    if (!event.ctrl || state.selection.size === 0) return picked
+    return new Set([...state.selection, ...picked])
 }
 
 /**
@@ -813,6 +840,7 @@ interface AimKey {
     readonly camera: Camera
     readonly color: number
     readonly alt: boolean
+    readonly ctrl: boolean
     readonly clicks: number
     readonly face: number
 }
@@ -837,6 +865,7 @@ const sameAim = (a: AimKey, b: AimKey): boolean =>
     && a.camera === b.camera
     && a.color === b.color
     && a.alt === b.alt
+    && a.ctrl === b.ctrl
     && a.clicks === b.clicks
     && a.face === b.face
 
@@ -902,7 +931,7 @@ const hoverAt = (state: AppState): AppState => {
         })
     }
 
-    if (state.tool === 'draw' || state.tool === 'erase') {
+    if (USES_BRUSH.has(state.tool)) {
         const cells = mirrored(state, strokeCells(state.brush, face, cell, cell))
         const value = state.tool === 'erase' ? 0 : state.color
         return withHover(state, {
@@ -941,6 +970,7 @@ const hoverAt = (state: AppState): AppState => {
         camera: state.orbit.camera,
         color: state.color,
         alt: event.alt,
+        ctrl: event.ctrl,
         clicks: event.clicks,
         face: hit.face
     }
@@ -982,7 +1012,7 @@ const solveRegion = (
     state: AppState,
     volume: Volume,
     hit: {x: number; y: number; z: number; face: number},
-    event: {clicks: number; alt: boolean},
+    event: {clicks: number; alt: boolean; ctrl: boolean},
     locked: ReadonlySet<number>
 ): AimAnswer => {
     if (state.tool === 'fill') {
@@ -1176,6 +1206,9 @@ const beginSelect = (state: AppState, event: ViewportPointer): AppState => {
      * the pointer then moves, that is what gets carried — so moving one voxel is one gesture rather
      * than click, then aim again, then drag. A press that never moves writes nothing and commits
      * nothing, because the move only fires when the cell under the cursor changes.
+     *
+     * What the carrying *is* is the tool: Move slides the voxels, Clone leaves a copy behind, and
+     * Rotate turns them a quarter at a time about the face that was grabbed.
      */
     const selection = pressSelection(state, volume, hit, event)
 
@@ -1185,7 +1218,10 @@ const beginSelect = (state: AppState, event: ViewportPointer): AppState => {
         selection,
         band: undefined,
         drag: {
-            kind: state.tool === 'clone' ? 'clone' : 'move',
+            kind:
+                state.tool === 'clone' ? 'clone'
+                : state.tool === 'rotate' ? 'turn'
+                : 'move',
             volume: state.volume,
             selection,
             // The plane of the face that was grabbed: dragging follows the surface under the hand.
@@ -1221,10 +1257,60 @@ const layersPulled = (state: AppState, drag: Drag, event: ViewportPointer): numb
     return Math.round(((dx * along + dy * over) * basis.scale) / squared)
 }
 
+/** How far sideways the hand goes before the turn commits. */
+const TURN_PIXELS = 48
+
+/**
+ * Which way one drag turns the selection: a quarter left, a quarter right, or not yet.
+ *
+ * Sideways pixels, not a swept angle. A turn has no length in the world to project the pointer onto
+ * the way a pull does, so there is nothing to measure but how far the hand went; and a straight
+ * sideways drag is the one gesture in the viewport that cannot be mistaken for an orbit.
+ *
+ * **One quarter per drag, however far the hand goes.** Counting a quarter every 48 px was the
+ * obvious reading and it was wrong on the screen: four quarters is the identity, so a long drag
+ * walked the model back to where it started, and two quarters is the identity for anything
+ * symmetric — which a two-voxel bar is. Measured across a 320 px drag it flipped between exactly
+ * two pictures eight times. A ratchet has one boundary instead of six and cannot flicker; turning
+ * twice is two drags, which is also what the buttons on the selection bar cost.
+ *
+ * The sign follows the grabbed face rather than the axis. A quarter turn about `z` reads clockwise
+ * from above and anticlockwise from below, so an artist who has orbited under the model and drags
+ * right would otherwise watch it turn the opposite way from the one they just learned.
+ */
+const quartersTurned = (state: AppState, drag: Drag, event: ViewportPointer): number => {
+    const dx = event.x - drag.x
+    if (Math.abs(dx) < TURN_PIXELS) return 0
+    const basis = basisFor(state.orbit.camera, drag.volume, event.height)
+    const step = FACE_STEP[drag.face] ?? [0, 0, 0]
+    const into =
+        step[0] * basis.forward[0] + step[1] * basis.forward[1] + step[2] * basis.forward[2]
+    const facing = into <= 0 ? 1 : -1
+    return facing * Math.sign(dx)
+}
+
 const continueDrag = (state: AppState, event: ViewportPointer): AppState => {
     const {drag} = state
     if (!drag) return state
     const draft = open(state, drag.volume)
+
+    if (drag.kind === 'turn') {
+        const quarters = quartersTurned(state, drag, event)
+        if (quarters === 0) {
+            return {...state, volume: drag.volume, selection: drag.selection}
+        }
+        const turned = rotateCells(draft, drag.selection, faceAxis(drag.face), quarters)
+        /*
+         * A turn is a bijection: every voxel has exactly one destination, so an answer that came
+         * back smaller lost some off the edge of the grid. Refuse it whole and leave the model where
+         * it was — the same rule the keyboard transform applies, and for the same reason. The draft
+         * is a throwaway copy, so dropping it costs nothing.
+         */
+        if (turned.size !== drag.selection.size) {
+            return {...state, volume: drag.volume, selection: drag.selection}
+        }
+        return {...state, volume: draft.volume, selection: turned, sheet: undefined}
+    }
 
     if (drag.kind === 'extrude') {
         const layers = layersPulled(state, drag, event)
