@@ -1,6 +1,6 @@
 import {IconButton} from '@astryxdesign/core/IconButton'
 import {Text} from '@astryxdesign/core/Text'
-import type {NamedCamera} from '../doc/cameras'
+import {DIRECTION_COUNTS, type NamedCamera} from '../doc/cameras'
 import type {Volume} from '../render/volume'
 import {CameraIcon, CopyIcon, PlusIcon, TrashIcon} from './icons'
 import {SectionHead} from './SectionHead'
@@ -23,7 +23,9 @@ export const CamerasPanel = ({
     onSelect,
     onCapture,
     onDuplicate,
-    onDelete
+    onDelete,
+    onDirections,
+    onAlign
 }: {
     volume: Volume
     cameras: readonly NamedCamera[]
@@ -32,9 +34,39 @@ export const CamerasPanel = ({
     onCapture: () => void
     onDuplicate: () => void
     onDelete: (id: string) => void
+    onDirections: (count: number) => void
+    onAlign: () => void
 }) => (
     <section className='section section-holds'>
         <SectionHead title='Cameras'>
+            {/*
+             * `FEATURESET.md` §13's one-click rings, and §14's alignment, next to the list they
+             * act on. Four and eight are the two counts the feature set names — "rotate every 45°"
+             * is eight of them, so it is the same button rather than a third.
+             */}
+            {DIRECTION_COUNTS.map(count => (
+                <button
+                    key={count}
+                    type='button'
+                    className='symmetry-axis'
+                    aria-label={`Create ${String(count)} directions`}
+                    title={`Replace the list with ${String(count)} cameras around one pivot`}
+                    onClick={() => {
+                        onDirections(count)
+                    }}
+                >
+                    {count}
+                </button>
+            ))}
+            <button
+                type='button'
+                className='symmetry-axis'
+                aria-label='Align the view to the nearest stop'
+                title='Turn the view to the nearest eighth and the nearest pitch'
+                onClick={onAlign}
+            >
+                ⌖
+            </button>
             <IconButton
                 label='Capture view as a camera'
                 tooltip='Capture the current view'

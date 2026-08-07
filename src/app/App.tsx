@@ -351,13 +351,23 @@ export const App = ({volume: source, name}: {volume: Volume; name: string}) => {
                         onDelete={id => {
                             dispatch({type: 'delete', id})
                         }}
+                        onDirections={count => {
+                            dispatch({type: 'directions', count})
+                        }}
+                        onAlign={() => {
+                            dispatch({type: 'align'})
+                        }}
                     />
                     <RendersPanel
                         volume={shown}
                         camera={current}
                         map={state.map}
+                        size={state.preview}
                         onMap={map => {
                             dispatch({type: 'map', map})
+                        }}
+                        onSize={size => {
+                            dispatch({type: 'preview', size})
                         }}
                     />
                     <ExportPanel

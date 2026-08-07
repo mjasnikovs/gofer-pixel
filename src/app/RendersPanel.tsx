@@ -33,16 +33,27 @@ const MAPS = [
     {value: MODE_EMISSION, label: 'Emission'}
 ]
 
+/**
+ * The sizes `FEATURESET.md` §15 names. The preview is drawn at the chosen resolution and blown up
+ * nearest-neighbour to a fixed box, which is the whole point of the feature: whether a detail
+ * survives 16 px is a question about 16 px, not about how much screen the panel has.
+ */
+const PREVIEW_SIZES = [16, 32, 64, 128] as const
+
 export const RendersPanel = ({
     volume,
     camera,
     map,
-    onMap
+    size,
+    onMap,
+    onSize
 }: {
     volume: Volume
     camera: NamedCamera | undefined
     map: number
+    size: number
     onMap: (map: number) => void
+    onSize: (size: number) => void
 }) => (
     <section className='section section-holds'>
         <SectionHead title='Renders' />
@@ -65,12 +76,44 @@ export const RendersPanel = ({
                 ))}
             </SegmentedControl>
 
+            <div className='field-row'>
+                <Text
+                    type='supporting'
+                    color='disabled'
+                >
+                    Sprite size
+                </Text>
+                <span className='spacer' />
+                <span
+                    className='symmetry-row'
+                    role='radiogroup'
+                    aria-label='Preview size'
+                >
+                    {PREVIEW_SIZES.map(entry => (
+                        <button
+                            key={entry}
+                            type='button'
+                            role='radio'
+                            aria-checked={entry === size}
+                            aria-label={`Preview at ${String(entry)} pixels`}
+                            className='symmetry-axis'
+                            data-on={entry === size || undefined}
+                            onClick={() => {
+                                onSize(entry)
+                            }}
+                        >
+                            {entry}
+                        </button>
+                    ))}
+                </span>
+            </div>
+
             <div className='checker render-preview'>
                 {camera ?
                     <Thumbnail
                         volume={volume}
                         camera={camera.camera}
-                        size={128}
+                        size={size}
                         map={map}
                         className='render-canvas'
                     />

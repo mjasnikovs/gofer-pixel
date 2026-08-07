@@ -10,7 +10,9 @@ import {
     type Shape
 } from '../doc/brush'
 import {
+    alignCamera,
     captureCamera,
+    directions,
     eightDirections,
     focusOn,
     ISOMETRIC_PITCH,
@@ -238,6 +240,13 @@ export interface AppState {
     readonly map: number
     /** Edge of one sprite in the sheet, in pixels. */
     readonly cell: number
+    /**
+     * Edge of the sprite the Renders panel previews, in pixels — `FEATURESET.md` §15.
+     *
+     * Its own number rather than the sheet's `cell`, because the question the preview answers is
+     * "does this detail survive 16 px", and answering it must not change what gets exported.
+     */
+    readonly preview: number
     readonly sheet: Sheet | undefined
     /**
      * Set by `bake`, cleared by `written`. Baking and writing the files are two different things —
@@ -313,12 +322,14 @@ export type AppAction =
     | {type: 'focus'}
     | {type: 'search'; query: string}
     | {type: 'select'; id: string}
-    | {type: 'eight-directions'}
+    | {type: 'directions'; count: number}
+    | {type: 'align'}
     | {type: 'capture'}
     | {type: 'duplicate'}
     | {type: 'delete'; id: string}
     | {type: 'map'; map: number}
     | {type: 'cell'; cell: number}
+    | {type: 'preview'; size: number}
     | {type: 'bake'}
     | {type: 'written'}
     | {type: 'tool'; tool: Tool}
@@ -375,6 +386,7 @@ export const initialState = (volume: Volume): AppState => {
         },
         map: MODE_COLOR,
         cell: 64,
+        preview: 64,
         sheet: undefined,
         exporting: false,
         serial: 0,
@@ -773,7 +785,7 @@ const endStroke = (state: AppState): AppState => {
 export const reduce = (state: AppState, action: AppAction): AppState => {
     switch (action.type) {
         case 'orbit': {
-            const orbit = applyOrbit(state.orbit, action.event, action.height)
+            const orbit = applyOrbit(state.orbit, action.event, action.height, state.snap)
             if (orbit === state.orbit) return state
             // Once the view has moved it is no longer the stored camera, and saying so is the
             // difference between a list of cameras and a list of bookmarks that quietly lie.
@@ -838,6 +850,14 @@ export const reduce = (state: AppState, action: AppAction): AppState => {
             const forward = redo(state.volume, state.history)
             return forward ? {...state, ...forward, sheet: undefined} : state
         }
+
+        /*
+         * Turn the view to the nearest of the eight yaws and the nearest of the pitch stops —
+         * `FEATURESET.md` §14. Nearest rather than a named view, because an artist who has orbited
+         * to roughly three-quarters-left wants exactly that and not Front.
+         */
+        case 'align':
+            return withCamera(state, alignCamera(state.orbit.camera), undefined)
 
         case 'select-color':
             return {...state, selection: selectColor(state.volume, action.color ?? state.color)}
@@ -1007,8 +1027,8 @@ export const reduce = (state: AppState, action: AppAction): AppState => {
             return found ? withCamera(state, found.camera, found.id) : state
         }
 
-        case 'eight-directions': {
-            const cameras = eightDirections(state.volume)
+        case 'directions': {
+            const cameras = directions(state.volume, action.count)
             const first = opening(cameras)
             return withCamera(
                 {...state, cameras, sheet: undefined},
@@ -1068,6 +1088,9 @@ export const reduce = (state: AppState, action: AppAction): AppState => {
 
         case 'cell':
             return {...state, cell: action.cell, sheet: undefined}
+
+        case 'preview':
+            return {...state, preview: action.size}
 
         case 'bake':
             return {

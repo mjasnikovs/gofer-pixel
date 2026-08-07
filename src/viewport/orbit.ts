@@ -70,7 +70,32 @@ const MAX_ZOOM = 512
 const clamp = (value: number, low: number, high: number): number =>
     Math.min(Math.max(value, low), high)
 
-export const apply = (state: OrbitState, event: OrbitEvent, height: number): OrbitState => {
+/**
+ * Pixel snapping, as `FEATURESET.md` §14 asks for it — and it is the switch labelled SNAP.
+ *
+ * Zoom is how many voxels tall the view is, so a whole number of voxels over a whole number of
+ * pixels is what makes a voxel edge land on a pixel edge. Pan is in voxels along the screen axes,
+ * so rounding it to whole voxels keeps the same grid alignment as the model moves under the frame.
+ *
+ * Off, both are free, which is what an artist wants while they are looking at something rather
+ * than composing a sprite from it.
+ */
+const snapCamera = (camera: Camera, snap: boolean): Camera =>
+    snap ?
+        {
+            ...camera,
+            zoom: Math.round(camera.zoom),
+            panX: Math.round(camera.panX),
+            panY: Math.round(camera.panY)
+        }
+    :   camera
+
+export const apply = (
+    state: OrbitState,
+    event: OrbitEvent,
+    height: number,
+    snap = false
+): OrbitState => {
     switch (event.type) {
         case 'camera':
             return {camera: event.camera, gesture: undefined}
@@ -112,26 +137,32 @@ export const apply = (state: OrbitState, event: OrbitEvent, height: number): Orb
             const voxelsPerPixel = gesture.from.zoom / height
             return {
                 ...state,
-                camera: {
-                    ...gesture.from,
-                    panX: gesture.from.panX - dx * voxelsPerPixel,
-                    panY: gesture.from.panY + dy * voxelsPerPixel
-                }
+                camera: snapCamera(
+                    {
+                        ...gesture.from,
+                        panX: gesture.from.panX - dx * voxelsPerPixel,
+                        panY: gesture.from.panY + dy * voxelsPerPixel
+                    },
+                    snap
+                )
             }
         }
 
-        case 'wheel':
+        case 'wheel': {
             // Exponential, so a notch is the same proportion of the view at every zoom level.
+            const zoomed = state.camera.zoom * Math.exp(event.delta * 0.001)
+            // Rounded *away* from where it started when snapping, so a notch always moves: rounding
+            // to nearest leaves a slow wheel stuck on the integer it is already sitting on.
+            const stepped =
+                snap ?
+                    zoomed > state.camera.zoom ?
+                        Math.ceil(zoomed)
+                    :   Math.floor(zoomed)
+                :   zoomed
             return {
                 ...state,
-                camera: {
-                    ...state.camera,
-                    zoom: clamp(
-                        state.camera.zoom * Math.exp(event.delta * 0.001),
-                        MIN_ZOOM,
-                        MAX_ZOOM
-                    )
-                }
+                camera: {...state.camera, zoom: clamp(stepped, MIN_ZOOM, MAX_ZOOM)}
             }
+        }
     }
 }

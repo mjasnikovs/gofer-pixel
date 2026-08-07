@@ -30,22 +30,57 @@ const DIRECTION_NAMES = [
     'Front Left'
 ]
 
+/** The counts `FEATURESET.md` §13 names: four, and every 45°, which is eight. */
+export const DIRECTION_COUNTS = [4, 8] as const
+
 /**
- * The eight directions a sprite sheet is usually cut into, at one click. `pitch` is shared: a sheet
- * whose rows disagree about the horizon is not a sheet.
+ * A ring of cameras around one pivot, at one click — `FEATURESET.md` §13.
+ *
+ * Everything but the yaw is shared: the same pitch, the same zoom, the same pivot, so the sprites
+ * come out at one scale and one horizon. A sheet whose rows disagree about either is not a sheet,
+ * and §14's "consistent object scale between camera views" is this line rather than a feature.
+ *
+ * Four directions are named from the eight, taking every other one, so Front is Front in both.
  */
-export const eightDirections = (volume: Volume, pitch = ISOMETRIC_PITCH): NamedCamera[] =>
-    DIRECTION_NAMES.map((name, i) => ({
-        id: `dir-${String(i)}`,
-        name,
-        camera: {
-            yaw: (i * Math.PI) / 4,
-            pitch,
-            zoom: defaultZoom(volume),
-            panX: 0,
-            panY: 0
+export const directions = (volume: Volume, count = 8, pitch = ISOMETRIC_PITCH): NamedCamera[] => {
+    const step = 8 / Math.max(1, count)
+    return Array.from({length: count}, (_unused, i) => {
+        const eighth = Math.round(i * step) % 8
+        return {
+            id: `dir-${String(i)}`,
+            name: DIRECTION_NAMES[eighth] ?? `Direction ${String(i)}`,
+            camera: {
+                yaw: (eighth * Math.PI) / 4,
+                pitch,
+                zoom: defaultZoom(volume),
+                panX: 0,
+                panY: 0
+            }
         }
-    }))
+    })
+}
+
+export const eightDirections = (volume: Volume, pitch = ISOMETRIC_PITCH): NamedCamera[] =>
+    directions(volume, 8, pitch)
+
+/**
+ * Turn the view to the nearest of the eight yaws and the nearest of three pitches — level, three
+ * quarters, and straight down.
+ *
+ * `FEATURESET.md` §14's "camera alignment tools", and the reason it snaps to the *nearest* rather
+ * than jumping to a named view: an artist who has orbited to roughly three-quarters-left wants
+ * exactly three-quarters-left, not Front.
+ */
+export const PITCH_STOPS = [0, ISOMETRIC_PITCH, Math.PI / 2, -ISOMETRIC_PITCH, -Math.PI / 2]
+
+export const alignCamera = (camera: Camera): Camera => {
+    const eighth = Math.PI / 4
+    const turns = Math.round(camera.yaw / eighth)
+    const nearest = PITCH_STOPS.reduce((best, stop) =>
+        Math.abs(stop - camera.pitch) < Math.abs(best - camera.pitch) ? stop : best
+    )
+    return {...camera, yaw: turns * eighth, pitch: nearest}
+}
 
 /**
  * Capture the viewport's current view as a new camera, the way the mockup's shutter button does.

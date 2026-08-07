@@ -128,10 +128,58 @@ test('the sheet is baked on demand and thrown away whenever it would go stale', 
     expect(reduce(baked, {type: 'map', map: MODE_NORMAL}).sheet).toBe(baked.sheet)
 })
 
-test('create-eight-directions replaces the list rather than appending to it', () => {
-    const state = reduce(reduce(fresh(), {type: 'capture'}), {type: 'eight-directions'})
+test('a ring of directions replaces the list rather than appending to it', () => {
+    const state = reduce(reduce(fresh(), {type: 'capture'}), {type: 'directions', count: 8})
     expect(state.cameras).toHaveLength(8)
     expect(state.selected).toBe('dir-1')
+
+    // Four takes every other one of the eight, so Front is Front in both and the sheet's rows
+    // still line up with a sheet cut the other way.
+    const four = reduce(state, {type: 'directions', count: 4})
+    expect(four.cameras.map(({name}) => name)).toEqual(['Front', 'Right', 'Back', 'Left'])
+    // One pitch and one zoom across the ring, which is what makes the sprites one set.
+    expect(new Set(four.cameras.map(({camera}) => camera.pitch)).size).toBe(1)
+    expect(new Set(four.cameras.map(({camera}) => camera.zoom)).size).toBe(1)
+})
+
+test('aligning turns the view to the nearest stop rather than to a named view', () => {
+    const state = reduce(fresh(), {type: 'select', id: 'dir-3'})
+    const nudged = reduce(
+        reduce(state, {
+            type: 'orbit',
+            event: {type: 'pointerdown', x: 0, y: 0, secondary: false},
+            height: 400
+        }),
+        {type: 'orbit', event: {type: 'pointermove', x: 8, y: 4}, height: 400}
+    )
+    expect(nudged.orbit.camera.yaw).not.toBeCloseTo((3 * Math.PI) / 4, 6)
+
+    const aligned = reduce(nudged, {type: 'align'})
+    expect(aligned.orbit.camera.yaw).toBeCloseTo((3 * Math.PI) / 4, 10)
+    expect(aligned.selected).toBeUndefined()
+})
+
+test('snap makes the zoom whole and the pan land on voxels', () => {
+    const loose = reduce(fresh(), {type: 'snap', on: false})
+    const tight = reduce(fresh(), {type: 'snap', on: true})
+    const wheel = {type: 'orbit', event: {type: 'wheel', delta: 40}, height: 400} as const
+
+    expect(Number.isInteger(reduce(loose, wheel).orbit.camera.zoom)).toBe(false)
+    expect(Number.isInteger(reduce(tight, wheel).orbit.camera.zoom)).toBe(true)
+    // A notch always moves, even when the zoom is already sitting on an integer.
+    expect(reduce(tight, wheel).orbit.camera.zoom).toBeGreaterThan(tight.orbit.camera.zoom)
+
+    const pan = (state: AppState): AppState =>
+        reduce(
+            reduce(state, {
+                type: 'orbit',
+                event: {type: 'pointerdown', x: 0, y: 0, secondary: true},
+                height: 400
+            }),
+            {type: 'orbit', event: {type: 'pointermove', x: 7, y: 3}, height: 400}
+        )
+    expect(Number.isInteger(pan(loose).orbit.camera.panX)).toBe(false)
+    expect(Number.isInteger(pan(tight).orbit.camera.panX)).toBe(true)
 })
 
 test('duplicating copies the selected camera rather than referring to it', () => {
