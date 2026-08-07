@@ -1,6 +1,21 @@
 import {useEffect, useRef} from 'react'
 
 /**
+ * An RGBA buffer behind a function, because React's development build reads props.
+ *
+ * React 19's dev build writes every *changed* prop into the Performance track, and it walks a
+ * `Uint8Array` one index at a time — the old buffer and the new one both. Measured over thirty
+ * pointer moves of a stroke with twenty-six previews on screen: 250,000 property rows per move,
+ * and 80 ms of the 100 ms each move cost under `vite dev`. The built bundle never had any of it,
+ * which is how dev came to be 5× slower than the thing it is supposed to be a preview of.
+ *
+ * A function is stringified rather than walked, so the buffer crosses the prop boundary for one
+ * row. Build it inside the same memo that builds the pixels: a fresh closure every render would
+ * re-run the effect below and redraw every canvas for nothing.
+ */
+export type Pixels = () => Uint8Array
+
+/**
  * An RGBA buffer on screen with nothing between it and the pixels: no smoothing on upload, and
  * `image-rendering: pixelated` on the way out. A sprite preview that resamples is a lie about what
  * the file will contain.
@@ -18,7 +33,7 @@ export const PixelCanvas = ({
 }: {
     width: number
     height: number
-    data: Uint8Array
+    data: Pixels
     className?: string
     title?: string
 }) => {
@@ -27,7 +42,7 @@ export const PixelCanvas = ({
     useEffect(() => {
         const context = ref.current?.getContext('2d')
         if (!context) return
-        context.putImageData(new ImageData(new Uint8ClampedArray(data), width, height), 0, 0)
+        context.putImageData(new ImageData(new Uint8ClampedArray(data()), width, height), 0, 0)
     }, [width, height, data])
 
     return (

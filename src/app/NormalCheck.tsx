@@ -33,7 +33,9 @@ export const NormalCheck = ({
 }) => {
     const {pixels, share} = useMemo(() => {
         const {normal} = render(volume, basisFor(camera.camera, volume, size), size, size)
-        return {pixels: lightNormals(normal), share: facingShare(normal)}
+        const lit = lightNormals(normal)
+        // The closure is built here rather than in the JSX so the prop is stable — see `Pixels`.
+        return {pixels: (): Uint8Array => lit, share: facingShare(normal)}
     }, [volume, camera, size])
 
     return (

@@ -10,7 +10,7 @@ import {
     MODE_NORMAL
 } from '../render/raycast.glsl'
 import {volumeDiagonal, type Volume} from '../render/volume'
-import {PixelCanvas} from './PixelCanvas'
+import {PixelCanvas, type Pixels} from './PixelCanvas'
 
 /**
  * The depth buffer as something you can look at, stretched across the volume's own diagonal.
@@ -59,9 +59,9 @@ const greyPixels = (values: Uint8Array, id: Uint8Array): Uint8Array => {
  *
  * Held in a `WeakMap` on the volume, so a document that is closed takes its sprites with it.
  */
-const sprites = new WeakMap<Volume, Map<string, Uint8Array>>()
+const sprites = new WeakMap<Volume, Map<string, Pixels>>()
 
-const spriteFor = (volume: Volume, camera: Camera, size: number, map: number): Uint8Array => {
+const spriteFor = (volume: Volume, camera: Camera, size: number, map: number): Pixels => {
     let cache = sprites.get(volume)
     if (!cache) {
         cache = new Map()
@@ -80,8 +80,11 @@ const spriteFor = (volume: Volume, camera: Camera, size: number, map: number): U
         : map === MODE_AO ? greyPixels(target.ao, target.id)
         : map === MODE_EMISSION ? target.emission
         : target.color
-    cache.set(key, pixels)
-    return pixels
+    // Cached as the closure, not the buffer, so the prop keeps its identity for as long as the
+    // pixels do — see `Pixels`.
+    const sprite: Pixels = () => pixels
+    cache.set(key, sprite)
+    return sprite
 }
 
 /**
