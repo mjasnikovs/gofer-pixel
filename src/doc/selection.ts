@@ -103,6 +103,50 @@ export const selectRect = (
     return found
 }
 
+/**
+ * The patch of surface the cursor is on: occupied cells on the same layer whose face on this side
+ * is open to air, reachable from the one under the cursor.
+ *
+ * This is what a pull grabs (`FEATURESET.md` §4, "drag a face → Extrude"). Coplanar and connected,
+ * so pulling the top of a table's leg does not also pull the other three legs, and open to air, so
+ * it stops at the point where the surface turns a corner and goes inside the model.
+ */
+export const facePatch = (
+    volume: Volume,
+    x: number,
+    y: number,
+    z: number,
+    step: Cell
+): Selection => {
+    const found = new Set<number>()
+    const onSurface = (cx: number, cy: number, cz: number): boolean =>
+        voxelAt(volume, cx, cy, cz) !== 0
+        && voxelAt(volume, cx + step[0], cy + step[1], cz + step[2]) === 0
+    if (!onSurface(x, y, z)) return found
+
+    // The two axes of the surface are the two the face's own step does not use.
+    const inPlane = NEIGHBOURS.filter(
+        ([dx, dy, dz]) => dx * step[0] + dy * step[1] + dz * step[2] === 0
+    )
+    const stack: Cell[] = [[x, y, z]]
+    found.add(voxelIndex(volume, x, y, z))
+    while (stack.length > 0) {
+        const cell = stack.pop()
+        if (!cell) break
+        for (const [dx, dy, dz] of inPlane) {
+            const nx = cell[0] + dx
+            const ny = cell[1] + dy
+            const nz = cell[2] + dz
+            if (!onSurface(nx, ny, nz)) continue
+            const index = voxelIndex(volume, nx, ny, nz)
+            if (found.has(index)) continue
+            found.add(index)
+            stack.push([nx, ny, nz])
+        }
+    }
+    return found
+}
+
 const NEIGHBOURS: readonly Cell[] = [
     [1, 0, 0],
     [-1, 0, 0],

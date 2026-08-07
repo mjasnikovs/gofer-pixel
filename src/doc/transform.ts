@@ -176,6 +176,54 @@ export const arrayCells = (
     return all
 }
 
+/**
+ * Pull a surface patch out along its own normal, or push it back in.
+ *
+ * Out copies the patch `layers` times, each copy carrying the colour of the cell it grew from, so
+ * a two-colour surface extrudes as two-coloured columns rather than as one flat slab. In erases
+ * the outermost `layers` of it, which is the same gesture run backwards and the reason it is one
+ * function: the artist drags one way and then the other without letting go.
+ *
+ * The returned selection is the new face — what the next drag of the same gesture will pull.
+ */
+export const extrudeCells = (
+    draft: Draft,
+    patch: Selection,
+    step: Cell,
+    layers: number
+): Selection => {
+    if (patch.size === 0 || layers === 0) return patch
+    const values = snapshot(draft, patch)
+    const out = layers > 0
+    const depth = Math.abs(layers)
+    let face: Selection = patch
+
+    for (let i = 1; i <= depth; i += 1) {
+        const at = out ? i : -(i - 1)
+        const cells = [...values].map(([index, value]) => {
+            const [x, y, z] = cellOf(draft.volume, index)
+            return {
+                cell: [x + step[0] * at, y + step[1] * at, z + step[2] * at] as Cell,
+                value: out ? value : 0
+            }
+        })
+        face = put(draft, cells)
+    }
+    if (out) return face
+
+    // Pushing in leaves the cell *behind* the last one erased as the new surface.
+    const behind = [...values].map(([index]) => {
+        const [x, y, z] = cellOf(draft.volume, index)
+        return voxelIndex(
+            draft.volume,
+            x - step[0] * depth,
+            y - step[1] * depth,
+            z - step[2] * depth
+        )
+    })
+    return new Set(behind.filter(index => (draft.volume.data[index] ?? 0) !== 0))
+}
+
 export const deleteCells = (draft: Draft, selection: Selection): Selection => {
     clear(draft, selection)
     return EMPTY_SELECTION

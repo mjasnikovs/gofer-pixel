@@ -19,6 +19,7 @@ import {
     selectConnectedColor,
     selectObject,
     selectRect,
+    facePatch,
     selectVoxel,
     shrink,
     type Cell,
@@ -29,6 +30,7 @@ import {
     arrayCells,
     deleteCells,
     duplicateCells,
+    extrudeCells,
     fitsAfter,
     flipCells,
     mirrorCells,
@@ -38,9 +40,10 @@ import {
     type Axis
 } from '../doc/transform'
 import {basisFor, createCamera, type Camera} from '../render/camera'
+import {FACE_STEP} from '../render/faces'
 import {pick, pickPlane, pickRay} from '../render/pick'
 import {MODE_COLOR} from '../render/raycast.glsl'
-import type {Volume} from '../render/volume'
+import {voxelIndex, type Volume} from '../render/volume'
 import {renderSheet, type Sheet} from '../sheet/sheet'
 import {
     apply as applyOrbit,
@@ -111,6 +114,33 @@ export type TransformOp =
 /** The transforms that must end with as many voxels as they started with. See the reducer. */
 const KEEPS_COUNT: ReadonlySet<TransformOp['kind']> = new Set(['move', 'rotate', 'flip'])
 
+/**
+ * A drag that is moving voxels rather than choosing them.
+ *
+ * Replayed from its start on every pointer move, never accumulated — the same pattern as
+ * `viewport/orbit.ts`, and for the same three reasons: the gesture is reproducible from its start
+ * plus a position, a test can jump straight to the end of a drag, and a dropped move event cannot
+ * leave the model somewhere the mouse is not. Accumulating would also mean a drag that wanders
+ * back and forth grinds the model up, because each step would move whatever it happened to hit.
+ *
+ * The cost is one grid copy per pointer move. On a 128³ document that is 2 MB of memcpy at mouse
+ * rate, which is far cheaper than the alternative being wrong.
+ */
+export interface Drag {
+    readonly kind: 'move' | 'clone' | 'extrude'
+    /** The document and the selection as they were when the pointer went down. */
+    readonly volume: Volume
+    readonly selection: Selection
+    /** The cell under the cursor at the start, on the plane of the face that was grabbed. */
+    readonly from: Cell
+    readonly axis: number
+    readonly layer: number
+    readonly face: number
+    /** Pointer position at the start, for the extrude drag, which measures along the normal. */
+    readonly x: number
+    readonly y: number
+}
+
 /** A rubber band while the pointer is down, in the viewport's own pixels. */
 export interface Band {
     readonly x0: number
@@ -165,6 +195,8 @@ export interface AppState {
     readonly selection: Selection
     /** Non-`undefined` while a rubber band is being dragged over the picture. */
     readonly band: Band | undefined
+    /** Non-`undefined` while voxels are being dragged — moved, cloned or pulled. */
+    readonly drag: Drag | undefined
     /** Draw-time mirroring. Writes real voxels as the stroke happens — see `doc/symmetry.ts`. */
     readonly symmetry: Symmetry
 
@@ -243,6 +275,7 @@ export const initialState = (volume: Volume): AppState => {
         stroke: undefined,
         selection: EMPTY_SELECTION,
         band: undefined,
+        drag: undefined,
         symmetry: NO_SYMMETRY,
         tool: 'draw',
         brush: {kind: 'voxel', size: 2, shape: 'square'},
@@ -379,11 +412,141 @@ const beginSelect = (state: AppState, event: ViewportPointer): AppState => {
             }
         }
     }
+
+    /*
+     * The Scale tool pulls a surface. What it grabs is the patch under the cursor rather than the
+     * standing selection, because a pull is aimed at a face and the artist is pointing at one.
+     */
+    if (state.tool === 'scale') {
+        const patch = facePatch(state.volume, hit.x, hit.y, hit.z, FACE_STEP[hit.face] ?? [0, 0, 0])
+        return {
+            ...state,
+            selection: patch,
+            drag: {
+                kind: 'extrude',
+                volume: state.volume,
+                selection: patch,
+                from: [hit.x, hit.y, hit.z],
+                axis: faceAxis(hit.face),
+                layer: hit[AXIS_KEYS[faceAxis(hit.face)] ?? 'x'],
+                face: hit.face,
+                x: event.x,
+                y: event.y
+            }
+        }
+    }
+
+    /*
+     * Selecting and dragging are the same gesture. A press picks what is under the cursor, and if
+     * the pointer then moves, that is what gets carried — so moving one voxel is one gesture rather
+     * than click, then aim again, then drag. A press that never moves writes nothing and commits
+     * nothing, because the move only fires when the cell under the cursor changes.
+     *
+     * Pressing on a voxel that is *already* selected keeps the whole selection instead of collapsing
+     * it to one cell, which is what makes a rubber-banded group draggable.
+     */
+    const already = state.selection.has(voxelIndex(state.volume, hit.x, hit.y, hit.z))
     const selection =
         event.clicks >= 2 ? selectConnectedColor(state.volume, hit.x, hit.y, hit.z)
         : event.alt ? selectObject(state.volume, hit.x, hit.y, hit.z)
+        : already ? state.selection
         : selectVoxel(state.volume, hit.x, hit.y, hit.z)
-    return {...state, selection, band: undefined}
+
+    const axis = faceAxis(hit.face)
+    return {
+        ...state,
+        selection,
+        band: undefined,
+        drag: {
+            kind: state.tool === 'clone' ? 'clone' : 'move',
+            volume: state.volume,
+            selection,
+            // The plane of the face that was grabbed: dragging follows the surface under the hand.
+            from: [hit.x, hit.y, hit.z],
+            axis,
+            layer: hit[AXIS_KEYS[axis] ?? 'x'],
+            face: hit.face,
+            x: event.x,
+            y: event.y
+        }
+    }
+}
+
+const AXIS_KEYS = ['x', 'y', 'z'] as const
+
+/**
+ * How many voxels along the face normal a pointer has travelled.
+ *
+ * A world step of one voxel along `n` moves the picture by `n · right` and `-n · up` voxels, which
+ * is that over `scale` in pixels. Projecting the pointer's travel back onto that direction is the
+ * least-squares answer, and rounding it is what makes a pull land on whole layers. Edge-on to the
+ * normal there is no answer, and the pull does nothing rather than something arbitrary.
+ */
+const layersPulled = (state: AppState, drag: Drag, event: ViewportPointer): number => {
+    const basis = basisFor(state.orbit.camera, drag.volume, event.height)
+    const step = FACE_STEP[drag.face] ?? [0, 0, 0]
+    const along = step[0] * basis.right[0] + step[1] * basis.right[1] + step[2] * basis.right[2]
+    const over = -(step[0] * basis.up[0] + step[1] * basis.up[1] + step[2] * basis.up[2])
+    const squared = along * along + over * over
+    if (squared < 1e-6) return 0
+    const dx = event.x - drag.x
+    const dy = event.y - drag.y
+    return Math.round(((dx * along + dy * over) * basis.scale) / squared)
+}
+
+const continueDrag = (state: AppState, event: ViewportPointer): AppState => {
+    const {drag} = state
+    if (!drag) return state
+    const draft = beginEdit(drag.volume)
+
+    if (drag.kind === 'extrude') {
+        const layers = layersPulled(state, drag, event)
+        if (layers === 0) {
+            return {...state, volume: drag.volume, selection: drag.selection}
+        }
+        const face = extrudeCells(draft, drag.selection, FACE_STEP[drag.face] ?? [0, 0, 0], layers)
+        return {...state, volume: draft.volume, selection: face, sheet: undefined}
+    }
+
+    const basis = basisFor(state.orbit.camera, drag.volume, event.height)
+    const cell = pickPlane(
+        basis,
+        event.x,
+        event.y,
+        event.width,
+        event.height,
+        drag.axis,
+        drag.layer
+    )
+    if (!cell) return state
+    const delta: Cell = [cell[0] - drag.from[0], cell[1] - drag.from[1], cell[2] - drag.from[2]]
+    if (delta[0] === 0 && delta[1] === 0 && delta[2] === 0) {
+        return {...state, volume: drag.volume, selection: drag.selection}
+    }
+    const selection =
+        drag.kind === 'clone' ?
+            duplicateCells(draft, drag.selection, delta)
+        :   moveCells(draft, drag.selection, delta)
+    return {...state, volume: draft.volume, selection, sheet: undefined}
+}
+
+const endDrag = (state: AppState): AppState => {
+    const {drag} = state
+    if (!drag) return state
+    // The document already shows the result, so the commit is only about the history: replay the
+    // whole gesture once against the volume it started from and record that as one diff.
+    const draft = beginEdit(drag.volume)
+    draft.volume.data.set(state.volume.data)
+    for (let i = 0; i < draft.volume.data.length; i += 1) {
+        const was = drag.volume.data[i] ?? 0
+        if (was !== (draft.volume.data[i] ?? 0)) draft.before.set(i, was)
+    }
+    const edit = commitEdit(draft)
+    return {
+        ...state,
+        drag: undefined,
+        history: edit ? record(state.history, edit) : state.history
+    }
 }
 
 const endBand = (state: AppState): AppState => {
@@ -475,6 +638,9 @@ export const reduce = (state: AppState, action: AppAction): AppState => {
                 return event.type === 'move' ?
                         {...state, band: {...state.band, x1: event.x, y1: event.y}}
                     :   endBand(state)
+            }
+            if (state.drag) {
+                return event.type === 'move' ? continueDrag(state, event) : endDrag(state)
             }
             return reduce(state, {
                 type: 'orbit',

@@ -472,6 +472,92 @@ test('radial symmetry is refused on a grid it would not be exact on', () => {
     expect(asked.symmetry.radial).toBe(square)
 })
 
+test('pressing and dragging a voxel carries it, in one gesture and one undo step', () => {
+    const state = armed('move')
+    const {column, row} = onModel(state)
+
+    const down = reduce(state, at('down', column, row))
+    expect(down.drag?.kind).toBe('move')
+    expect(down.selection.size).toBe(1)
+    expect(down.volume).toBe(state.volume)
+
+    // Far enough across the grabbed face that the cell under the cursor has certainly changed.
+    const dragged = reduce(down, at('move', column + 12, row + 6))
+    expect(dragged.volume).not.toBe(state.volume)
+    expect(occupied(dragged.volume)).toBeLessThanOrEqual(occupied(state.volume))
+
+    const dropped = reduce(dragged, at('up', column + 12, row + 6))
+    expect(dropped.drag).toBeUndefined()
+    expect(dropped.history.past).toHaveLength(1)
+    expect(reduce(dropped, {type: 'undo'}).volume.data).toEqual(state.volume.data)
+})
+
+test('a drag is replayed from where it started, not accumulated as it goes', () => {
+    const state = armed('move')
+    const {column, row} = onModel(state)
+    const down = reduce(state, at('down', column, row))
+
+    const wandered = [
+        [column + 9, row + 3],
+        [column - 4, row + 7],
+        [column + 12, row + 6]
+    ].reduce((live, [x, y]) => reduce(live, at('move', x ?? 0, y ?? 0)), down)
+    const straight = reduce(down, at('move', column + 12, row + 6))
+
+    // Three moves ending where one move ended leave the identical document.
+    expect(wandered.volume.data).toEqual(straight.volume.data)
+})
+
+test('a press that never moves selects and writes nothing', () => {
+    const state = armed('move')
+    const {column, row} = onModel(state)
+    const tapped = reduce(reduce(state, at('down', column, row)), at('up', column, row))
+    expect(tapped.selection.size).toBe(1)
+    expect(tapped.history.past).toHaveLength(0)
+    expect(tapped.volume.data).toEqual(state.volume.data)
+})
+
+test('clone leaves the original where it was and move does not', () => {
+    const {column, row} = onModel(armed('move'))
+    const drag = (tool: 'move' | 'clone'): AppState => {
+        const down = reduce(armed(tool), at('down', column, row))
+        return reduce(down, at('move', column + 12, row + 6))
+    }
+
+    const cloned = drag('clone')
+    const source = cloned.drag?.from ?? [0, 0, 0]
+    expect(voxelAt(cloned.volume, source[0], source[1], source[2])).not.toBe(0)
+    expect(voxelAt(drag('move').volume, source[0], source[1], source[2])).toBe(0)
+})
+
+test('the scale tool pulls the surface under the cursor, and pushing it back is the same drag', () => {
+    const state = armed('scale')
+    const {column, row} = onModel(state)
+
+    const down = reduce(state, at('down', column, row))
+    expect(down.drag?.kind).toBe('extrude')
+    expect(down.selection.size).toBeGreaterThan(0)
+    // The patch is one connected face, not the whole model.
+    expect(down.selection.size).toBeLessThan(occupied(state.volume))
+
+    // Drag until the projection along the normal rounds to at least one whole layer, whichever
+    // screen direction that face happens to point in.
+    const pulled = [
+        at('move', column + 40, row),
+        at('move', column - 40, row),
+        at('move', column, row + 40),
+        at('move', column, row - 40)
+    ]
+        .map(event => reduce(down, event))
+        .find(next => occupied(next.volume) > occupied(state.volume))
+    if (!pulled) throw new Error('one of the four directions pulls the face outward')
+    expect(pulled.history.past).toHaveLength(0)
+
+    const done = reduce(pulled, at('up', column, row))
+    expect(done.history.past).toHaveLength(1)
+    expect(reduce(done, {type: 'undo'}).volume.data).toEqual(state.volume.data)
+})
+
 test('the chrome settings move without touching the render or the sheet', () => {
     const baked = reduce(fresh(), {type: 'bake'})
     const after = reduce(
