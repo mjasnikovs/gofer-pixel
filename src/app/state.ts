@@ -5,10 +5,11 @@ import {
     SHAPES,
     type Brush,
     type BrushKind,
+    type Offset,
     type Shape
 } from '../doc/brush'
 import {captureCamera, eightDirections, ISOMETRIC_PITCH, type NamedCamera} from '../doc/cameras'
-import {beginEdit, commitEdit, fillRegion, stampBrush, strokeBrush, type Draft} from '../doc/edits'
+import {beginEdit, commitEdit, fillRegion, strokeCells, writeCells, type Draft} from '../doc/edits'
 import {EMPTY_HISTORY, record, redo, undo, type History} from '../doc/history'
 import {firstColor} from '../doc/palette'
 import {
@@ -20,8 +21,22 @@ import {
     selectRect,
     selectVoxel,
     shrink,
+    type Cell,
     type Selection
 } from '../doc/selection'
+import {canRadial, NO_SYMMETRY, symmetryMaps, type Symmetry} from '../doc/symmetry'
+import {
+    arrayCells,
+    deleteCells,
+    duplicateCells,
+    fitsAfter,
+    flipCells,
+    mirrorCells,
+    moveCells,
+    paintCells,
+    rotateCells,
+    type Axis
+} from '../doc/transform'
 import {basisFor, createCamera, type Camera} from '../render/camera'
 import {pick, pickPlane, pickRay} from '../render/pick'
 import {MODE_COLOR} from '../render/raycast.glsl'
@@ -75,6 +90,26 @@ const WRITES: ReadonlySet<Tool> = new Set<Tool>(['draw', 'erase', 'fill', 'pick'
  * `FEATURESET.md` §39 is explicit that the rail should not grow one.
  */
 const SELECTS: ReadonlySet<Tool> = new Set<Tool>(['move', 'rotate', 'scale', 'clone'])
+
+/**
+ * What the floating bar over a selection can do — `FEATURESET.md` §9, plus delete and recolour.
+ *
+ * One action type rather than eight, because every one of them is the same three steps: open a
+ * draft, transform the selection into it, record the diff. Eight cases in the reducer would be
+ * eight chances for one of them to forget the history.
+ */
+export type TransformOp =
+    | {kind: 'move'; delta: Cell}
+    | {kind: 'rotate'; axis: Axis}
+    | {kind: 'flip'; axis: Axis}
+    | {kind: 'mirror'; axis: Axis}
+    | {kind: 'duplicate'; delta: Cell}
+    | {kind: 'array'; delta: Cell; count: number}
+    | {kind: 'delete'}
+    | {kind: 'paint'; color: number}
+
+/** The transforms that must end with as many voxels as they started with. See the reducer. */
+const KEEPS_COUNT: ReadonlySet<TransformOp['kind']> = new Set(['move', 'rotate', 'flip'])
 
 /** A rubber band while the pointer is down, in the viewport's own pixels. */
 export interface Band {
@@ -130,6 +165,8 @@ export interface AppState {
     readonly selection: Selection
     /** Non-`undefined` while a rubber band is being dragged over the picture. */
     readonly band: Band | undefined
+    /** Draw-time mirroring. Writes real voxels as the stroke happens — see `doc/symmetry.ts`. */
+    readonly symmetry: Symmetry
 
     readonly tool: Tool
     readonly brush: Brush
@@ -152,6 +189,8 @@ export type AppAction =
     | {type: 'grow-selection'}
     | {type: 'shrink-selection'}
     | {type: 'clear-selection'}
+    | {type: 'transform'; op: TransformOp}
+    | {type: 'symmetry'; axis: keyof Symmetry; on: boolean}
     | {type: 'select'; id: string}
     | {type: 'eight-directions'}
     | {type: 'capture'}
@@ -204,6 +243,7 @@ export const initialState = (volume: Volume): AppState => {
         stroke: undefined,
         selection: EMPTY_SELECTION,
         band: undefined,
+        symmetry: NO_SYMMETRY,
         tool: 'draw',
         brush: {kind: 'voxel', size: 2, shape: 'square'},
         color: firstColor(volume),
@@ -230,6 +270,20 @@ const withCamera = (state: AppState, camera: Camera, selected: string | undefine
  * instead would be a megabyte a mouse-move on a large model, for a copy nothing reads.
  */
 const live = (draft: Draft): Volume => ({...draft.volume})
+
+/**
+ * Every cell of a stroke, plus every image of every cell.
+ *
+ * Cells, not stamp centres. An even-sized brush grows towards `+`, so it is not its own mirror
+ * image and reflecting where it was stamped leaves the reflection one voxel over — a seam down the
+ * middle of the model. Reflecting the cells themselves is exact for every brush and for the radial
+ * quarter turn as well, which swaps the x and y axes a flat footprint lies in.
+ */
+const mirrored = (state: AppState, cells: readonly Offset[]): readonly Offset[] => {
+    const maps = symmetryMaps(state.volume, state.symmetry)
+    if (maps.length === 1) return cells
+    return maps.flatMap(map => cells.map(map))
+}
 
 const beginStroke = (state: AppState, event: ViewportPointer): AppState => {
     const {volume, tool, color, brush} = state
@@ -271,7 +325,7 @@ const beginStroke = (state: AppState, event: ViewportPointer): AppState => {
     const value = tool === 'erase' ? 0 : color
     const draft = beginEdit(volume)
     const axis = faceAxis(hit.face)
-    stampBrush(draft, brush, hit.face, cell[0], cell[1], cell[2], value)
+    writeCells(draft, mirrored(state, strokeCells(brush, hit.face, cell, cell)), value)
     return {
         ...state,
         volume: live(draft),
@@ -296,7 +350,8 @@ const continueStroke = (state: AppState, event: ViewportPointer): AppState => {
     if (!cell) return state
     const [x, y, z] = cell
     if (x === stroke.at[0] && y === stroke.at[1] && z === stroke.at[2]) return state
-    strokeBrush(stroke.draft, state.brush, stroke.face, stroke.at, cell, stroke.value)
+    const cells = strokeCells(state.brush, stroke.face, stroke.at, cell)
+    writeCells(stroke.draft, mirrored(state, cells), stroke.value)
     return {...state, volume: live(stroke.draft), stroke: {...stroke, at: cell}}
 }
 
@@ -342,6 +397,28 @@ const endBand = (state: AppState): AppState => {
         band: undefined,
         selection:
             moved ? selectRect(state.volume, basis, band, band.width, band.height) : EMPTY_SELECTION
+    }
+}
+
+const applyTransform = (draft: Draft, state: AppState, op: TransformOp): Selection => {
+    const {selection} = state
+    switch (op.kind) {
+        case 'move':
+            return moveCells(draft, selection, op.delta)
+        case 'rotate':
+            return rotateCells(draft, selection, op.axis)
+        case 'flip':
+            return flipCells(draft, selection, op.axis)
+        case 'mirror':
+            return mirrorCells(draft, selection, op.axis)
+        case 'duplicate':
+            return duplicateCells(draft, selection, op.delta)
+        case 'array':
+            return arrayCells(draft, selection, op.delta, op.count)
+        case 'delete':
+            return deleteCells(draft, selection)
+        case 'paint':
+            return paintCells(draft, selection, op.color)
     }
 }
 
@@ -433,6 +510,42 @@ export const reduce = (state: AppState, action: AppAction): AppState => {
 
         case 'clear-selection':
             return state.selection.size === 0 ? state : {...state, selection: EMPTY_SELECTION}
+
+        case 'transform': {
+            if (state.selection.size === 0) return state
+            const {op} = action
+            // A nudge that would push part of the selection off the grid is refused whole, rather
+            // than dropping the voxels that fell off — that is the one loss undo cannot make
+            // obvious, because nothing on screen says how many went.
+            if (op.kind === 'move' && !fitsAfter(state.volume, state.selection, op.delta)) {
+                return state
+            }
+            const draft = beginEdit(state.volume)
+            const selection = applyTransform(draft, state, op)
+            /*
+             * Move, rotate and flip are bijections: every selected voxel has exactly one
+             * destination, so a selection that came back smaller lost voxels off the edge of the
+             * grid. Refuse the whole operation rather than half-doing it — the draft is a throwaway
+             * copy, so discarding it costs nothing, and a rotate that silently keeps half a model
+             * is the kind of loss undo cannot make obvious. Duplicate, array and mirror are
+             * additive and may legitimately clip.
+             */
+            if (KEEPS_COUNT.has(op.kind) && selection.size !== state.selection.size) return state
+            const edit = commitEdit(draft)
+            if (!edit) return state
+            return {
+                ...state,
+                volume: draft.volume,
+                selection,
+                history: record(state.history, edit),
+                sheet: undefined
+            }
+        }
+
+        case 'symmetry': {
+            if (action.axis === 'radial' && !canRadial(state.volume)) return state
+            return {...state, symmetry: {...state.symmetry, [action.axis]: action.on}}
+        }
 
         case 'select': {
             const found = state.cameras.find(({id}) => id === action.id)

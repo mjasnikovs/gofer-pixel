@@ -19,10 +19,10 @@ import type {Tool} from './state'
  * The left rail of `docs/editor.png`: nine tools, icon over label, the armed one carried by an
  * accent fill and an accent border rather than by a tint you have to hunt for.
  *
- * None of them writes a voxel — editing is on the proof of concept's do-not-build list — but which
- * tool is armed is real state, and arming one is what a hover, a cursor and eventually a stroke
- * will read. The rail is a radio group, because exactly one tool is armed at a time and a screen
- * reader should hear that rather than nine unrelated buttons.
+ * The rail is a radio group, because exactly one tool is armed at a time and a screen reader should
+ * hear that rather than nine unrelated buttons. Which tool is armed decides what the left button
+ * does in the viewport: the first four write voxels, the next four work on a selection, and Measure
+ * leaves the drag to the camera.
  */
 const TOOL_ICONS: Record<Tool, ReactNode> = {
     draw: <DrawIcon />,
@@ -132,18 +132,62 @@ const Toggle = ({
     </button>
 )
 
+/**
+ * Draw-time symmetry, as three axis letters and a radial ring.
+ *
+ * Letters rather than switches: these four are read at a glance while drawing and are set once a
+ * session, so they want to be small and unambiguous rather than large and legible from across the
+ * room. Radial is disabled outright when the grid is not square in x and y, because a quarter turn
+ * of an oblong box lands outside it — `FEATURESET.md` §10's "where mathematically voxel-safe" is a
+ * disabled button, not a silent no-op.
+ */
+const SymmetryButton = ({
+    label,
+    title,
+    isOn,
+    isDisabled,
+    onToggle
+}: {
+    label: string
+    title: string
+    isOn: boolean
+    isDisabled: boolean
+    onToggle: (on: boolean) => void
+}) => (
+    <button
+        type='button'
+        role='switch'
+        aria-checked={isOn}
+        aria-label={title}
+        aria-disabled={isDisabled}
+        className='symmetry-axis'
+        data-on={isOn || undefined}
+        onClick={() => {
+            if (!isDisabled) onToggle(!isOn)
+        }}
+    >
+        {label}
+    </button>
+)
+
 export const GridPanel = ({
     grid,
     snap,
     voxelSize,
+    symmetry,
+    canRadial,
     onGrid,
-    onSnap
+    onSnap,
+    onSymmetry
 }: {
     grid: boolean
     snap: boolean
     voxelSize: number
+    symmetry: {x: boolean; y: boolean; z: boolean; radial: boolean}
+    canRadial: boolean
     onGrid: (on: boolean) => void
     onSnap: (on: boolean) => void
+    onSymmetry: (axis: 'x' | 'y' | 'z' | 'radial', on: boolean) => void
 }) => (
     <div className='panel snap-panel'>
         <div className='snap-row'>
@@ -159,6 +203,42 @@ export const GridPanel = ({
                 isOn={snap}
                 onToggle={onSnap}
             />
+        </div>
+        <div className='snap-size'>
+            <Text
+                type='supporting'
+                color='disabled'
+            >
+                Symmetry
+            </Text>
+            <span className='spacer' />
+            <span className='symmetry-row'>
+                {(['x', 'y', 'z'] as const).map(axis => (
+                    <SymmetryButton
+                        key={axis}
+                        label={axis.toUpperCase()}
+                        title={`Mirror drawing across ${axis.toUpperCase()}`}
+                        isOn={symmetry[axis]}
+                        isDisabled={false}
+                        onToggle={on => {
+                            onSymmetry(axis, on)
+                        }}
+                    />
+                ))}
+                <SymmetryButton
+                    label='◴'
+                    title={
+                        canRadial ?
+                            'Four-fold radial symmetry'
+                        :   'Radial symmetry needs a grid that is square in X and Y'
+                    }
+                    isOn={symmetry.radial}
+                    isDisabled={!canRadial}
+                    onToggle={on => {
+                        onSymmetry('radial', on)
+                    }}
+                />
+            </span>
         </div>
         <div className='snap-size'>
             <Text

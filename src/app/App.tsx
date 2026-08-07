@@ -1,5 +1,6 @@
 import {useCallback, useEffect, useMemo, useReducer} from 'react'
 import {selectionBounds} from '../doc/selection'
+import {canRadial} from '../doc/symmetry'
 import type {Raycaster} from '../render/gl'
 import type {Volume} from '../render/volume'
 import {Viewport} from '../viewport/Viewport'
@@ -10,6 +11,7 @@ import {writeSheet} from './download'
 import {ExportPanel} from './ExportPanel'
 import {Header} from './Header'
 import {RendersPanel} from './RendersPanel'
+import {SelectionBar} from './SelectionBar'
 import {Timeline} from './Timeline'
 import {GridPanel, ToolRail} from './ToolRail'
 import {AxisGizmo, GroundGrid, HintBar, SelectionBox, ViewCube} from './ViewportOverlay'
@@ -27,6 +29,14 @@ import {handle} from './handle'
  * There is no state here. Everything is `reduce` in `state.ts`, which is why the interesting tests
  * are 1 ms functions rather than a browser driving a UI.
  */
+/** Arrow keys move the selection by one voxel along a grid axis. See the handler for Shift. */
+const NUDGES: Record<string, readonly [number, number, number] | undefined> = {
+    ArrowRight: [1, 0, 0],
+    ArrowLeft: [-1, 0, 0],
+    ArrowUp: [0, 1, 0],
+    ArrowDown: [0, -1, 0]
+}
+
 export const App = ({volume: source, name}: {volume: Volume; name: string}) => {
     const [state, dispatch] = useReducer(reduce, source, initialState)
     // Everything below reads the *document's* volume, not the one the file was opened with. They
@@ -91,6 +101,24 @@ export const App = ({volume: source, name}: {volume: Volume; name: string}) => {
             // The two brackets that every editor uses for "more of this" and "less of this".
             if (event.key === ']') dispatch({type: 'grow-selection'})
             if (event.key === '[') dispatch({type: 'shrink-selection'})
+            if (event.key === 'Delete' || event.key === 'Backspace') {
+                dispatch({type: 'transform', op: {kind: 'delete'}})
+            }
+            /*
+             * Nudging is along the axes of the *model*, not of the screen: a voxel-safe move is by
+             * whole cells of the grid, and mapping a screen direction onto a grid axis would have
+             * to round somewhere. Shift swaps the horizontal pair for the vertical one, which is
+             * the third axis a two-dimensional keyboard cannot otherwise reach.
+             */
+            const nudge = NUDGES[event.key]
+            if (nudge) {
+                event.preventDefault()
+                const [dx, dy, dz] = nudge
+                dispatch({
+                    type: 'transform',
+                    op: {kind: 'move', delta: event.shiftKey ? [0, 0, dx + dy] : [dx, dy, dz]}
+                })
+            }
         }
         document.addEventListener('keydown', onKey)
         return () => {
@@ -181,6 +209,15 @@ export const App = ({volume: source, name}: {volume: Volume; name: string}) => {
                         volume={volume}
                         camera={state.orbit.camera}
                     />
+                    <SelectionBar
+                        count={state.selection.size}
+                        onTransform={op => {
+                            dispatch({type: 'transform', op})
+                        }}
+                        onClear={() => {
+                            dispatch({type: 'clear-selection'})
+                        }}
+                    />
                     <HintBar
                         tool={`${(state.tool[0] ?? '').toUpperCase()}${state.tool.slice(1)}`}
                         onCapture={capture}
@@ -192,11 +229,16 @@ export const App = ({volume: source, name}: {volume: Volume; name: string}) => {
                         grid={state.grid}
                         snap={state.snap}
                         voxelSize={Math.max(1, Math.round(state.cell / state.orbit.camera.zoom))}
+                        symmetry={state.symmetry}
+                        canRadial={canRadial(volume)}
                         onGrid={on => {
                             dispatch({type: 'grid', on})
                         }}
                         onSnap={on => {
                             dispatch({type: 'snap', on})
+                        }}
+                        onSymmetry={(axis, on) => {
+                            dispatch({type: 'symmetry', axis, on})
                         }}
                     />
                 </div>

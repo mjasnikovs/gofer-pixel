@@ -871,3 +871,90 @@ body,
     background: color-mix(in srgb, var(--color-accent-default) 12%, transparent);
     pointer-events: none;
 }
+
+/*
+ * The transform bar sits at the top of the viewport and exists only while something is selected —
+ * `FEATURESET.md` §4. Same chrome as the hint bar at the foot, so the two read as one family of
+ * things floating over the render rather than as two unrelated widgets.
+ */
+.selection-bar {
+    position: absolute;
+    left: 50%;
+    top: 16px;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 12px;
+    border-radius: var(--radius-full);
+    border: 1px solid var(--color-border);
+    background: var(--color-background-card);
+    color: var(--color-icon-secondary);
+    white-space: nowrap;
+}
+
+.selection-group {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.selection-caption {
+    display: flex;
+    align-items: center;
+    margin-right: 4px;
+    color: var(--color-text-disabled);
+    font-size: var(--font-size-supporting);
+}
+
+.selection-action {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 22px;
+    height: 22px;
+    padding: 0 5px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-small);
+    background: none;
+    color: var(--color-text-secondary);
+    font-size: var(--font-size-supporting);
+    cursor: pointer;
+}
+
+.selection-action:hover {
+    border-color: var(--color-border-emphasized);
+    background: var(--color-background-hover);
+    color: var(--color-text-primary);
+}
+
+/* ---- symmetry ---- */
+
+.symmetry-row {
+    display: flex;
+    gap: 3px;
+}
+
+.symmetry-axis {
+    min-width: 20px;
+    height: 20px;
+    padding: 0;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-small);
+    background: none;
+    color: var(--color-text-secondary);
+    font-size: var(--font-size-supporting);
+    line-height: 1;
+    cursor: pointer;
+}
+
+.symmetry-axis[data-on] {
+    border-color: var(--color-accent-default);
+    background: var(--color-accent-subtle);
+    color: var(--color-text-accent);
+}
+
+.symmetry-axis[aria-disabled='true'] {
+    color: var(--color-text-disabled);
+    cursor: not-allowed;
+}

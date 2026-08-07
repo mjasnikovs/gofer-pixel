@@ -404,6 +404,74 @@ test('selecting by colour takes the loaded colour unless told another', () => {
     expect(reduce(state, {type: 'select-color', color: 0}).selection.size).toBe(0)
 })
 
+test('a transform is one undo step and throws the stale sheet away', () => {
+    const picked = reduce(armed('move'), {type: 'select-color'})
+    expect(picked.selection.size).toBeGreaterThan(0)
+    const baked = reduce(picked, {type: 'bake'})
+
+    const painted = reduce(baked, {type: 'transform', op: {kind: 'paint', color: 200}})
+    expect(painted.history.past).toHaveLength(1)
+    expect(painted.sheet).toBeUndefined()
+    expect(painted.volume).not.toBe(baked.volume)
+    expect(painted.selection.size).toBe(picked.selection.size)
+    expect(occupied(painted.volume)).toBe(occupied(baked.volume))
+    expect(reduce(painted, {type: 'undo'}).volume.data).toEqual(baked.volume.data)
+
+    // A quarter turn about z would swing the car's 16-voxel length into a 10-voxel width, and half
+    // of it would fall off the grid. That is refused whole rather than half-done.
+    expect(reduce(picked, {type: 'transform', op: {kind: 'rotate', axis: 2}})).toBe(picked)
+
+    // Nothing selected is nothing to transform, not a transform of everything.
+    const empty = reduce(picked, {type: 'clear-selection'})
+    expect(reduce(empty, {type: 'transform', op: {kind: 'delete'}})).toBe(empty)
+})
+
+test('a nudge that would push the selection off the grid is refused whole', () => {
+    const state = reduce(armed('move'), {type: 'select-color'})
+    const {sx} = state.volume
+
+    // Far enough to guarantee the far side of the model leaves the grid.
+    const refused = reduce(state, {type: 'transform', op: {kind: 'move', delta: [sx, 0, 0]}})
+    expect(refused).toBe(state)
+
+    const nudged = reduce(state, {type: 'transform', op: {kind: 'move', delta: [0, 0, 1]}})
+    expect(occupied(nudged.volume)).toBe(occupied(state.volume))
+})
+
+test('symmetry writes both halves in one stroke, and undoes as one', () => {
+    const plain = armed('draw')
+    const mirrored = reduce(plain, {type: 'symmetry', axis: 'x', on: true})
+    const {column, row} = onModel(plain)
+
+    const one = reduce(reduce(plain, at('down', column, row)), at('up', column, row))
+    const two = reduce(reduce(mirrored, at('down', column, row)), at('up', column, row))
+
+    // Same click, twice the voxels, still one entry in the history.
+    expect(occupied(two.volume) - occupied(plain.volume)).toBe(
+        2 * (occupied(one.volume) - occupied(plain.volume))
+    )
+    expect(two.history.past).toHaveLength(1)
+    expect(reduce(two, {type: 'undo'}).volume.data).toEqual(plain.volume.data)
+
+    // Every voxel the mirrored stroke added has a partner across the middle of the grid.
+    const {sx, sy} = two.volume
+    const edit = two.history.past[0]
+    for (const index of edit?.at ?? []) {
+        const z = Math.floor(index / (sx * sy))
+        const rest = index - z * sx * sy
+        const x = rest % sx
+        const y = Math.floor(rest / sx)
+        expect(voxelAt(two.volume, sx - 1 - x, y, z)).toBe(voxelAt(two.volume, x, y, z))
+    }
+})
+
+test('radial symmetry is refused on a grid it would not be exact on', () => {
+    const state = armed('draw')
+    const square = state.volume.sx === state.volume.sy
+    const asked = reduce(state, {type: 'symmetry', axis: 'radial', on: true})
+    expect(asked.symmetry.radial).toBe(square)
+})
+
 test('the chrome settings move without touching the render or the sheet', () => {
     const baked = reduce(fresh(), {type: 'bake'})
     const after = reduce(

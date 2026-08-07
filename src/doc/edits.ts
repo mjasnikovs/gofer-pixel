@@ -1,5 +1,5 @@
 import {voxelAt, voxelIndex, type Volume} from '../render/volume'
-import {brushOffsets, type Brush} from './brush'
+import {brushOffsets, type Brush, type Offset} from './brush'
 
 /**
  * Writing voxels, as a diff rather than as a new volume.
@@ -45,6 +45,45 @@ export const writeVoxel = (draft: Draft, x: number, y: number, z: number, value:
     data[index] = value
 }
 
+/**
+ * Every cell a drag of the brush covers — the footprint, at every step of the line between the two
+ * pointer samples.
+ *
+ * Cells rather than writes, because symmetry mirrors *cells*. Mirroring the centre of the stamp
+ * instead would be wrong for any brush that is not its own mirror image, and an even-sized brush
+ * never is: a size-2 square grows towards `+`, so its reflection sits one voxel over from where
+ * the reflected centre puts it. That is a one-voxel seam down the middle of every symmetric model,
+ * which is exactly the class of defect this project keeps finding.
+ *
+ * The line matters for the same reason the footprint does. Pointer moves arrive at whatever rate
+ * the mouse reports, so two consecutive samples can be twenty voxels apart, and drawing only the
+ * endpoints leaves a dotted line — the oldest bug in pixel art.
+ */
+export const strokeCells = (
+    brush: Brush,
+    face: number,
+    from: Offset,
+    to: Offset,
+    into: Offset[] = []
+): readonly Offset[] => {
+    const offsets = brushOffsets(brush, face)
+    const [x0, y0, z0] = from
+    const [x1, y1, z1] = to
+    const steps = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0), Math.abs(z1 - z0))
+    for (let i = 0; i <= steps; i += 1) {
+        const t = steps === 0 ? 0 : i / steps
+        const cx = Math.round(x0 + (x1 - x0) * t)
+        const cy = Math.round(y0 + (y1 - y0) * t)
+        const cz = Math.round(z0 + (z1 - z0) * t)
+        for (const [dx, dy, dz] of offsets) into.push([cx + dx, cy + dy, cz + dz])
+    }
+    return into
+}
+
+export const writeCells = (draft: Draft, cells: Iterable<Offset>, value: number): void => {
+    for (const [x, y, z] of cells) writeVoxel(draft, x, y, z, value)
+}
+
 /** One click of the brush, oriented by the face the ray struck. */
 export const stampBrush = (
     draft: Draft,
@@ -55,45 +94,19 @@ export const stampBrush = (
     z: number,
     value: number
 ): void => {
-    for (const [dx, dy, dz] of brushOffsets(brush, face)) {
-        writeVoxel(draft, x + dx, y + dy, z + dz, value)
-    }
+    writeCells(draft, strokeCells(brush, face, [x, y, z], [x, y, z]), value)
 }
 
-/**
- * A dragged brush leaves no gaps.
- *
- * Pointer moves arrive at whatever rate the mouse reports, so two consecutive samples can be twenty
- * voxels apart. The stroke is the line between them, walked with a 3D Bresenham, not the two
- * endpoints — otherwise drawing fast leaves a dotted line, which is the oldest bug in pixel art.
- */
+/** A dragged brush, leaving no gaps. */
 export const strokeBrush = (
     draft: Draft,
     brush: Brush,
     face: number,
-    from: readonly [number, number, number],
-    to: readonly [number, number, number],
+    from: Offset,
+    to: Offset,
     value: number
 ): void => {
-    const [x0, y0, z0] = from
-    const [x1, y1, z1] = to
-    const steps = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0), Math.abs(z1 - z0))
-    if (steps === 0) {
-        stampBrush(draft, brush, face, x1, y1, z1, value)
-        return
-    }
-    for (let i = 0; i <= steps; i += 1) {
-        const t = i / steps
-        stampBrush(
-            draft,
-            brush,
-            face,
-            Math.round(x0 + (x1 - x0) * t),
-            Math.round(y0 + (y1 - y0) * t),
-            Math.round(z0 + (z1 - z0) * t),
-            value
-        )
-    }
+    writeCells(draft, strokeCells(brush, face, from, to), value)
 }
 
 /**
