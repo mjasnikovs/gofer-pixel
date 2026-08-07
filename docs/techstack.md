@@ -224,10 +224,18 @@ Still open, and each one is a decision rather than a measurement:
 
 1. **How a render becomes pixel art.** One ray per output pixel is crisp and aliased. Whether the
    pipeline also quantises shading into N palette-aware steps (`FEATURESET.md` §22) changes the
-   renderer's output stage. Not decided.
+   renderer's output stage. Not decided — and not on `docs/TASKS.md`, because §22 is postponed and
+   the output stage should not be reshaped for something that is not being built.
 2. **What happens to `src/gen/`.** It survives the cut, but it currently scores candidates by
    rendering them with the sprite-stacking renderer that is being deleted. It has to be repointed at
    the raycaster.
-3. **Whether 2D slice editing survives.** `FEATURESET.md` §6 wants it; the mockups have no trace of
-   it. `legacy/src/editor/state.ts` is the only part of the old editor worth keeping either way, and
-   its gesture-replay pattern is already carried over into `src/viewport/orbit.ts`.
+3. ~~**Whether 2D slice editing survives.**~~ **Closed 2026-08-07: it survives, as a clip.**
+   `FEATURESET.md` §6 asks for the current slice solid and the rest ghosted. What it asks for it
+   _for_ is drawing interiors without fighting the camera, and what achieves that is the layers in
+   front going away. Ghosting would mean alpha in the raycaster — a change to the one algorithm the
+   two backends are held to agreeing on byte for byte — in exchange for scenery the artist still
+   cannot click through. `src/doc/slice.ts` masks a grid the way a hidden object does, and costs the
+   renderer nothing.
+
+    It is also not a second editing mode. The plane lock of §5 already answers "which plane am I
+    drawing on"; slice mode answers "which layer of it, and can I see it".

@@ -978,6 +978,48 @@ test('importing a PNG opens it as a document and keeps the references and preset
     expect(opened.presets).toHaveLength(1)
 })
 
+test('slice mode opens on the middle layer, walks with the wheel, and leaves with the plane', () => {
+    const state = fresh()
+    expect(state.slice).toBeUndefined()
+
+    // A slice needs a plane to be a slice of, so switching it on locks XY if nothing was locked.
+    const sliced = reduce(state, {type: 'slice', on: true})
+    expect(sliced.plane).toBe(2)
+    expect(sliced.slice).toBe(Math.floor(state.volume.sz / 2))
+
+    // The wheel walks through depth rather than zooming, which is the whole of §6's second bullet.
+    const wheel = {type: 'orbit', event: {type: 'wheel', delta: 40}, height: 400} as const
+    const deeper = reduce(sliced, wheel)
+    expect(deeper.slice).toBe((sliced.slice ?? 0) + 1)
+    expect(deeper.orbit.camera.zoom).toBe(sliced.orbit.camera.zoom)
+    // And it stops at the end rather than wrapping round to the other side of the model.
+    let walked = deeper
+    for (let i = 0; i < 20; i += 1) walked = reduce(walked, wheel)
+    expect(walked.slice).toBe(state.volume.sz - 1)
+
+    // Zoom is still on the wheel when the mode is off.
+    expect(reduce(state, wheel).orbit.camera.zoom).not.toBe(state.orbit.camera.zoom)
+
+    expect(reduce(sliced, {type: 'slice', on: false}).slice).toBeUndefined()
+    expect(reduce(sliced, {type: 'plane', axis: undefined}).slice).toBeUndefined()
+    expect(reduce(state, {type: 'slice-step', delta: 1})).toBe(state)
+})
+
+test('a stroke in slice mode lands on the slice, not on whatever the ray hit', () => {
+    const state = reduce(reduce(armed('draw'), {type: 'plane', axis: 2}), {type: 'slice', on: true})
+    const {column, row} = onModel(state)
+    const down = reduce(state, at('down', column, row))
+
+    expect(down.stroke?.axis).toBe(2)
+    expect(down.stroke?.layer).toBe(state.slice as never)
+    // Every cell it wrote is on that one layer.
+    const {sx, sy} = state.volume
+    const done = reduce(down, at('up', column, row))
+    for (const index of done.history.past[0]?.at ?? []) {
+        expect(Math.floor(index / (sx * sy))).toBe(state.slice as never)
+    }
+})
+
 test('the chrome settings move without touching the render or the sheet', () => {
     const baked = reduce(fresh(), {type: 'bake'})
     const after = reduce(

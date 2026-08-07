@@ -196,6 +196,10 @@ export const App = ({
             if (event.key === 'Escape') dispatch({type: 'clear-selection'})
             // The two brackets that every editor uses for "more of this" and "less of this".
             if (event.key === 'f' || event.key === 'F') dispatch({type: 'focus'})
+            // `FEATURESET.md` §6's "press a key". S for slice, and it toggles.
+            if (event.key === 's' || event.key === 'S') {
+                dispatch({type: 'slice', on: state.slice === undefined})
+            }
             if (event.key === ']') dispatch({type: 'grow-selection'})
             if (event.key === '[') dispatch({type: 'shrink-selection'})
             if (event.key === 'Delete' || event.key === 'Backspace') {
@@ -221,7 +225,7 @@ export const App = ({
         return () => {
             document.removeEventListener('keydown', onKey)
         }
-    }, [capture])
+    }, [capture, state.slice])
 
     /*
      * Autosave — `FEATURESET.md` §32.

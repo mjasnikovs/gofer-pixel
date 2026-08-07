@@ -53,6 +53,7 @@ import {
     type Cell,
     type Selection
 } from '../doc/selection'
+import {clampLayer, layerCount, slicedVolume} from '../doc/slice'
 import {canRadial, NO_SYMMETRY, symmetryMaps, type Symmetry} from '../doc/symmetry'
 import {
     arrayCells,
@@ -305,6 +306,13 @@ export interface AppState {
     readonly plane: Axis | undefined
     /** What Copy took, as offsets from the corner of what was selected, plus that corner. */
     readonly clipboard: Clipboard | undefined
+    /**
+     * Which layer slice mode is showing, or `undefined` when it is off — `FEATURESET.md` §6.
+     *
+     * The axis is the plane lock's; slice mode without a plane is a slice of nothing in particular,
+     * so switching it on locks the XY plane if nothing is locked yet.
+     */
+    readonly slice: number | undefined
 
     readonly tool: Tool
     readonly brush: Brush
@@ -368,6 +376,8 @@ export type AppAction =
     | {type: 'reference-drop'; plane: Axis}
     | {type: 'import-image'; volume: Volume; name: string}
     | {type: 'open'; document: OpenedDocument}
+    | {type: 'slice'; on: boolean}
+    | {type: 'slice-step'; delta: number}
     | {type: 'bake'}
     | {type: 'written'}
     | {type: 'tool'; tool: Tool}
@@ -458,6 +468,7 @@ export const initialState = (volume: Volume, opened?: OpenedDocument): AppState 
         search: '',
         plane: undefined,
         clipboard: undefined,
+        slice: undefined,
         tool: 'draw',
         brush: {kind: 'voxel', size: 2, shape: 'square', figure: 'free'},
         color: firstColor(volume),
@@ -494,7 +505,13 @@ const live = (draft: Draft): Volume => ({...draft.volume})
  * clicked and what gets written. It returns the volume itself when nothing is hidden, which is the
  * usual case and the reason this is cheap enough to call per pointer event.
  */
-const visible = (state: AppState): Volume => shownVolume(state.volume, state.objects)
+const visible = (state: AppState): Volume => {
+    const shown = shownVolume(state.volume, state.objects)
+    if (state.slice === undefined) return shown
+    const axis = state.plane ?? 2
+    const {forward} = basisFor(state.orbit.camera, state.volume, 1)
+    return slicedVolume(shown, {axis, layer: state.slice}, forward)
+}
 
 /** A draft that knows which object new voxels join and which objects refuse to be touched. */
 const open = (state: AppState, volume: Volume = state.volume): Draft =>
@@ -567,6 +584,9 @@ const beginStroke = (state: AppState, event: ViewportPointer): AppState => {
      */
     const axis = state.plane ?? faceAxis(hit.face)
     const face = state.plane === undefined ? hit.face : axis * 2 + 1
+    // In slice mode the layer is the slice, not whatever the ray happened to land on: the point of
+    // the mode is that the artist is working on one layer and can see it.
+    const layer = state.slice ?? cell[axis]
     writeCells(draft, mirrored(state, strokeCells(brush, face, cell, cell)), value)
     return {
         ...state,
@@ -576,7 +596,7 @@ const beginStroke = (state: AppState, event: ViewportPointer): AppState => {
             base: state.volume,
             origin: cell,
             axis,
-            layer: cell[axis],
+            layer,
             face,
             value,
             at: cell
@@ -843,6 +863,14 @@ const endStroke = (state: AppState): AppState => {
 export const reduce = (state: AppState, action: AppAction): AppState => {
     switch (action.type) {
         case 'orbit': {
+            // In slice mode the wheel walks through depth, which is what §6 asks of it. Zoom is
+            // still on the wheel everywhere else, and slice mode is off by default.
+            if (state.slice !== undefined && action.event.type === 'wheel') {
+                return reduce(state, {
+                    type: 'slice-step',
+                    delta: action.event.delta > 0 ? 1 : -1
+                })
+            }
             const orbit = applyOrbit(state.orbit, action.event, action.height, state.snap)
             if (orbit === state.orbit) return state
             // Once the view has moved it is no longer the stored camera, and saying so is the
@@ -961,7 +989,32 @@ export const reduce = (state: AppState, action: AppAction): AppState => {
         }
 
         case 'plane':
-            return {...state, plane: action.axis}
+            // Leaving the plane lock leaves slice mode: a slice needs an axis to be a slice of.
+            return {
+                ...state,
+                plane: action.axis,
+                slice: action.axis === undefined ? undefined : state.slice
+            }
+
+        /*
+         * Slice mode — `FEATURESET.md` §6. It opens on the middle layer of the locked plane, and
+         * locks XY if nothing was locked, because a slice with no plane is a slice of nothing.
+         */
+        case 'slice': {
+            if (!action.on) return {...state, slice: undefined}
+            const axis = state.plane ?? 2
+            return {
+                ...state,
+                plane: axis,
+                slice: Math.floor(layerCount(state.volume, axis) / 2)
+            }
+        }
+
+        case 'slice-step': {
+            if (state.slice === undefined) return state
+            const axis = state.plane ?? 2
+            return {...state, slice: clampLayer(state.volume, axis, state.slice + action.delta)}
+        }
 
         case 'copy': {
             const box = selectionBounds(state.volume, state.selection)
