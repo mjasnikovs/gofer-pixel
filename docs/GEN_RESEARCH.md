@@ -43,9 +43,8 @@ scaffold for the artist, not as a finished asset.
   ~6–9 s per 32³ shape. Organic silhouettes far beyond the op pipeline (a real sitting cat, a
   real chair), but hollow, noisy, colourless shells; after despeckle + solidify + smoothing +
   symmetrize it still reads as melted. Judged worse than the primitive look and not wired.
-  Would be the base if anyone retrains it: recipe, data (`dylanebert/objaverse-lowpoly-obj` +
-  `tiange/Cap3D`, both ODC-By) and its known fixes (solid fill, mirror augmentation, curated
-  subset) are documented in the model card. Needs a free GPU; both are owned by llama-server.
+  Retraining it was considered and **dropped** (2026-08-08): the ceiling is the Objaverse-lowpoly
+  data, not the training run, and both GPUs are owned by llama-server anyway.
 
 ## Leads worth wiring next
 
@@ -55,5 +54,3 @@ scaffold for the artist, not as a finished asset.
 - **Real assets as worked examples.** The examples cap the quality and mine are programmer art. A
   greedy box decomposition of artist-made `.vox` files would turn good assets into better
   teachers.
-- **Multi-colour parts for shape-model output**, if VoxelModel is ever revisited: k-means part
-  clusters, model labels colours per cluster in a text-only call. Untested.
