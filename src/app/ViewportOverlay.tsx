@@ -68,8 +68,14 @@ export const GroundGrid = ({volume, camera}: {volume: Volume; camera: Camera}) =
         return {x: dot(d, right), y: -dot(d, up)}
     }
 
-    // One line per voxel while that is legible, and a coarser lattice once it is not.
-    const step = Math.max(1, 2 ** Math.ceil(Math.log2(Math.max(volume.sx, volume.sy) / 24)))
+    /*
+     * One line per voxel while that is legible, and a coarser lattice once it is not.
+     *
+     * Legibility is a screen question, so `zoom` — how many voxels the viewport shows — decides it,
+     * not how big the grid is. Keyed to `sx, sy` it drew two-voxel cells on a 32³ document with room
+     * for one-voxel ones, and never coarsened at all when the artist zoomed out.
+     */
+    const step = Math.max(1, 2 ** Math.ceil(Math.log2(camera.zoom / 128)))
 
     /*
      * Two lattices, because a cell is a promise.

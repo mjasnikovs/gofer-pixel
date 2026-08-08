@@ -396,6 +396,16 @@ test('the fine lattice stops exactly on the boundary of the volume', async () =>
     await drawn.done()
 })
 
+test('a cell inside the volume is one voxel, not two', async () => {
+    const box = createVolume(32, 32, 32, new Uint8Array(256 * 4))
+    const drawn = await floor(box)
+
+    // 33 lines each way: one per voxel boundary, both edges included.
+    expect(drawn.fine.length).toBe((box.sx + 1) * 2)
+
+    await drawn.done()
+})
+
 test('the ground beyond the volume is coarser than the cells inside it, and reaches further', async () => {
     const box = createVolume(32, 32, 32, new Uint8Array(256 * 4))
     const drawn = await floor(box)
