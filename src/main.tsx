@@ -1,3 +1,7 @@
+// First, and it has to stay first: it turns off a dev-only cost that React measures once, when
+// `react-dom` is evaluated. See the file.
+import './react-timing'
+
 import '@astryxdesign/core/reset.css'
 import '@astryxdesign/core/astryx.css'
 import './theme/gofer-pixel-theme.css'

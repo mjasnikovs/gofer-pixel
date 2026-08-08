@@ -297,3 +297,20 @@ test('the brush outline is drawn at the same scale as the render under it', asyn
     expect(seen.outline.top).toBeLessThanOrEqual(centre.y)
     expect(seen.outline.bottom).toBeGreaterThanOrEqual(centre.y)
 })
+
+/**
+ * The dev build's Performance track is off, and one query parameter turns it back on.
+ *
+ * Not a timing test, because the cost it guards against is not a frame: React 19's development
+ * build deep-diffs every changed prop, and `Volume` hands down two fresh `Uint8Array`s per edit to
+ * about thirty components. One voxel cost 1.2 s on a 32³ document. `src/react-timing.ts` says the
+ * rest. What is asserted here is the gate itself, because the gate is read once at import time and
+ * a reordered import in `main.tsx` is exactly how this comes back.
+ */
+test('React 19 dev render logging is off by default and opt-in by flag', async ({page}) => {
+    await ready(page)
+    expect(await page.evaluate(() => typeof console.timeStamp)).toBe('undefined')
+
+    await page.goto('/?react-track')
+    expect(await page.evaluate(() => typeof console.timeStamp)).toBe('function')
+})
