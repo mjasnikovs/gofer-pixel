@@ -10,6 +10,7 @@ import {readVox} from '../vox/vox-file'
 import {browserStore, clearSnapshots, putSnapshot, snapshots, type Store} from '../doc/store'
 import {browserScorer, type Scorer} from '../gen/clip'
 import {browserLlama, type Llama} from '../gen/llama'
+import {browserVeto, type Veto} from '../gen/veto'
 import {sheetMetadata} from '../sheet/metadata'
 import {selectionBounds} from '../doc/selection'
 import {canRadial} from '../doc/symmetry'
@@ -98,7 +99,8 @@ export const App = ({
     store = browserStore(),
     files = browserFiles(),
     llama = browserLlama(),
-    scorer = browserScorer()
+    scorer = browserScorer(),
+    veto = browserVeto()
 }: {
     volume: Volume
     name: string
@@ -109,6 +111,8 @@ export const App = ({
     llama?: Llama
     /** The local CLIP service — see `src/gen/clip.ts`. Optional at runtime as well as in a test. */
     scorer?: Scorer
+    /** The naming judge — see `src/gen/veto.ts`. The same server as `llama`. */
+    veto?: Veto
 }) => {
     const [state, dispatch] = useReducer(reduce, source, start => initialState(start, name, opened))
     // Everything below reads the *document's* volume, not the one the file was opened with. They
@@ -810,6 +814,7 @@ export const App = ({
                 <GenerateDialog
                     llama={llama}
                     scorer={scorer}
+                    veto={veto}
                     onClose={() => {
                         setGenerating(false)
                     }}

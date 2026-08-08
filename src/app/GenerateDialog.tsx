@@ -4,6 +4,7 @@ import {Dialog, DialogHeader} from '@astryxdesign/core/Dialog'
 import {NumberInput} from '@astryxdesign/core/NumberInput'
 import {ProgressBar} from '@astryxdesign/core/ProgressBar'
 import {SegmentedControl, SegmentedControlItem} from '@astryxdesign/core/SegmentedControl'
+import {Switch} from '@astryxdesign/core/Switch'
 import {Text} from '@astryxdesign/core/Text'
 import {TextInput} from '@astryxdesign/core/TextInput'
 import {ISOMETRIC_PITCH} from '../doc/cameras'
@@ -16,6 +17,7 @@ import {
     type Llama
 } from '../gen/llama'
 import {overallScore, scoreModel, type ModelScores} from '../gen/score'
+import {judge, type Veto, type Verdict} from '../gen/veto'
 import {rankingViews} from '../gen/views'
 import {createCamera} from '../render/camera'
 import type {Volume} from '../render/volume'
@@ -39,6 +41,14 @@ export interface Ranked {
     readonly scores: ModelScores
     readonly overall: number
     readonly clip: number | null
+    /**
+     * What the vision model called it — see `gen/veto.ts`. `null` until it has been asked.
+     *
+     * A failed verdict sorts a candidate to the end and marks it. It never removes one: the judge is
+     * loose enough to have called a good cat a sheep, and the artist is looking at the same picture
+     * it was.
+     */
+    readonly veto: Verdict | null
 }
 
 /** How many candidates can be asked for at once. */
@@ -65,7 +75,7 @@ const CandidateCard = ({
     isBest: boolean
     onPick: () => void
 }) => {
-    const {candidate, scores} = entry
+    const {candidate, scores, veto} = entry
     return (
         <div className='generate-card'>
             <Thumbnail
@@ -75,6 +85,14 @@ const CandidateCard = ({
                 className='generate-thumb'
             />
             <Text weight='semibold'>{candidate.spec.name}</Text>
+            {veto !== null && veto.word !== '' && (
+                <Text
+                    type='supporting'
+                    color='secondary'
+                >
+                    {`reads as "${veto.word}"`}
+                </Text>
+            )}
             <Text
                 type='supporting'
                 color='disabled'
@@ -99,12 +117,15 @@ const CandidateCard = ({
 export const GenerateDialog = ({
     llama,
     scorer,
+    veto,
     onClose,
     onPick,
     onRunning
 }: {
     llama: Llama
     scorer: Scorer
+    /** The naming judge — see `gen/veto.ts`. Same server as `llama`, different question. */
+    veto: Veto
     onClose: () => void
     onPick: (volume: Volume, name: string, record: GenerationRecord) => void
     /**
@@ -121,10 +142,17 @@ export const GenerateDialog = ({
     const [busy, setBusy] = useState(false)
     const [done, setDone] = useState(0)
     const [status, setStatus] = useState('')
+    const [vetoNote, setVetoNote] = useState('')
     const [clipNote, setClipNote] = useState('')
     const [ranked, setRanked] = useState<readonly Ranked[]>([])
     const [rankBy, setRankBy] = useState<'built-in' | 'clip'>('built-in')
     const [server, setServer] = useState<string | undefined>(undefined)
+    /**
+     * Off by default. It costs one extra call to the vision model per candidate and the word it
+     * comes back with sorts nothing — it is worth switching on when a batch keeps coming back
+     * wrong and you want to know what the model thinks it drew instead. See `gen/veto.ts`.
+     */
+    const [naming, setNaming] = useState(false)
 
     /*
      * The one AbortController, held across renders: Cancel has to reach a fetch that a *previous*
@@ -154,11 +182,15 @@ export const GenerateDialog = ({
     const run = useCallback(async (): Promise<void> => {
         const controller = new AbortController()
         running.current = controller
+        // Read through a call, never as a field: the flag flips during an `await`, and a plain read
+        // narrows to `false` for the rest of the function under the type-aware lint rules.
+        const stopped = (): boolean => controller.signal.aborted
         setBusy(true)
         setRanked([])
         setDone(0)
         setRankBy('built-in')
         setClipNote('')
+        setVetoNote('')
         setStatus(`Generating 0/${String(count)}…`)
 
         const landed: Ranked[] = []
@@ -183,7 +215,8 @@ export const GenerateDialog = ({
                         candidate: attempt.candidate,
                         scores,
                         overall: overallScore(scores),
-                        clip: null
+                        clip: null,
+                        veto: null
                     })
                     // A copy per attempt, so the grid fills in rather than appearing at the end.
                     setRanked([...landed])
@@ -199,7 +232,39 @@ export const GenerateDialog = ({
                 + (failures[0]?.ok === false ? ` — ${failures[0].error.slice(0, 90)}` : '')
         )
         setBusy(false)
-        if (landed.length === 0 || controller.signal.aborted) return
+        if (landed.length === 0 || stopped()) return
+
+        /*
+         * What each candidate reads as. One vision call each, sequentially, for the same reason
+         * generation is sequential.
+         *
+         * It was built to be a veto and it is not one: measured over 8 cats and 8 knights, it threw
+         * away a real cat for being called "dog" and the best knight of eight for being called
+         * "santa". The word itself is honest and worth reading — a knight that reads as "santa" is
+         * telling the artist exactly which part of the sprite is wrong.
+         */
+        const judged = [...landed]
+        if (naming) {
+            setVetoNote(`Naming: 0/${String(judged.length)}…`)
+            for (let i = 0; i < judged.length; i += 1) {
+                const entry = judged[i]
+                if (!entry || stopped()) break
+                judged[i] = {
+                    ...entry,
+                    veto: await judge(veto, entry.candidate.volume, prompt, controller.signal)
+                }
+                setRanked([...judged])
+                setVetoNote(`Naming: ${String(i + 1)}/${String(judged.length)}…`)
+            }
+            const missed = judged.filter(entry => entry.veto?.pass === false)
+            const asked = judged.filter(entry => entry.veto !== null && entry.veto.word !== '')
+            setVetoNote(
+                asked.length === 0 ?
+                    'Naming: the model would not say what these are'
+                :   `Naming: ${String(asked.length - missed.length)} of ${String(asked.length)} read as the subject`
+            )
+        }
+        if (stopped()) return
 
         /*
          * CLIP second, and only if the service is up. It is a second opinion on an ordering that
@@ -213,10 +278,10 @@ export const GenerateDialog = ({
                 return
             }
             const views = await Promise.all(
-                landed.map(entry => rankingViews(entry.candidate.volume))
+                judged.map(entry => rankingViews(entry.candidate.volume))
             )
             const scores = await scorer.score(prompt, views, controller.signal)
-            const withClip = landed.map((entry, i) => ({...entry, clip: scores[i] ?? null}))
+            const withClip = judged.map((entry, i) => ({...entry, clip: scores[i] ?? null}))
             setRanked(withClip)
             setRankBy('clip')
             const agreement = rankAgreement(
@@ -230,9 +295,29 @@ export const GenerateDialog = ({
         } catch (error) {
             setClipNote(`CLIP: ${error instanceof Error ? error.message : String(error)}`)
         }
-    }, [llama, scorer, prompt, count])
+    }, [llama, scorer, veto, naming, prompt, count])
+
+    /*
+     * The slots still to fill. `done` counts attempts, not candidates, so a failed attempt closes
+     * its own placeholder rather than leaving one shimmering for a model that will never arrive.
+     */
+    const pending = busy ? Math.max(0, count - done) : 0
+
+    /** The one way a batch starts, so the button and the Enter key cannot drift apart. */
+    const start = (): void => {
+        const batch = run()
+        onRunning?.(batch)
+        void batch
+    }
 
     const hasClip = ranked.some(entry => entry.clip !== null)
+    /*
+     * The naming does not touch the order, and that is a measurement rather than caution — see
+     * `gen/veto.ts` and `docs/GEN_RESEARCH.md`, 2026-08-08. Sorted by it, a real cat with ears and
+     * an upright tail went last for being called "dog", and the best knight of eight went last for
+     * being called "santa". The word is shown because it says what the sprite reads as; it does not
+     * get to move anything.
+     */
     const order = [...ranked].sort((a, b) =>
         rankBy === 'clip' && hasClip ?
             (b.clip ?? -Infinity) - (a.clip ?? -Infinity)
@@ -267,6 +352,11 @@ export const GenerateDialog = ({
                         value={prompt}
                         isDisabled={busy}
                         onChange={setPrompt}
+                        // Enter is what a prompt field is for. Guarded rather than unconditional:
+                        // held down mid-batch it would start a second batch over the first.
+                        onEnter={() => {
+                            if (!busy && server !== undefined) start()
+                        }}
                     />
                     <NumberInput
                         label='Candidates'
@@ -295,12 +385,19 @@ export const GenerateDialog = ({
                                 running.current?.abort()
                                 return
                             }
-                            const batch = run()
-                            onRunning?.(batch)
-                            void batch
+                            start()
                         }}
                     />
                 </div>
+
+                <Switch
+                    label='Ask what each result looks like'
+                    description='Slower. Puts the model’s own word under each picture.'
+                    size='sm'
+                    value={naming}
+                    isDisabled={busy}
+                    onChange={setNaming}
+                />
 
                 {busy && (
                     <ProgressBar
@@ -314,6 +411,12 @@ export const GenerateDialog = ({
                 <div className='generate-status'>
                     <Text type='supporting'>
                         <span data-testid='generate-status'>{status}</span>
+                    </Text>
+                    <Text
+                        type='supporting'
+                        color='disabled'
+                    >
+                        <span data-testid='veto-status'>{vetoNote}</span>
                     </Text>
                     <Text
                         type='supporting'
@@ -356,6 +459,24 @@ export const GenerateDialog = ({
                                 )
                             }}
                         />
+                    ))}
+                    {/*
+                     * One empty slot per candidate still to come, so the grid has its final shape
+                     * from the first second. A candidate is 7–20 s and only the *finished* ones can
+                     * be drawn, so without these the artist watches an empty box for twenty seconds
+                     * and cannot tell a slow model from a broken one.
+                     */}
+                    {Array.from({length: pending}, (_, i) => (
+                        <div
+                            key={`pending-${String(i)}`}
+                            className='generate-card generate-pending'
+                            data-testid='generate-pending'
+                            aria-hidden='true'
+                        >
+                            <div className='generate-thumb generate-thumb-empty' />
+                            <div className='generate-pending-line' />
+                            <div className='generate-pending-line generate-pending-line-short' />
+                        </div>
                     ))}
                 </div>
 

@@ -4,6 +4,7 @@ import {createRoot, type Root} from 'react-dom/client'
 import {memoryScorer, type Scorer} from '../gen/clip'
 import {memoryLlama, type GenerationRecord, type Llama} from '../gen/llama'
 import type {VoxSpec} from '../gen/ops'
+import {memoryVeto, type Veto} from '../gen/veto'
 import type {Volume} from '../render/volume'
 import {GenerateDialog, MAX_CANDIDATES} from './GenerateDialog'
 
@@ -44,7 +45,12 @@ interface Mounted {
     batch: () => Promise<void>
 }
 
-const open = async (llama: Llama, scorer: Scorer = memoryScorer([], false)): Promise<Mounted> => {
+const open = async (
+    llama: Llama,
+    scorer: Scorer = memoryScorer([], false),
+    // Canned silence: the judge answers nothing, which passes every candidate — see `gen/veto.ts`.
+    veto: Veto = memoryVeto([''])
+): Promise<Mounted> => {
     const host = document.createElement('div')
     document.body.appendChild(host)
     const root = createRoot(host)
@@ -56,6 +62,7 @@ const open = async (llama: Llama, scorer: Scorer = memoryScorer([], false)): Pro
             <GenerateDialog
                 llama={llama}
                 scorer={scorer}
+                veto={veto}
                 onClose={() => closed.push(1)}
                 onPick={(volume, name, record) => picked.push({volume, name, record})}
                 onRunning={batch => {
@@ -116,7 +123,28 @@ const control = (label: string): HTMLElement => {
 const said = (testid: string): string =>
     dialog().querySelector(`[data-testid="${testid}"]`)?.textContent.trim() ?? ''
 
-const cards = (): HTMLElement[] => [...dialog().querySelectorAll<HTMLElement>('.generate-card')]
+const cards = (): HTMLElement[] => [
+    ...dialog().querySelectorAll<HTMLElement>('.generate-card:not(.generate-pending)')
+]
+
+/** The empty slots for candidates the model has not answered for yet. */
+const pending = (): HTMLElement[] => [
+    ...dialog().querySelectorAll<HTMLElement>('[data-testid="generate-pending"]')
+]
+
+/**
+ * Switch the naming pass on.
+ *
+ * Astryx's Switch is a real checkbox with a `<label for>` beside it, so it is reached as an input
+ * rather than by the text next to it — and it is the only checkbox in this dialog.
+ */
+const toggleNaming = async (): Promise<void> => {
+    const box = dialog().querySelector<HTMLInputElement>('input[type="checkbox"]')
+    if (!box) throw new Error('the dialog has no naming switch')
+    await act(async () => {
+        box.click()
+    })
+}
 
 test('with no server there is nothing to press, and the dialog says why', async () => {
     const down: Llama = {
@@ -200,6 +228,135 @@ test('CLIP takes over the order when the service is up, and says how much it dis
         control('Built-in').click()
     })
     expect(cards()[0]?.textContent).not.toContain('brick')
+
+    await close(root, host)
+})
+
+test('Enter in the prompt starts the batch, the same way the button does', async () => {
+    const mounted = await open(memoryLlama([carved('tower', '#808080')]))
+    const {root, host} = mounted
+    const field = dialog().querySelector<HTMLInputElement>('input[type="text"]')
+    if (!field) throw new Error('the dialog has no prompt field')
+
+    await act(async () => {
+        field.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}))
+    })
+    await act(async () => {
+        await mounted.batch()
+    })
+
+    expect(cards()).toHaveLength(4)
+
+    await close(root, host)
+})
+
+test('the slots a batch will fill are on screen before the model answers', async () => {
+    let release: (() => void) | undefined
+    let asked = 0
+    const held: Llama = {
+        probe: () => Promise.resolve('qwen'),
+        bodyPlan: () => Promise.resolve('quadruped'),
+        generate: (_prompt, _sampler, _plan, signal) => {
+            asked += 1
+            if (signal?.aborted === true) return Promise.reject(new Error('cancelled'))
+            // Only the second one waits. Holding every candidate after the first would leave the
+            // third in flight for ever and the batch would never settle.
+            if (asked !== 2) return Promise.resolve({spec: carved('tower', '#808080'), model: 'q'})
+            return new Promise(resolve => {
+                release = () => {
+                    resolve({spec: carved('hut', '#664422'), model: 'q'})
+                }
+            })
+        }
+    }
+    const mounted = await open(held)
+
+    expect(pending()).toHaveLength(0)
+    await act(async () => {
+        control('Generate').click()
+    })
+
+    // One candidate landed, one in flight, two not started: four slots either way, so the grid
+    // keeps its shape and the thumbnails do not move under the pointer as each one arrives.
+    expect(cards()).toHaveLength(1)
+    expect(pending()).toHaveLength(3)
+
+    await act(async () => {
+        release?.()
+        await mounted.batch()
+    })
+
+    // Nothing left in flight, nothing left shimmering.
+    expect(pending()).toHaveLength(0)
+
+    await close(mounted.root, mounted.host)
+})
+
+test('naming is off until it is asked for, because it costs a call a candidate', async () => {
+    const veto = memoryVeto(['rock'], false)
+    const mounted = await open(
+        memoryLlama([carved('tower', '#808080')]),
+        memoryScorer([], false),
+        veto
+    )
+    const {root, host} = mounted
+
+    await generate(mounted)
+
+    expect(said('veto-status')).toBe('')
+    // The cards, not the dialog: the menu row's own description says the words "reads as".
+    expect(
+        cards()
+            .map(card => card.textContent)
+            .join()
+    ).not.toContain('reads as')
+    // Not merely hidden: the server was never asked.
+    expect(veto.seen).toHaveLength(0)
+
+    await close(root, host)
+})
+
+test('what a candidate reads as is shown, counted, and allowed to move nothing', async () => {
+    const mounted = await open(
+        memoryLlama([carved('tower', '#808080'), brick]),
+        memoryScorer([], false),
+        // The second of the four is the brick, and the model calls it a rock. That is not the
+        // prompt's word and the text call refuses it, so two of the four "fail".
+        memoryVeto(['tower', 'rock'], false)
+    )
+    const {root, host} = mounted
+
+    await toggleNaming()
+    await generate(mounted)
+
+    expect(said('veto-status')).toBe('Naming: 2 of 4 read as the subject')
+    expect(cards()).toHaveLength(4)
+    expect(dialog().textContent).toContain('reads as "rock"')
+    /*
+     * The order is still the built-in score's, and the brick is still last on its own merits. The
+     * naming does not sort: measured live, it put a real cat behind a brick for being called "dog".
+     */
+    expect(cards()[0]?.textContent).toContain('reads as "tower"')
+    expect(cards()[0]?.textContent).toContain('tower')
+
+    await close(root, host)
+})
+
+test('a word the model stands behind is the same to the grid as one that matched', async () => {
+    // "a stone tower" named "castle": not the prompt's word, and the model says it could describe
+    // it anyway. Counted as read, and nothing moves either way.
+    const mounted = await open(
+        memoryLlama([carved('tower', '#808080')]),
+        memoryScorer([], false),
+        memoryVeto(['castle'], true)
+    )
+    const {root, host} = mounted
+
+    await toggleNaming()
+    await generate(mounted)
+
+    expect(said('veto-status')).toBe('Naming: 4 of 4 read as the subject')
+    expect(dialog().textContent).toContain('reads as "castle"')
 
     await close(root, host)
 })

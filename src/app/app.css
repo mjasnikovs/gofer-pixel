@@ -1341,6 +1341,56 @@ body,
     background: var(--color-background-surface);
 }
 
+/*
+ * A slot for a candidate the model is still writing. Same box as a real card, so the grid does not
+ * reflow as each one lands — the thumbnails are the thing being compared and they must not move
+ * under the pointer.
+ */
+.generate-pending {
+    pointer-events: none;
+}
+
+.generate-thumb-empty {
+    border: 1px dashed var(--color-border);
+}
+
+.generate-pending-line {
+    height: 10px;
+    border-radius: var(--radius-element);
+    background: var(--color-background-card);
+}
+
+.generate-pending-line-short {
+    width: 60%;
+}
+
+/*
+ * The one animation in this dialog, and it is load-bearing: a still placeholder and a wedged app
+ * look identical. Reduced motion keeps the shape and drops the pulse.
+ */
+.generate-pending .generate-thumb-empty,
+.generate-pending-line {
+    animation: generate-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes generate-pulse {
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.45;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .generate-pending .generate-thumb-empty,
+    .generate-pending-line {
+        animation: none;
+    }
+}
+
 .generate-thumb {
     image-rendering: pixelated;
     display: block;

@@ -20,23 +20,19 @@ import {ready} from './driver'
  * model is not deterministic, so what it returned could not be asserted anyway. What was measured
  * that way is written down in `docs/TASKS.md`.
  */
-const TOWER = {
-    name: 'tower',
-    size: [12, 12, 20],
-    mirror_x: false,
-    ops: [
-        {op: 'box', from: [2, 2, 0], to: [9, 9, 19], color: '#8a8f98'},
-        {op: 'erase', from: [4, 4, 6], to: [7, 7, 19]},
-        {op: 'box', from: [1, 1, 18], to: [10, 10, 19], color: '#4a4f57'}
-    ]
-}
+/*
+ * The reply is JavaScript, not JSON — see `src/gen/llama.ts`. The op language is y-up and the
+ * rasteriser swaps to the z-up `Volume`, so the middle pair is the height.
+ *
+ * Neither carries a name: the code format has none, so `specFromCode` names the model after the
+ * prompt and both candidates come back called "a stone tower". They are told apart by how solid
+ * they are, which is what the built-in score sorts on anyway.
+ */
+const TOWER = `box(2,0,2, 9,19,9, '#8a8f98')
+erase(4,6,4, 7,19,7)
+box(1,18,1, 10,19,10, '#4a4f57')`
 
-const BRICK = {
-    name: 'brick',
-    size: [12, 12, 20],
-    mirror_x: false,
-    ops: [{op: 'box', from: [0, 0, 0], to: [11, 11, 19], color: '#808080'}]
-}
+const BRICK = "box(0,0,0, 11,19,11, '#808080')"
 
 /** llama-server and clipserve, as far as the page can tell. */
 const stub = async (page: Page, {clip = true}: {clip?: boolean} = {}): Promise<string[]> => {
@@ -48,10 +44,20 @@ const stub = async (page: Page, {clip = true}: {clip?: boolean} = {}): Promise<s
             await route.fulfill({json: {data: [{id: 'stub-27b'}]}})
             return
         }
-        const spec = next % 2 === 0 ? TOWER : BRICK
+        /*
+         * The body-plan pick is a chat call too — once per batch, before any candidate — and it
+         * must not eat a canned reply, or every candidate comes back as the one after it. It is
+         * told apart by its token budget: one word against 4096.
+         */
+        const sent = route.request().postDataJSON() as {max_tokens?: number}
+        if (sent.max_tokens === 16) {
+            await route.fulfill({json: {choices: [{message: {content: 'building'}}]}})
+            return
+        }
+        const reply = next % 2 === 0 ? TOWER : BRICK
         next += 1
         await route.fulfill({
-            json: {model: 'stub-27b', choices: [{message: {content: JSON.stringify(spec)}}]}
+            json: {model: 'stub-27b', choices: [{message: {content: reply}}]}
         })
     })
     await page.route('http://127.0.0.1:8765/**', async route => {
@@ -132,7 +138,7 @@ test('a batch draws real pixels on every card, and picking one replaces the docu
     expect(drawn[0]?.hash).not.toBe(drawn[1]?.hash)
 
     // The built-in order sinks the solid brick, so the primary button is the carved one.
-    await expect(cards.nth(0)).toContainText('tower')
+    await expect(cards.nth(0)).not.toContainText('solid 100%')
     await cards.nth(0).getByRole('button', {name: 'Use this one'}).click()
     await expect(dialog).toBeHidden()
 
@@ -154,9 +160,11 @@ test('a batch draws real pixels on every card, and picking one replaces the docu
         }
     })
 
-    expect(after.size).toEqual([12, 20])
+    // The grid is fitted to the ops, never to a declared size — `src/gen/ops.ts`. The tower's ops
+    // span x 1-10 and y 0-19, so it is 10 wide and 20 tall.
+    expect(after.size).toEqual([10, 20])
     expect(after.filled).toBeGreaterThan(0)
-    expect(after.doc).toMatchObject({name: 'tower', dirty: true})
+    expect(after.doc).toMatchObject({name: 'a stone tower', dirty: true})
     expect(after.origin?.model).toBe('stub-27b')
     expect(after.origin?.sampler.seed).toBeGreaterThan(0)
 })
@@ -171,10 +179,59 @@ test('CLIP reorders the grid when the service answers, and says so', async ({pag
     await dialog.getByRole('button', {name: 'Generate', exact: true}).click()
     await expect(dialog.locator('[data-testid="clip-status"]')).toContainText('2 ranked')
 
-    // The built-in order put the brick last. CLIP disagrees, and CLIP is what is on screen.
-    await expect(dialog.locator('.generate-card').nth(0)).toContainText('brick')
+    // The built-in order put the solid brick last. CLIP disagrees, and CLIP is what is on screen.
+    await expect(dialog.locator('.generate-card').nth(0)).toContainText('solid 100%')
     await dialog.getByRole('radio', {name: 'Built-in'}).click()
-    await expect(dialog.locator('.generate-card').nth(0)).toContainText('tower')
+    await expect(dialog.locator('.generate-card').nth(0)).not.toContainText('solid 100%')
+})
+
+test('Enter starts a batch, and empty slots stand in for the candidates still coming', async ({
+    page
+}) => {
+    await ready(page)
+
+    /*
+     * The first candidate is held open until this test lets it go. Not a wait — nothing here sleeps
+     * — it is a request that has not been answered yet, which is the only state in which the
+     * placeholders exist at all.
+     */
+    let release: (() => void) | undefined
+    const held = new Promise<void>(resolve => {
+        release = resolve
+    })
+    let asked = 0
+    await page.route('http://localhost:8080/**', async route => {
+        if (route.request().url().endsWith('/v1/models')) {
+            await route.fulfill({json: {data: [{id: 'stub-27b'}]}})
+            return
+        }
+        const sent = route.request().postDataJSON() as {max_tokens?: number}
+        if (sent.max_tokens === 16) {
+            await route.fulfill({json: {choices: [{message: {content: 'building'}}]}})
+            return
+        }
+        asked += 1
+        if (asked === 1) await held
+        await route.fulfill({json: {model: 'stub-27b', choices: [{message: {content: TOWER}}]}})
+    })
+    await page.route('http://127.0.0.1:8765/**', route => route.abort('connectionrefused'))
+
+    await openDialog(page)
+    const dialog = dialogOf(page)
+    await dialog.getByLabel('Candidates').fill('2')
+
+    // A real key in a real field. The button is never touched.
+    await dialog.getByLabel('Prompt').click()
+    await page.keyboard.press('Enter')
+
+    // Nothing has come back, so the grid is two empty slots rather than an empty box.
+    await expect(dialog.locator('[data-testid="generate-pending"]')).toHaveCount(2)
+    await expect(dialog.locator('.generate-card:not(.generate-pending)')).toHaveCount(0)
+
+    release?.()
+
+    await expect(dialog.locator('.generate-card:not(.generate-pending)')).toHaveCount(2)
+    await expect(dialog.locator('[data-testid="generate-pending"]')).toHaveCount(0)
 })
 
 test('Escape closes the dialog, because a modal that only shuts one way is a trap', async ({
