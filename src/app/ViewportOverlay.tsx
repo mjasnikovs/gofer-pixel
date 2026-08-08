@@ -70,14 +70,63 @@ export const GroundGrid = ({volume, camera}: {volume: Volume; camera: Camera}) =
 
     // One line per voxel while that is legible, and a coarser lattice once it is not.
     const step = Math.max(1, 2 ** Math.ceil(Math.log2(Math.max(volume.sx, volume.sy) / 24)))
-    const pad = step * 4
-    const lines: {a: {x: number; y: number}; b: {x: number; y: number}}[] = []
-    for (let x = -pad; x <= volume.sx + pad; x += step) {
-        lines.push({a: project([x, -pad, 0]), b: project([x, volume.sy + pad, 0])})
+
+    /*
+     * Two lattices, because a cell is a promise.
+     *
+     * One uniform lattice used to run `pad` voxels past the volume, and every square out there took
+     * a press that did nothing but say "Outside the grid" — the floor drew cells where no cell can
+     * be filled. Deleting the overhang is not the fix: without ground under and around the model
+     * nothing says how high anything is floating.
+     *
+     * So the two regions are drawn as different things. Inside, one line per voxel, stopping dead on
+     * the boundary — small squares read as pixels. Outside, a lattice four times coarser that fades
+     * out before it reaches the edge of the pad — big squares read as ground, and nothing far out
+     * invites a click. The fine lattice's own last line is the boundary; it needs no separate edge.
+     */
+    const coarse = step * 4
+    const pad = coarse * 2
+
+    /** Every gridline coordinate from `from` to `to`, always including `to` itself. */
+    const ticks = (from: number, to: number, by: number): number[] => {
+        const out: number[] = []
+        for (let k = from; k < to; k += by) out.push(k)
+        out.push(to)
+        return out
     }
-    for (let y = -pad; y <= volume.sy + pad; y += step) {
-        lines.push({a: project([-pad, y, 0]), b: project([volume.sx + pad, y, 0])})
+    const span = (a: Vec3, b: Vec3) => ({a: project(a), b: project(b)})
+
+    const fine = [
+        ...ticks(0, volume.sx, step).map(x => span([x, 0, 0], [x, volume.sy, 0])),
+        ...ticks(0, volume.sy, step).map(y => span([0, y, 0], [volume.sx, y, 0]))
+    ]
+    const ground = [
+        ...ticks(-pad, volume.sx + pad, coarse).map(x =>
+            span([x, -pad, 0], [x, volume.sy + pad, 0])
+        ),
+        ...ticks(-pad, volume.sy + pad, coarse).map(y =>
+            span([-pad, y, 0], [volume.sx + pad, y, 0])
+        )
+    ]
+
+    /*
+     * The falloff is radial in *screen* space, so it does not swing about as the camera orbits: a
+     * gradient in voxels would fade the far corner of an isometric view and not the near one. It
+     * holds full strength out to the furthest corner of the volume itself, so the coarse lattice
+     * starts at the boundary rather than already half gone.
+     */
+    const middle = project([volume.sx / 2, volume.sy / 2, 0])
+    const reach = (x: number, y: number): number => {
+        const p = project([x, y, 0])
+        return Math.hypot(p.x - middle.x, p.y - middle.y)
     }
+    const inner = Math.max(reach(0, 0), reach(volume.sx, 0), reach(0, volume.sy), reach(volume.sx, volume.sy)) // prettier-ignore
+    const outer = Math.max(
+        reach(-pad, -pad),
+        reach(volume.sx + pad, -pad),
+        reach(-pad, volume.sy + pad),
+        reach(volume.sx + pad, volume.sy + pad)
+    )
 
     /*
      * The hole is cut around the *voxels*, not around the grid.
@@ -122,8 +171,47 @@ export const GroundGrid = ({volume, camera}: {volume: Volume; camera: Camera}) =
                     fill='black'
                 />
             </mask>
+            <radialGradient
+                id='ground-grid-falloff'
+                gradientUnits='userSpaceOnUse'
+                cx={middle.x}
+                cy={middle.y}
+                r={outer}
+            >
+                <stop
+                    offset={outer > 0 ? inner / outer : 1}
+                    stopColor='white'
+                />
+                <stop
+                    offset='1'
+                    stopColor='black'
+                />
+            </radialGradient>
+            <mask id='ground-grid-fade'>
+                <rect
+                    x={-half * 4}
+                    y={-half * 4}
+                    width={half * 8}
+                    height={half * 8}
+                    fill='url(#ground-grid-falloff)'
+                />
+            </mask>
             <g mask='url(#ground-grid-mask)'>
-                {lines.map((line, index) => (
+                <g mask='url(#ground-grid-fade)'>
+                    {ground.map((line, index) => (
+                        <line
+                            key={index}
+                            x1={line.a.x}
+                            y1={line.a.y}
+                            x2={line.b.x}
+                            y2={line.b.y}
+                            stroke='currentColor'
+                            strokeWidth='1'
+                            vectorEffect='non-scaling-stroke'
+                        />
+                    ))}
+                </g>
+                {fine.map((line, index) => (
                     <line
                         key={index}
                         x1={line.a.x}
