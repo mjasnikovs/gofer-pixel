@@ -387,6 +387,60 @@ test('a drag stays on the layer it started on instead of climbing towards the ca
     expect(edit.at.length).toBeGreaterThan(4)
 })
 
+/** Every voxel an edit touched, as `[x, y, z]`. */
+const editCells = ({sx, sy}: Volume, edit: {at: ArrayLike<number>}): number[][] =>
+    [...Array.from(edit.at)].map(index => {
+        const z = Math.floor(index / (sx * sy))
+        const rest = index - z * sx * sy
+        return [rest % sx, Math.floor(rest / sx), z]
+    })
+
+/**
+ * Shift mid-drag pulls the flat stroke out of the surface — the gesture that answers "how do I get
+ * thickness" without a second tool. The shape stops following the cursor and the depth starts.
+ *
+ * Held, not toggled: the last move decides, so a drag that lets go of Shift finishes flat. That is
+ * the part worth a test, because it is the part that is a redraw rather than an append.
+ */
+test('Shift held during a drag extrudes the stroke along its own normal', () => {
+    const state = {...armed('draw'), brush: {...fresh().brush, size: 1, figure: 'line' as const}}
+    const {column, row} = onModel(state)
+
+    let live = reduce(state, at('down', column, row))
+    const axis = live.stroke?.axis ?? 0
+    const layer = live.stroke?.layer ?? 0
+    live = reduce(live, at('move', column - 10, row + 10))
+    const flat = editCells(
+        state.volume,
+        reduce(live, at('up', column - 10, row + 10)).history.past[0] ?? {at: []}
+    )
+    // The drag drew a line, and every cell of it sits on the plane the click pinned.
+    expect(flat.length).toBeGreaterThan(2)
+    for (const cell of flat) expect(cell[axis]).toBe(layer)
+
+    // Now the same drag, with Shift held for a second leg. The footprint is unchanged and the
+    // stroke has gained layers off the plane.
+    const pulled = reduce(live, at('move', column - 10, row - 6, {shift: true}))
+    const raised = editCells(
+        state.volume,
+        reduce(pulled, at('up', column - 10, row - 6, {shift: true})).history.past[0] ?? {at: []}
+    )
+    expect(new Set(raised.map(cell => cell[axis])).size).toBeGreaterThan(1)
+    // Flattening both back onto the plane gives the same shape: an extrude repeats, it never moves.
+    const footprint = (cells: number[][]): string[] =>
+        [...new Set(cells.map(cell => cell.filter((_, i) => i !== axis).join(',')))].toSorted()
+    expect(footprint(raised)).toEqual(footprint(flat))
+
+    // Letting go hands the cursor back to the shape and takes the depth away again, because the
+    // stroke stores no extrusion between moves.
+    const dropped = reduce(pulled, at('move', column - 10, row + 10))
+    const back = editCells(
+        state.volume,
+        reduce(dropped, at('up', column - 10, row + 10)).history.past[0] ?? {at: []}
+    )
+    expect(back).toEqual(flat)
+})
+
 test('erase takes the voxel under the cursor, and draw puts one in front of it', () => {
     const start = armed('erase')
     const {column, row} = onModel(start)

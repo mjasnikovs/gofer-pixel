@@ -97,7 +97,7 @@ import {
     remapColor,
     rotateCells
 } from '../doc/transform'
-import {basisFor, createCamera, type Camera} from '../render/camera'
+import {basisFor, createCamera, type Basis, type Camera} from '../render/camera'
 import {FACE_STEP} from '../render/faces'
 import {pick, pickPlane, pickRay} from '../render/pick'
 import {MODE_COLOR} from '../render/raycast.glsl'
@@ -295,6 +295,17 @@ export interface Stroke {
     readonly face: number
     readonly value: number
     readonly at: Cell
+    /**
+     * The figure's cells on the base plane, as of the last move with Shift up — what an extrude
+     * repeats along the normal.
+     *
+     * Held separately from the draft because the draft is bytes and an extrude needs the shape
+     * back. It is also why the flat part of a stroke holds still while Shift is down: the drag has
+     * stopped feeding this and started feeding `depth`.
+     */
+    readonly spots: readonly Cell[]
+    /** How far out the extrude has reached, as a layer along `axis`. Equal to `layer` when flat. */
+    readonly depth: number
 }
 
 /**
@@ -1254,16 +1265,81 @@ const beginStroke = (state: AppState, event: ViewportPointer): AppState => {
             layer,
             face,
             value,
-            at: cell
+            at: cell,
+            spots: [cell],
+            depth: layer
         },
         sheet: undefined
     }
+}
+
+/**
+ * The plane a Shift-held drag measures depth on — the other half of `FEATURESET.md` §5.
+ *
+ * A stroke pins itself to the plane of the click, which is what a drag *along* a surface wants and
+ * gives no way at all to leave it. Depth has to be read off a plane the normal lies in, and two of
+ * them do: pick the more face-on to the camera. The other is nearer edge-on, where `pickPlane` has
+ * no cell to answer with and a drag of any length maps to a handful of voxels.
+ */
+const sideAxis = (axis: Axis, forward: readonly [number, number, number]): Axis => {
+    const a: Axis = axis === 0 ? 1 : 0
+    const b: Axis = axis === 2 ? 1 : 2
+    return Math.abs(forward[a]) >= Math.abs(forward[b]) ? a : b
+}
+
+/**
+ * The flat stroke, repeated out along its own normal — Shift held mid-drag.
+ *
+ * The shape stops following the cursor and the depth starts, so the gesture reads as pulling the
+ * thing already drawn out of the surface. It is drawn from `base` every move for the same reason a
+ * figure is: dragging back towards the surface has to *take away* layers, which appending cannot
+ * do. Letting Shift go hands the cursor back to the shape and collapses the stroke flat again —
+ * nothing here is stored across a move, so the key is the whole of the mode.
+ *
+ * Depth is a layer rather than a count, which is what lets it go negative: an extrude dragged past
+ * the surface digs in behind it instead of stopping dead at zero.
+ */
+const extrudeStroke = (
+    state: AppState,
+    stroke: Stroke,
+    basis: Basis,
+    event: ViewportPointer
+): AppState => {
+    const side = sideAxis(stroke.axis, basis.forward)
+    const cell = pickPlane(
+        basis,
+        event.x,
+        event.y,
+        event.width,
+        event.height,
+        side,
+        stroke.at[side]
+    )
+    if (!cell) return state
+    const depth = cell[stroke.axis]
+    if (depth === stroke.depth) return state
+
+    const draft = open(state, stroke.base)
+    const lo = Math.min(stroke.layer, depth)
+    const hi = Math.max(stroke.layer, depth)
+    const cells: Cell[] = []
+    for (let at = lo; at <= hi; at += 1) {
+        for (const spot of stroke.spots) {
+            const moved: [number, number, number] = [spot[0], spot[1], spot[2]]
+            moved[stroke.axis] = at
+            cells.push(...strokeCells(state.brush, stroke.face, moved, moved))
+        }
+    }
+    writeCells(draft, mirrored(state, cells), stroke.value)
+    return {...state, volume: live(draft), stroke: {...stroke, draft, depth}}
 }
 
 const continueStroke = (state: AppState, event: ViewportPointer): AppState => {
     const {stroke} = state
     if (!stroke) return state
     const basis = basisFor(state.orbit.camera, state.volume, event.height)
+    if (event.shift) return extrudeStroke(state, stroke, basis, event)
+
     const cell = pickPlane(
         basis,
         event.x,
@@ -1275,7 +1351,10 @@ const continueStroke = (state: AppState, event: ViewportPointer): AppState => {
     )
     if (!cell) return state
     const [x, y, z] = cell
-    if (x === stroke.at[0] && y === stroke.at[1] && z === stroke.at[2]) return state
+    const still = x === stroke.at[0] && y === stroke.at[1] && z === stroke.at[2]
+    // An extrude that has just been let go has to be undone even when the cursor has not moved,
+    // or the depth outlives the key that asked for it.
+    if (still && stroke.depth === stroke.layer) return state
 
     /*
      * Freehand appends to the draft it already has. A figure is redrawn from the document the
@@ -1284,17 +1363,31 @@ const continueStroke = (state: AppState, event: ViewportPointer): AppState => {
      * which appending cannot do.
      */
     if (state.brush.figure === 'free') {
-        const cells = strokeCells(state.brush, stroke.face, stroke.at, cell)
-        writeCells(stroke.draft, mirrored(state, cells), stroke.value)
-        return {...state, volume: live(stroke.draft), stroke: {...stroke, at: cell}}
+        // Freehand is the one stroke whose shape is history rather than arithmetic, so the cells an
+        // extrude would repeat have to be kept as the drag lays them down.
+        const spots = [...stroke.spots, ...figureCells('free', stroke.at, cell, stroke.axis)]
+        const draft = stroke.depth === stroke.layer ? stroke.draft : open(state, stroke.base)
+        const cells =
+            draft === stroke.draft ?
+                strokeCells(state.brush, stroke.face, stroke.at, cell)
+            :   spots.flatMap(spot => strokeCells(state.brush, stroke.face, spot, spot))
+        writeCells(draft, mirrored(state, cells), stroke.value)
+        return {
+            ...state,
+            volume: live(draft),
+            stroke: {...stroke, draft, at: cell, spots, depth: stroke.layer}
+        }
     }
 
     const draft = open(state, stroke.base)
-    const cells = figureCells(state.brush.figure, stroke.origin, cell, stroke.axis).flatMap(spot =>
-        strokeCells(state.brush, stroke.face, spot, spot)
-    )
+    const spots = figureCells(state.brush.figure, stroke.origin, cell, stroke.axis)
+    const cells = spots.flatMap(spot => strokeCells(state.brush, stroke.face, spot, spot))
     writeCells(draft, mirrored(state, cells), stroke.value)
-    return {...state, volume: live(draft), stroke: {...stroke, draft, at: cell}}
+    return {
+        ...state,
+        volume: live(draft),
+        stroke: {...stroke, draft, at: cell, spots, depth: stroke.layer}
+    }
 }
 
 /**
