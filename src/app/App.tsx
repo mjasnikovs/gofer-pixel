@@ -21,7 +21,7 @@ import {ObjectsPanel} from './ObjectsPanel'
 import {ReferenceLayer} from './ReferenceLayer'
 import {RendersPanel} from './RendersPanel'
 import {SelectionBar} from './SelectionBar'
-import {Timeline} from './Timeline'
+// import {Timeline} from './Timeline' — see the commented bar at the end of the layout
 import {GridPanel, ToolRail} from './ToolRail'
 import {AxisGizmo, BrushGhost, GroundGrid, HintBar, SelectionBox, ViewCube} from './ViewportOverlay'
 import {ViewsStrip} from './ViewsStrip'
@@ -267,9 +267,10 @@ export const App = ({
         handle.dispatch = dispatch
     }, [state])
 
-    const current = useMemo(
-        () => state.cameras.find(({id}) => id === state.selected),
-        [state.cameras, state.selected]
+    /** What the render panel inspects. Survives orbiting; see `previewed` in `state.ts`. */
+    const previewed = useMemo(
+        () => state.cameras.find(({id}) => id === state.previewed),
+        [state.cameras, state.previewed]
     )
 
     const bounds = useMemo(
@@ -525,7 +526,7 @@ export const App = ({
                     />
                     <RendersPanel
                         volume={shown}
-                        camera={current}
+                        camera={previewed}
                         map={state.map}
                         size={state.preview}
                         onMap={map => {
@@ -582,15 +583,22 @@ export const App = ({
                 </div>
             </div>
 
-            <Timeline
-                volume={shown}
-                camera={current ?? state.cameras[0]}
-                frame={state.frame}
-                fps={state.fps}
-                onFps={fps => {
-                    dispatch({type: 'fps', fps})
-                }}
-            />
+            {/*
+             * The animation bar is commented out, not deleted. One frame is all the document holds,
+             * so the only live control in it was the FPS selector and nothing read the value.
+             * `Timeline.tsx`, `state.fps`, `state.frame` and the `fps` action all still stand.
+             * Uncomment when FEATURESET §24 comes up.
+             *
+             * <Timeline
+             *     volume={shown}
+             *     camera={previewed ?? state.cameras[0]}
+             *     frame={state.frame}
+             *     fps={state.fps}
+             *     onFps={fps => {
+             *         dispatch({type: 'fps', fps})
+             *     }}
+             * />
+             */}
         </div>
     )
 }

@@ -84,7 +84,7 @@ export const RendersPanel = ({
                     type='supporting'
                     color='disabled'
                 >
-                    Sprite size
+                    {camera ? `${camera.name} at` : 'Sprite size'}
                 </Text>
                 <span className='spacer' />
                 <span
@@ -125,7 +125,7 @@ export const RendersPanel = ({
                         type='supporting'
                         color='disabled'
                     >
-                        The view has been moved — pick a camera to preview its maps.
+                        No cameras — capture one to preview its maps.
                     </Text>
                 }
             </div>

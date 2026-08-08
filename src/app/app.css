@@ -545,11 +545,14 @@ body,
  * The normal-map diagnostic, under the Normal tab. Same preview box as the tab above it, so the
  * two read as one thing being looked at two ways rather than as two panels.
  */
+/*
+ * No side padding: the lit preview and the map preview above it are the same picture twice, and two
+ * boxes of different widths read as two different features.
+ */
 .normal-check {
     display: flex;
     flex-direction: column;
     gap: 6px;
-    padding: 0 12px 12px;
 }
 
 /* The tile being dragged along the strip, so the artist can see which cell they are moving. */
@@ -771,10 +774,16 @@ body,
     text-align: center;
 }
 
+/*
+ * A fixed 128 px box, not the canvas's natural size. `width: auto` drew a 16 px sprite 16 px wide,
+ * which is a speck, and made the size buttons look broken.
+ *
+ * 128 is chosen because every size the panel offers divides into it exactly, so a pixel is a whole
+ * number of screen pixels at 16, 32, 64 and 128. A box of 132 would smear one column in eight.
+ */
 .render-canvas {
-    max-height: 132px;
-    width: auto;
-    height: auto;
+    width: 128px;
+    height: 128px;
 }
 
 /*

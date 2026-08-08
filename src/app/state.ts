@@ -396,6 +396,16 @@ export interface AppState {
     readonly cameras: readonly NamedCamera[]
     /** Which stored camera the viewport is currently showing, if it still matches one. */
     readonly selected: string | undefined
+    /**
+     * Which camera the render panel previews. The last one that was actually picked, and orbiting
+     * does not clear it.
+     *
+     * `selected` cannot do this job. It answers "is the view still this camera", so the first
+     * mouse-drag has to unset it or the views strip highlights a lie. The panel is asking a
+     * different question — "which camera am I inspecting the maps of" — and that answer should
+     * outlive a nudge of the view.
+     */
+    readonly previewed: string | undefined
     /** The camera being dragged along the views strip, if one is — `FEATURESET.md` §16. */
     readonly dragging: string | undefined
     readonly orbit: OrbitState
@@ -621,6 +631,7 @@ export const initialState = (source: Volume, opened?: OpenedDocument): AppState 
         volume,
         cameras,
         selected: first?.id,
+        previewed: first?.id,
         dragging: undefined,
         orbit: {
             camera: first?.camera ?? createCamera(volume, 0, ISOMETRIC_PITCH),
@@ -668,6 +679,7 @@ export const initialState = (source: Volume, opened?: OpenedDocument): AppState 
 const withCamera = (state: AppState, camera: Camera, selected: string | undefined): AppState => ({
     ...state,
     selected,
+    previewed: selected ?? state.previewed,
     orbit: {camera, gesture: undefined}
 })
 
@@ -1812,6 +1824,7 @@ const step = (state: AppState, action: AppAction): AppState => {
                 serial,
                 cameras: [...state.cameras, added],
                 selected: added.id,
+                previewed: added.id,
                 sheet: undefined
             }
         }
@@ -1835,6 +1848,7 @@ const step = (state: AppState, action: AppAction): AppState => {
                 serial,
                 cameras: [...state.cameras, added],
                 selected: added.id,
+                previewed: added.id,
                 sheet: undefined
             }
         }
@@ -1846,6 +1860,9 @@ const step = (state: AppState, action: AppAction): AppState => {
                 ...state,
                 cameras,
                 selected: state.selected === action.id ? undefined : state.selected,
+                // The panel has to point at something, so a deleted preview falls to the next
+                // camera rather than to the empty message.
+                previewed: state.previewed === action.id ? cameras[0]?.id : state.previewed,
                 sheet: undefined
             }
         }

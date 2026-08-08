@@ -599,15 +599,25 @@ export const AxisGizmo = ({volume, camera}: {volume: Volume; camera: Camera}) =>
  * The wireframe cube in the bottom-right corner, drawn from the live basis for the same reason the
  * gizmo is: it is the volume's own bounding box, so it turns with the model instead of being a
  * decal of one particular angle.
+ *
+ * Which is why its size is derived rather than picked. A unit cube seen corner-on projects a corner
+ * `sqrt(3)/2` of an edge from the centre; face-on, half an edge. Sizing it for the face-on case and
+ * letting the corner-on case fall where it lands is what sliced the corners off at every angle an
+ * artist actually orbits to.
  */
+const CUBE_VIEWBOX = 64
+const CUBE_STROKE = 1
+/** The largest cube whose corner-on silhouette, stroke included, still lands inside the viewBox. */
+const CUBE = (CUBE_VIEWBOX - CUBE_STROKE) / Math.sqrt(3)
+
 export const ViewCube = ({volume, camera}: {volume: Volume; camera: Camera}) => {
     const {right, up} = basisFor(camera, volume, 1)
     const corners: Vec3[] = []
     for (let i = 0; i < 8; i += 1)
         corners.push([(i & 1) - 0.5, ((i >> 1) & 1) - 0.5, ((i >> 2) & 1) - 0.5])
     const flat = corners.map(corner => ({
-        x: dot(corner, right) * 44,
-        y: -dot(corner, up) * 44
+        x: dot(corner, right) * CUBE,
+        y: -dot(corner, up) * CUBE
     }))
     const edges: [number, number][] = [
         [0, 1],
@@ -627,7 +637,7 @@ export const ViewCube = ({volume, camera}: {volume: Volume; camera: Camera}) => 
     return (
         <svg
             className='view-cube'
-            viewBox='-32 -32 64 64'
+            viewBox={`${String(-CUBE_VIEWBOX / 2)} ${String(-CUBE_VIEWBOX / 2)} ${String(CUBE_VIEWBOX)} ${String(CUBE_VIEWBOX)}`}
             width='60'
             height='60'
             aria-hidden='true'
@@ -640,7 +650,7 @@ export const ViewCube = ({volume, camera}: {volume: Volume; camera: Camera}) => 
                     x2={flat[to]?.x ?? 0}
                     y2={flat[to]?.y ?? 0}
                     stroke='currentColor'
-                    strokeWidth='1'
+                    strokeWidth={CUBE_STROKE}
                 />
             ))}
         </svg>

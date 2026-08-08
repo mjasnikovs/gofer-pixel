@@ -98,6 +98,15 @@ test('picking a camera shows it; orbiting away says it is no longer that camera'
     })
     expect(dragged.selected).toBeUndefined()
     expect(dragged.orbit.camera.yaw).toBeCloseTo(Math.PI / 2 + 0.4, 10)
+
+    // The render panel keeps its subject. Losing it to a mouse-move emptied the panel every time
+    // the artist touched the view, which is what the panel is for looking at.
+    expect(dragged.previewed).toBe('dir-2')
+
+    // A deleted preview falls to the next camera, not to nothing.
+    const gone = reduce(dragged, {type: 'delete', id: 'dir-2'})
+    expect(gone.previewed).toBe(gone.cameras[0]?.id)
+    expect(gone.previewed).not.toBe('dir-2')
 })
 
 test('capturing the current view appends a camera and selects it', () => {
