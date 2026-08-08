@@ -8,6 +8,7 @@ import {DEFAULT_OUTPUT, loadDocument, saveDocument} from '../doc/save'
 import {latestSnapshot, memoryStore, snapshots, type Store} from '../doc/store'
 import {memoryFiles, type Files} from '../doc/files'
 import {initialObjects} from '../doc/objects'
+import type {Axis} from '../doc/brush'
 import {NO_SYMMETRY} from '../doc/symmetry'
 import {handle} from './handle'
 
@@ -620,4 +621,991 @@ test('a typed custom size is the box that gets built', async () => {
         48, 32, 8
     ])
     await unmount(mounted)
+})
+
+/*
+ * Reference art — `FEATURESET.md` §33.
+ *
+ * The picture arrives by drag-and-drop, which needs `createImageBitmap` and a real decoder, so the
+ * drop itself belongs to the browser suite. Everything after it — the row of controls, the lock,
+ * and the layer under the viewport — is state, and this is where it gets held down.
+ */
+const PICTURE = 'data:image/png;base64,iVBORw0KGgo='
+
+const withReference = async (plane: Axis = 1) => {
+    const mounted = await mount()
+    await act(async () => {
+        handle.dispatch?.({type: 'reference', plane, url: PICTURE})
+    })
+    return mounted
+}
+
+const references = () => handle.state?.references ?? []
+
+test('a dropped reference gets a row of controls and a picture under the viewport', async () => {
+    const mounted = await withReference()
+
+    expect(references()).toEqual([{plane: 1, url: PICTURE, opacity: 0.5, locked: false}])
+    expect(mounted.host.querySelector('.reference-layer image')?.getAttribute('href')).toBe(PICTURE)
+    // The row names the plane it belongs to, so two references are told apart.
+    expect(mounted.host.textContent).toContain('XZ ref')
+
+    await unmount(mounted)
+})
+
+test('there is no reference row until something has been dropped', async () => {
+    const mounted = await mount()
+
+    expect(mounted.host.textContent).not.toContain(' ref')
+    expect(mounted.host.querySelector('.reference-layer')).toBeNull()
+
+    await unmount(mounted)
+})
+
+test('fainter and brighter step the reference opacity and stop at the ends', async () => {
+    const mounted = await withReference()
+
+    await act(async () => {
+        control(mounted.host, 'Fainter reference').click()
+    })
+    expect(references()[0]?.opacity).toBeCloseTo(0.35, 6)
+
+    await act(async () => {
+        control(mounted.host, 'Brighter reference').click()
+    })
+    expect(references()[0]?.opacity).toBeCloseTo(0.5, 6)
+
+    // Clamped, not wrapped: four more steps up would run past 1 without this.
+    for (let step = 0; step < 5; step += 1)
+        await act(async () => {
+            control(mounted.host, 'Brighter reference').click()
+        })
+    expect(references()[0]?.opacity).toBe(1)
+
+    for (let step = 0; step < 9; step += 1)
+        await act(async () => {
+            control(mounted.host, 'Fainter reference').click()
+        })
+    expect(references()[0]?.opacity).toBe(0)
+
+    await unmount(mounted)
+})
+
+test('a locked reference cannot be faded or dropped by accident', async () => {
+    const mounted = await withReference()
+
+    await act(async () => {
+        control(mounted.host, 'Lock the reference').click()
+    })
+    expect(references()[0]?.locked).toBe(true)
+
+    await act(async () => {
+        control(mounted.host, 'Fainter reference').click()
+    })
+    await act(async () => {
+        control(mounted.host, 'Remove the reference').click()
+    })
+    expect(references()).toEqual([{plane: 1, url: PICTURE, opacity: 0.5, locked: true}])
+
+    // Unlocked again, the same two clicks land.
+    await act(async () => {
+        control(mounted.host, 'Lock the reference').click()
+    })
+    await act(async () => {
+        control(mounted.host, 'Remove the reference').click()
+    })
+    expect(references()).toEqual([])
+    expect(mounted.host.querySelector('.reference-layer')).toBeNull()
+
+    await unmount(mounted)
+})
+
+test('the lock button says which way it goes', async () => {
+    const mounted = await withReference()
+
+    const lock = control(mounted.host, 'Lock the reference')
+    expect(lock.getAttribute('aria-checked')).toBe('false')
+    expect(lock.getAttribute('title')).toContain('Lock it')
+
+    await act(async () => {
+        lock.click()
+    })
+    expect(control(mounted.host, 'Lock the reference').getAttribute('title')).toBe(
+        'Unlock the reference'
+    )
+
+    await unmount(mounted)
+})
+
+test('a second picture on the same plane replaces the first rather than stacking', async () => {
+    const mounted = await withReference()
+    const other = 'data:image/png;base64,iVBORw0KGgoAAAA='
+
+    await act(async () => {
+        handle.dispatch?.({type: 'reference', plane: 1, url: other})
+    })
+    expect(references()).toEqual([{plane: 1, url: other, opacity: 0.5, locked: false}])
+    expect(mounted.host.querySelectorAll('.reference-layer image')).toHaveLength(1)
+
+    // A different plane is a different picture and both stay.
+    await act(async () => {
+        handle.dispatch?.({type: 'reference', plane: 2, url: PICTURE})
+    })
+    expect(references()).toHaveLength(2)
+    expect(mounted.host.querySelectorAll('.reference-layer image')).toHaveLength(2)
+    expect(mounted.host.textContent).toContain('XY ref')
+
+    await unmount(mounted)
+})
+
+test('reference art survives a save and reopen', async () => {
+    const disk = new Map<string, string>()
+    const mounted = await mount(memoryStore(), memoryFiles(disk))
+
+    await act(async () => {
+        handle.dispatch?.({type: 'reference', plane: 0, url: PICTURE})
+    })
+    await act(async () => {
+        handle.dispatch?.({type: 'reference-lock', plane: 0, on: true})
+    })
+    await act(async () => {
+        control(mounted.host, 'Main menu').click()
+    })
+    await act(async () => {
+        menuItem('Save').click()
+    })
+
+    const back = loadDocument(disk.get('car.gpix') ?? '')
+    expect(back?.references).toEqual([{plane: 0, url: PICTURE, opacity: 0.5, locked: true}])
+
+    await unmount(mounted)
+})
+
+/*
+ * The Renders panel — `docs/editor.png`'s RENDERS row. Five maps off one ray, at four sizes, plus
+ * §19's normal check under the one map it belongs to.
+ */
+test('picking a map redraws the preview, and only Normal brings the light check with it', async () => {
+    const mounted = await mount()
+    const preview = () => mounted.host.querySelector('canvas.render-canvas')
+
+    expect(handle.state?.map).toBe(0)
+    expect(mounted.host.querySelector('.normal-check')).toBeNull()
+
+    await act(async () => {
+        control(mounted.host, 'Normal').click()
+    })
+    expect(handle.state?.map).toBe(1)
+    expect(mounted.host.querySelector('.normal-check')).not.toBeNull()
+    expect(mounted.host.textContent).toContain('% of the sprite faces the light')
+    expect(mounted.host.textContent).toContain('+X right, +Y up, +Z out of the screen')
+
+    await act(async () => {
+        control(mounted.host, 'AO').click()
+    })
+    expect(handle.state?.map).toBe(4)
+    expect(mounted.host.querySelector('.normal-check')).toBeNull()
+    expect(preview()).not.toBeNull()
+
+    await unmount(mounted)
+})
+
+test('the preview size is the sprite size, not the size of the box it sits in', async () => {
+    const mounted = await mount()
+    const preview = () => mounted.host.querySelector('canvas.render-canvas')
+
+    expect(preview()?.getAttribute('data-pixels')).toBe('64x64')
+
+    await act(async () => {
+        control(mounted.host, 'Preview at 16 pixels').click()
+    })
+    expect(handle.state?.preview).toBe(16)
+    expect(preview()?.getAttribute('data-pixels')).toBe('16x16')
+
+    // And the light check follows it, so both halves of the diagnostic show the same pixels.
+    await act(async () => {
+        control(mounted.host, 'Normal').click()
+    })
+    expect(mounted.host.querySelector('.normal-check canvas')?.getAttribute('data-pixels')).toBe(
+        '16x16'
+    )
+
+    await unmount(mounted)
+})
+
+/*
+ * The keyboard. Every one of these is also a button or a menu item somewhere, which is exactly why
+ * they are worth holding down: a shortcut that has quietly stopped dispatching looks identical to
+ * one that was never pressed.
+ */
+const press = async (key: string, modifiers: Partial<KeyboardEventInit> = {}): Promise<void> => {
+    await act(async () => {
+        document.dispatchEvent(new KeyboardEvent('keydown', {key, ...modifiers}))
+    })
+}
+
+test('the shortcuts that only exist in the hint bar’s caption still dispatch', async () => {
+    const mounted = await mount()
+
+    // A selection to work on, and the two brackets that grow and shrink it.
+    await act(async () => {
+        handle.dispatch?.({type: 'select-color', color: 1})
+    })
+    const picked = handle.state?.selection.size ?? 0
+    expect(picked).toBeGreaterThan(0)
+
+    await press(']')
+    expect(handle.state?.selection.size).toBeGreaterThan(picked)
+    await press('[')
+    expect(handle.state?.selection.size).toBeLessThanOrEqual(picked)
+
+    // Selected again, because shrinking twice can empty it and Delete with nothing chosen is a
+    // no-op that would make the next three assertions pass for the wrong reason.
+    await act(async () => {
+        handle.dispatch?.({type: 'select-color', color: 1})
+    })
+    const before = handle.state?.volume.data.filter(Boolean).length ?? 0
+    await press('Delete')
+    expect(handle.state?.selection.size).toBe(0)
+    const afterDelete = handle.state?.volume.data.filter(Boolean).length ?? 0
+    expect(afterDelete).toBeLessThan(before)
+
+    // Undo and redo, from the keys rather than from the header.
+    await press('z', {ctrlKey: true})
+    expect(handle.state?.volume.data.filter(Boolean).length).toBeGreaterThan(afterDelete)
+    await press('z', {ctrlKey: true, shiftKey: true})
+    expect(handle.state?.volume.data.filter(Boolean).length).toBe(afterDelete)
+
+    // S toggles the slice, and toggles it back.
+    await press('s')
+    expect(handle.state?.slice).toBeDefined()
+    await press('s')
+    expect(handle.state?.slice).toBeUndefined()
+
+    // Escape drops a selection rather than leaving the bar hanging over the viewport.
+    await act(async () => {
+        handle.dispatch?.({type: 'select-color', color: 1})
+    })
+    await press('Escape')
+    expect(handle.state?.selection.size).toBe(0)
+
+    // F frames the model. Alt is a modifier the app does not claim, so it passes through untouched.
+    const zoomed = handle.state?.orbit.camera.zoom
+    await press('f')
+    expect(handle.state?.orbit.camera.zoom).not.toBe(zoomed)
+    const framed = handle.state?.orbit.camera.zoom
+    await press('f', {altKey: true})
+    expect(handle.state?.orbit.camera.zoom).toBe(framed)
+
+    await unmount(mounted)
+})
+
+test('copy and paste go through the keyboard and put the voxels back', async () => {
+    const mounted = await mount()
+    const filled = () => handle.state?.volume.data.filter(Boolean).length ?? 0
+
+    await act(async () => {
+        handle.dispatch?.({type: 'select-color', color: 1})
+    })
+    await press('c', {ctrlKey: true})
+    await press('Delete')
+    const emptied = filled()
+
+    await press('v', {ctrlKey: true})
+    expect(filled()).toBeGreaterThan(emptied)
+
+    await unmount(mounted)
+})
+
+/*
+ * The selection bar — `FEATURESET.md` §4 and §39. Nine transforms, a duplicate and a delete, and
+ * they exist only while something is selected.
+ */
+test('the selection bar appears with a selection and its transforms reach the document', async () => {
+    const mounted = await mount()
+    const bar = () => mounted.host.querySelector('[role="toolbar"][aria-label="Selection"]')
+
+    expect(bar()).toBeNull()
+
+    /*
+     * A lopsided little model rather than the car: a transform is only visible if the thing being
+     * transformed is asymmetric, and a rotate that would push the selection off the grid is refused
+     * whole — so the test builds a shape with room to turn in.
+     */
+    const grid = createVolume(8, 8, 8, volume.palette)
+    for (let x = 0; x < 3; x += 1) grid.data[x + 8 * (3 + 8 * 3)] = 1
+    grid.data[1 + 8 * (4 + 8 * 3)] = 1
+    await act(async () => {
+        handle.dispatch?.({
+            type: 'new',
+            volume: grid,
+            objects: initialObjects(grid),
+            name: 'shape.gpix'
+        })
+    })
+    await act(async () => {
+        handle.dispatch?.({type: 'select-color', color: 1})
+    })
+    expect(bar()).not.toBeNull()
+    expect(bar()?.textContent).toContain('4 voxels')
+
+    // Each of the three families moves the voxels somewhere the last two did not.
+    const shapes = new Set<string>()
+    for (const label of ['Rotate 90° about Z', 'Flip X', 'Mirror across Y']) {
+        await act(async () => {
+            control(mounted.host, label).click()
+        })
+        shapes.add((handle.state?.volume.data ?? new Uint8Array()).join(''))
+    }
+    expect(shapes.size).toBe(3)
+
+    const before = handle.state?.volume.data.filter(Boolean).length ?? 0
+    await act(async () => {
+        control(mounted.host, 'Duplicate one voxel up').click()
+    })
+    expect(handle.state?.volume.data.filter(Boolean).length).toBeGreaterThan(before)
+
+    await act(async () => {
+        control(mounted.host, 'Delete selected voxels').click()
+    })
+    expect(handle.state?.selection.size).toBe(0)
+    expect(bar()).toBeNull()
+
+    // And with something chosen again, Deselect takes the bar back off the viewport.
+    await act(async () => {
+        handle.dispatch?.({type: 'select-color', color: 1})
+    })
+    await act(async () => {
+        control(mounted.host, 'Deselect').click()
+    })
+    expect(bar()).toBeNull()
+
+    await unmount(mounted)
+})
+
+/*
+ * The views strip is the sheet's own order, so everything that rewires it invalidates the bake.
+ * `FEATURESET.md` §16's "drag to reorder" is the one that has no keyboard equivalent to fall back
+ * on, which is why it is driven here as three drag events rather than trusted to the reducer.
+ */
+test('the views strip rebuilds, aligns, duplicates, deletes and reorders the camera list', async () => {
+    const mounted = await mount()
+    const names = () => (handle.state?.cameras ?? []).map(entry => entry.name)
+
+    expect(names()).toHaveLength(8)
+
+    await act(async () => {
+        control(mounted.host, 'Create 4 directions').click()
+    })
+    expect(names()).toHaveLength(4)
+
+    await act(async () => {
+        within(mounted.host, '.views-strip', 'Right').click()
+    })
+    await act(async () => {
+        control(mounted.host, 'Duplicate camera').click()
+    })
+    expect(names()).toHaveLength(5)
+
+    await act(async () => {
+        control(mounted.host, 'Delete camera').click()
+    })
+    expect(names()).toHaveLength(4)
+
+    // Align turns the live view to the nearest stop, which is what makes a captured camera square.
+    await act(async () => {
+        handle.dispatch?.({
+            type: 'orbit',
+            event: {type: 'pointerdown', x: 100, y: 100, secondary: false},
+            height: 512
+        })
+    })
+    await act(async () => {
+        handle.dispatch?.({
+            type: 'orbit',
+            event: {type: 'pointermove', x: 137, y: 118},
+            height: 512
+        })
+    })
+    await act(async () => {
+        handle.dispatch?.({type: 'orbit', event: {type: 'pointerup'}, height: 512})
+    })
+    const crooked = handle.state?.orbit.camera.yaw ?? 0
+    await act(async () => {
+        control(mounted.host, 'Align the view to the nearest stop').click()
+    })
+    expect(handle.state?.orbit.camera.yaw).not.toBe(crooked)
+
+    const order = names()
+    const tiles = [...mounted.host.querySelectorAll('.views-strip [role="radio"]')]
+    const [first, , third] = tiles
+    if (!first || !third) throw new Error('the strip should hold four cameras')
+    await act(async () => {
+        first.dispatchEvent(new Event('pointerdown', {bubbles: true}))
+    })
+    expect(handle.state?.dragging).toBeDefined()
+    await act(async () => {
+        third.dispatchEvent(new Event('pointerover', {bubbles: true}))
+    })
+    await act(async () => {
+        third.dispatchEvent(new Event('pointerup', {bubbles: true}))
+    })
+    expect(handle.state?.dragging).toBeUndefined()
+    expect(names()).not.toEqual(order)
+    expect(names().toSorted()).toEqual(order.toSorted())
+
+    await unmount(mounted)
+})
+
+/*
+ * The export panel. Every knob here changes bytes in a file, so each one is checked against the
+ * sheet the reducer produced rather than against the control's own state.
+ */
+test('padding, bounds and sprite size are the sheet’s own numbers', async () => {
+    const mounted = await mount()
+
+    await act(async () => {
+        control(mounted.host, '2 pixels of padding').click()
+    })
+    expect(handle.state?.padding).toBe(2)
+
+    // Astryx's Switch is a checkbox with a `<label for>` beside it, so it is reached by role.
+    const box = mounted.host.querySelector<HTMLElement>('.export-body input[role="switch"]')
+    if (!box) throw new Error('no collision-box switch')
+    const wasBoxed = handle.state?.bounds
+    await act(async () => {
+        box.click()
+    })
+    expect(handle.state?.bounds).toBe(!wasBoxed)
+
+    await act(async () => {
+        control(mounted.host, '32 px').click()
+    })
+    await act(async () => {
+        control(mounted.host, 'Export sprite sheet').click()
+    })
+
+    // Four across, eight cameras: two rows of 32 px cells with 2 px around and between.
+    expect(handle.state?.sheet?.width).toBe(4 * 34 + 2)
+    expect(handle.state?.sheet?.height).toBe(2 * 34 + 2)
+    expect(handle.state?.sheet?.padding).toBe(2)
+    expect(handle.state?.bounds).toBe(!wasBoxed)
+
+    await unmount(mounted)
+})
+
+test('the two extra downloads do nothing until there is a sheet to cut them from', async () => {
+    const written: string[] = []
+    const realCreate = URL.createObjectURL
+    const realClick = HTMLAnchorElement.prototype.click
+    URL.createObjectURL = (): string => 'blob:test'
+    HTMLAnchorElement.prototype.click = function click(this: HTMLAnchorElement): void {
+        written.push(this.download)
+    }
+
+    try {
+        const mounted = await mount()
+        // The menu closes on every pick, so it is opened once per item.
+        const pick = async (label: string): Promise<void> => {
+            await act(async () => {
+                control(mounted.host, 'More export options').click()
+            })
+            await act(async () => {
+                menuItem(label).click()
+            })
+        }
+
+        await pick('Download every sprite separately')
+        await pick('Download metadata JSON')
+        expect(written).toEqual([])
+
+        await act(async () => {
+            control(mounted.host, 'Export sprite sheet').click()
+        })
+        written.length = 0
+
+        await pick('Download every sprite separately')
+        await pick('Download metadata JSON')
+        // One PNG per camera, plus the JSON that says where each of them landed.
+        expect(written.filter(name => name.endsWith('.png'))).toHaveLength(8)
+        expect(written).toContain('sprites.json')
+
+        await unmount(mounted)
+    } finally {
+        URL.createObjectURL = realCreate
+        HTMLAnchorElement.prototype.click = realClick
+    }
+})
+
+test('saving a preset takes the name the artist typed, and a cancelled prompt saves nothing', async () => {
+    const realPrompt = globalThis.prompt
+    const answers: (string | null)[] = [null, 'Mine']
+    globalThis.prompt = (): string | null => answers.shift() ?? null
+
+    try {
+        const mounted = await mount()
+        const presets = () => (handle.state?.presets ?? []).length
+
+        const before = presets()
+        await act(async () => {
+            control(mounted.host, 'Save these maps as a preset').click()
+        })
+        expect(presets()).toBe(before)
+
+        await act(async () => {
+            control(mounted.host, 'Save these maps as a preset').click()
+        })
+        expect(presets()).toBe(before + 1)
+        expect(handle.state?.preset).toBe('Mine')
+
+        await unmount(mounted)
+    } finally {
+        globalThis.prompt = realPrompt
+    }
+})
+
+/*
+ * The objects panel — `FEATURESET.md` §18. Show, solo, lock, duplicate, delete and the search box,
+ * driven from the row rather than from the reducer, because the row is where the wiring can rot.
+ */
+test('the objects panel’s switches reach the document', async () => {
+    const mounted = await mount()
+    const objects = () => handle.state?.objects.list ?? []
+
+    await act(async () => {
+        control(mounted.host, 'Add an object').click()
+    })
+    expect(objects()).toHaveLength(2)
+    const added = objects()[1]?.name ?? ''
+
+    await act(async () => {
+        control(mounted.host, `Show ${added}`).click()
+    })
+    expect(objects()[1]?.hidden).toBe(true)
+
+    await act(async () => {
+        control(mounted.host, `Lock ${added}`).click()
+    })
+    expect(objects()[1]?.locked).toBe(true)
+
+    // Solo is one field on the list, not `hidden` on every other row: turning it off has to put
+    // back exactly what was hidden before, and a per-row flag could not.
+    await act(async () => {
+        control(mounted.host, `Show only ${added}`).click()
+    })
+    expect(handle.state?.objects.solo).toBe(objects()[1]?.id)
+    await act(async () => {
+        control(mounted.host, `Show only ${added}`).click()
+    })
+    expect(handle.state?.objects.solo).toBeUndefined()
+
+    await act(async () => {
+        control(mounted.host, `Duplicate ${added}`).click()
+    })
+    expect(objects()).toHaveLength(3)
+
+    await unmount(mounted)
+})
+
+test('the search box hides the rows that do not match', async () => {
+    const mounted = await mount()
+    const rows = () => mounted.host.querySelectorAll('.object-list [role="radio"]').length
+
+    // The box only appears past `SEARCH_FROM`, so there is something to search.
+    for (let step = 0; step < 9; step += 1)
+        await act(async () => {
+            handle.dispatch?.({type: 'object', op: {kind: 'add'}})
+        })
+    const all = rows()
+    expect(all).toBeGreaterThan(8)
+
+    const field = mounted.host.querySelector<HTMLInputElement>('.object-body input[type="text"]')
+    if (!field) throw new Error('no search box')
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+    await act(async () => {
+        setter?.call(field, 'nothing-matches-this')
+        field.dispatchEvent(new Event('input', {bubbles: true}))
+    })
+    expect(handle.state?.search).toBe('nothing-matches-this')
+    expect(rows()).toBeLessThan(all)
+
+    await unmount(mounted)
+})
+
+/*
+ * A `.vox` is MagicaVoxel's format and arrives as an untitled document; anything that will not
+ * parse is refused without touching what is open. A half-loaded document is the one outcome
+ * `doc/save.ts` exists to prevent, so the refusal is the assertion that matters here.
+ *
+ * `memoryFiles` carries text, and a `.vox` is a RIFF container full of arbitrary bytes — so these
+ * two bring their own port rather than round-tripping the model through UTF-8.
+ */
+const picking = (name: string, bytes: Uint8Array): Files => ({
+    overwrites: true,
+    forget: () => undefined,
+    open: async () => Promise.resolve({name, bytes, text: new TextDecoder().decode(bytes)}),
+    save: async () => Promise.resolve(name)
+})
+
+test('a .vox picked from the disk opens as an untitled document', async () => {
+    const bytes = new Uint8Array(
+        await Bun.file(new URL('../assets/car.vox', import.meta.url)).arrayBuffer()
+    )
+    const mounted = await mount(memoryStore(), picking('other.vox', bytes))
+
+    await act(async () => {
+        control(mounted.host, 'Main menu').click()
+    })
+    await act(async () => {
+        menuItem('Open…').click()
+    })
+
+    expect(handle.state?.doc.name).toBe('other.vox')
+    expect(handle.state?.volume.data.filter(Boolean).length).toBeGreaterThan(0)
+
+    await unmount(mounted)
+})
+
+test('a file that will not parse leaves the open document alone', async () => {
+    const mounted = await mount(memoryStore(), picking('notes.vox', new Uint8Array([1, 2, 3, 4])))
+    const before = handle.state?.volume.data.filter(Boolean).length
+
+    await act(async () => {
+        control(mounted.host, 'Main menu').click()
+    })
+    await act(async () => {
+        menuItem('Open…').click()
+    })
+
+    expect(handle.state?.doc.name).toBe('car.vox')
+    expect(handle.state?.volume.data.filter(Boolean).length).toBe(before)
+
+    await unmount(mounted)
+})
+
+/*
+ * The brush column. Every one of these is a one-line closure between a panel and the reducer, which
+ * is exactly the kind of wiring that rots without anyone noticing: the control still moves, the
+ * document stops hearing about it.
+ */
+test('the brush and palette controls reach the document', async () => {
+    const mounted = await mount()
+    const paletteSwitch = (label: string): HTMLElement => {
+        const found = [...mounted.host.querySelectorAll<HTMLElement>('.brush-column label')].find(
+            node => node.textContent.trim() === label
+        )
+        const input =
+            found?.previousElementSibling?.querySelector<HTMLElement>('input')
+            ?? mounted.host.querySelector<HTMLElement>(
+                `input[id="${found?.getAttribute('for') ?? ''}"]`
+            )
+        if (!input) throw new Error(`no switch labelled "${label}"`)
+        return input
+    }
+
+    await act(async () => {
+        control(mounted.host, 'Larger brush').click()
+    })
+    expect(handle.state?.brush.size).toBe(3)
+    await act(async () => {
+        control(mounted.host, 'Smaller brush').click()
+    })
+    expect(handle.state?.brush.size).toBe(2)
+
+    // Emissive is a property of the loaded colour, not of the brush — it follows the palette entry.
+    await act(async () => {
+        paletteSwitch('Emissive').click()
+    })
+    expect(handle.state?.volume.emissive[handle.state.color]).toBeGreaterThan(0)
+
+    await act(async () => {
+        paletteSwitch('Lock').click()
+    })
+    expect(handle.state?.paletteLocked).toBe(true)
+
+    await act(async () => {
+        control(mounted.host, 'Add a colour to the palette').click()
+    })
+    expect(handle.state?.color).toBeGreaterThan(0)
+
+    await act(async () => {
+        control(mounted.host, 'Pick a colour from the model').click()
+    })
+    expect(handle.state?.tool).toBe('pick')
+
+    await unmount(mounted)
+})
+
+test('recoloring a palette entry repaints every voxel that was using it', async () => {
+    const mounted = await mount()
+    const loaded = handle.state?.color ?? 1
+
+    const field = mounted.host.querySelector<HTMLInputElement>(
+        `input[aria-label="Colour of palette entry ${String(loaded)}"]`
+    )
+    if (!field) throw new Error('no colour field')
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+    await act(async () => {
+        setter?.call(field, '#123456')
+        field.dispatchEvent(new Event('input', {bubbles: true}))
+    })
+
+    expect([...(handle.state?.volume.palette ?? []).slice(loaded * 4, loaded * 4 + 3)]).toEqual([
+        0x12, 0x34, 0x56
+    ])
+
+    await unmount(mounted)
+})
+
+/*
+ * The scene toggles under the viewport — grid, edges, snap, invert — plus symmetry and the drawing
+ * plane. `FEATURESET.md` §5 and §12.
+ */
+test('the scene toggles, symmetry and the drawing plane all reach the document', async () => {
+    const mounted = await mount()
+    const toggle = (label: string): HTMLElement => {
+        const row = [...mounted.host.querySelectorAll<HTMLElement>('.snap-toggle')].find(node =>
+            node.textContent.includes(label)
+        )
+        const input = row?.querySelector<HTMLElement>('input[role="switch"]')
+        if (!input) throw new Error(`no toggle labelled "${label}"`)
+        return input
+    }
+
+    for (const [label, field] of [
+        ['Grid', 'grid'],
+        ['Edges', 'edges'],
+        ['Snap', 'snap'],
+        ['Invert', 'invert']
+    ] as const) {
+        const was = handle.state?.[field]
+        await act(async () => {
+            toggle(label).click()
+        })
+        expect(handle.state?.[field]).toBe(!was)
+    }
+
+    await act(async () => {
+        control(mounted.host, 'Mirror drawing across X').click()
+    })
+    expect(handle.state?.symmetry.x).toBe(true)
+
+    // The car is 16 × 10, so radial is refused and says so rather than going quietly dead.
+    const radial = control(mounted.host, 'Radial symmetry needs a grid that is square in X and Y')
+    await act(async () => {
+        radial.click()
+    })
+    expect(handle.state?.symmetry.radial).toBe(false)
+
+    await act(async () => {
+        control(mounted.host, 'Lock drawing to the XY plane').click()
+    })
+    expect(handle.state?.plane).toBe(2)
+    await act(async () => {
+        control(mounted.host, 'Draw on the face under the cursor').click()
+    })
+    expect(handle.state?.plane).toBeUndefined()
+
+    await unmount(mounted)
+})
+
+/*
+ * A picture dropped on the viewport — `FEATURESET.md` §33 and §34, told apart by Shift.
+ *
+ * The browser's own decoder is the one part of this that cannot exist here: happy-dom's
+ * `createImageBitmap` will not take a `Blob`, and its canvas has no 2D context. Both are stubbed,
+ * and everything the app actually decides — which of the two things a drop becomes, what the
+ * reference's URL is, how deep the extrusion goes — is real.
+ */
+const withDecoder = async (
+    run: () => Promise<void>,
+    pixels = new Uint8ClampedArray([255, 0, 0, 255, 0, 0, 0, 0, 0, 255, 0, 255, 0, 0, 0, 0])
+): Promise<void> => {
+    const realBitmap = globalThis.createImageBitmap
+    const realContext = HTMLCanvasElement.prototype.getContext
+    // A stand-in for the browser's decoder, and for the three context calls `dropImage` makes
+    // alongside the one `PixelCanvas` makes. Neither is an `ImageBitmap` or a real context.
+    globalThis.createImageBitmap = async () =>
+        Promise.resolve({
+            width: 2,
+            height: 2,
+            close: () => undefined
+        })
+    HTMLCanvasElement.prototype.getContext = (() => ({
+        drawImage: () => undefined,
+        putImageData: () => undefined,
+        getImageData: () => ({data: pixels, width: 2, height: 2, colorSpace: 'srgb'})
+    })) as unknown as typeof HTMLCanvasElement.prototype.getContext
+    try {
+        await run()
+    } finally {
+        globalThis.createImageBitmap = realBitmap
+        HTMLCanvasElement.prototype.getContext = realContext
+    }
+}
+
+const dropOn = async (host: HTMLElement, file: File | undefined, shift: boolean): Promise<void> => {
+    const stage = host.querySelector('.stage')
+    if (!stage) throw new Error('no stage')
+    const event = new Event('drop', {bubbles: true})
+    Object.defineProperty(event, 'dataTransfer', {value: {files: file ? [file] : []}})
+    Object.defineProperty(event, 'shiftKey', {value: shift})
+    await act(async () => {
+        stage.dispatchEvent(event)
+    })
+    await settled()
+}
+
+/**
+ * Wait for the app's own decode to land, without waiting for a *duration*.
+ *
+ * `dropImage` reads the file, decodes it and — for a reference — hands the blob to a `FileReader`,
+ * which resolves on the task queue rather than the microtask queue. So this drains the microtasks
+ * that get the handler as far as its reader, and then waits on a reader of its own: queued after
+ * the app's, so it cannot land before it. No timer, and nothing to tune.
+ */
+const settled = async (): Promise<void> => {
+    await act(async () => {
+        for (let flush = 0; flush < 8; flush += 1) await Promise.resolve()
+    })
+    await act(async () => {
+        await new Promise<void>(resolve => {
+            const reader = new FileReader()
+            reader.addEventListener('load', () => {
+                resolve()
+            })
+            reader.readAsText(new Blob(['']))
+        })
+    })
+}
+
+const asPng = (): File =>
+    new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'front.png', {type: 'image/png'})
+
+test('a picture dropped on the viewport becomes reference art', async () => {
+    await withDecoder(async () => {
+        const mounted = await mount()
+
+        await dropOn(mounted.host, asPng(), false)
+
+        // Onto Front, because nothing has locked a drawing plane.
+        expect(handle.state?.references).toHaveLength(1)
+        expect(handle.state?.references[0]?.plane).toBe(1)
+        expect(handle.state?.references[0]?.url).toStartWith('data:image/png;base64,')
+
+        // With a plane locked, it lands on that one instead — the artist who locked it is working
+        // on it.
+        await act(async () => {
+            handle.dispatch?.({type: 'plane', axis: 0})
+        })
+        await dropOn(mounted.host, asPng(), false)
+        expect(handle.state?.references.map(entry => entry.plane).toSorted()).toEqual([0, 1])
+
+        await unmount(mounted)
+    })
+})
+
+test('the same picture dropped with Shift becomes voxels instead', async () => {
+    await withDecoder(async () => {
+        const mounted = await mount()
+
+        await dropOn(mounted.host, asPng(), true)
+
+        expect(handle.state?.references).toEqual([])
+        // Two opaque pixels in a 2 × 2, extruded four deep, in a grid the import sized itself.
+        expect(handle.state?.doc.name).toBe('front.png')
+        expect([handle.state?.volume.sx, handle.state?.volume.sz]).toEqual([2, 2])
+        expect(handle.state?.volume.sy).toBe(4)
+        expect(handle.state?.volume.data.filter(Boolean).length).toBe(8)
+
+        await unmount(mounted)
+    })
+})
+
+test('a drop that is not a picture is ignored rather than half-applied', async () => {
+    await withDecoder(async () => {
+        const mounted = await mount()
+        const before = handle.state?.volume.data.filter(Boolean).length
+
+        await dropOn(mounted.host, undefined, false)
+        await dropOn(mounted.host, new File(['hello'], 'notes.txt', {type: 'text/plain'}), false)
+
+        expect(handle.state?.references).toEqual([])
+        expect(handle.state?.volume.data.filter(Boolean).length).toBe(before)
+
+        await unmount(mounted)
+    })
+})
+
+test('a picture the browser cannot decode is not a picture, whatever it was named', async () => {
+    const realBitmap = globalThis.createImageBitmap
+    globalThis.createImageBitmap = async () => Promise.reject(new Error('not an image'))
+    try {
+        const mounted = await mount()
+
+        await dropOn(mounted.host, asPng(), false)
+
+        expect(handle.state?.references).toEqual([])
+        await unmount(mounted)
+    } finally {
+        globalThis.createImageBitmap = realBitmap
+    }
+})
+
+/*
+ * `FEATURESET.md` §7's import half. A file input is the one thing that needs an element rather than
+ * an action, so the picker is stubbed at the click and the parsing is real.
+ */
+test('a .hex file loaded from the picker becomes the palette', async () => {
+    const realClick = HTMLInputElement.prototype.click
+    HTMLInputElement.prototype.click = function click(this: HTMLInputElement): void {
+        if (this.type !== 'file') {
+            realClick.call(this)
+            return
+        }
+        Object.defineProperty(this, 'files', {
+            configurable: true,
+            value: [new File(['112233\n445566\n'], 'mine.hex', {type: 'text/plain'})]
+        })
+        this.dispatchEvent(new Event('change'))
+    }
+
+    try {
+        const mounted = await mount()
+
+        await act(async () => {
+            control(mounted.host, 'Load a palette').click()
+        })
+        await settled()
+
+        expect([...(handle.state?.volume.palette ?? []).slice(4, 10)]).toEqual([
+            0x11, 0x22, 0x33, 255, 0x44, 0x55
+        ])
+
+        await unmount(mounted)
+    } finally {
+        HTMLInputElement.prototype.click = realClick
+    }
+})
+
+test('the palette writes back out as a .hex file', async () => {
+    const written: string[] = []
+    const realCreate = URL.createObjectURL
+    const realClick = HTMLAnchorElement.prototype.click
+    URL.createObjectURL = (): string => 'blob:test'
+    HTMLAnchorElement.prototype.click = function click(this: HTMLAnchorElement): void {
+        written.push(this.download)
+    }
+
+    try {
+        const mounted = await mount()
+        await act(async () => {
+            control(mounted.host, 'Save the palette').click()
+        })
+        expect(written).toEqual(['palette.hex'])
+        await unmount(mounted)
+    } finally {
+        URL.createObjectURL = realCreate
+        HTMLAnchorElement.prototype.click = realClick
+    }
 })
