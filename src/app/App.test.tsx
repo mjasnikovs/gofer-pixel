@@ -479,9 +479,10 @@ test('a generated candidate becomes the open document, provenance and all', asyn
         mirror_x: false,
         ops: [
             {
+                // Ops are y-up: 6 wide, 12 tall, 6 deep. See `gen/ops.ts`.
                 op: 'box' as const,
-                from: [1, 1, 0] as [number, number, number],
-                to: [6, 6, 11] as [number, number, number],
+                from: [1, 0, 1] as [number, number, number],
+                to: [6, 11, 6] as [number, number, number],
                 color: '#808080'
             }
         ]
@@ -512,7 +513,8 @@ test('a generated candidate becomes the open document, provenance and all', asyn
         control(global.document.body, 'Use this one').click()
     })
 
-    expect([handle.state?.volume.sx, handle.state?.volume.sz]).toEqual([8, 12])
+    // The grid is fitted to the ops, so the tower is 12 tall on the volume's z.
+    expect([handle.state?.volume.sx, handle.state?.volume.sz]).toEqual([6, 12])
     expect(handle.state?.doc).toMatchObject({name: 'tower', dirty: true, savedAt: undefined})
     expect(handle.state?.origin?.prompt).toBe('a stone tower')
     expect(handle.state?.origin?.model).toBe('qwen')

@@ -1855,7 +1855,8 @@ test('a generated candidate becomes an ordinary unsaved document, with what made
         name: 'tower',
         size: [8, 8, 16],
         mirror_x: false,
-        ops: [{op: 'box', from: [2, 2, 0], to: [5, 5, 15], color: '#808080'}]
+        // y-up ops, fitted to a grid — see `gen/ops.ts`. 8 wide, 16 tall, 8 deep.
+        ops: [{op: 'box', from: [0, 0, 0], to: [7, 15, 7], color: '#808080'}]
     })
 
     const next = reduce(state, {type: 'generate', volume: made, name: 'tower', record})

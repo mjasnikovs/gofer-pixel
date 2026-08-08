@@ -44,12 +44,18 @@ test('an empty grid scores zero everywhere rather than dividing by nothing', () 
     })
 })
 
-test('slice usage is layers that hold something, over the height of the grid', () => {
+test('slice usage is layers that hold something, over the height of the model', () => {
+    // Half a grid, but a solid half: nothing is missing from the shape, so this is a 1.
     const half = box(createVolume(4, 4, 8), [0, 0, 0], [3, 3, 3])
-    expect(sliceUsage(half)).toBe(0.5)
+    expect(sliceUsage(half)).toBe(1)
 
     const pancake = box(createVolume(4, 4, 8), [0, 0, 2], [3, 3, 2])
-    expect(sliceUsage(pancake)).toBe(1 / 8)
+    expect(sliceUsage(pancake)).toBe(1)
+
+    // A floating hat: 2 filled layers spanning 8, which is what the term is for.
+    const floating = box(createVolume(4, 4, 8), [0, 0, 0], [3, 3, 0])
+    box(floating, [0, 0, 7], [3, 3, 7])
+    expect(sliceUsage(floating)).toBe(2 / 8)
 })
 
 test('a solid block fills its box; a hollow one does not', () => {

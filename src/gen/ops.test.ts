@@ -11,14 +11,63 @@ const spec = (ops: VoxSpec['ops'], over: Partial<VoxSpec> = {}): VoxSpec => ({
 })
 
 test('a box fills its inclusive bounds and nothing else', () => {
+    // Ops are y-up; the grid is z-up and fitted to them. `[1,1,1]…[2,3,4]` is 2 wide, 3 tall and
+    // 4 deep, so the grid is 2 x 4 x 3 and the low corner of the box is its origin.
     const volume = rasterise(spec([{op: 'box', from: [1, 1, 1], to: [2, 3, 4], color: '#ff0000'}]))
 
+    expect([volume.sx, volume.sy, volume.sz]).toEqual([2, 4, 3])
     expect(countFilled(volume)).toBe(2 * 3 * 4)
-    expect(voxelAt(volume, 1, 1, 1)).toBe(1)
-    expect(voxelAt(volume, 2, 3, 4)).toBe(1)
-    expect(voxelAt(volume, 0, 1, 1)).toBe(0)
-    expect(voxelAt(volume, 3, 1, 1)).toBe(0)
+    expect(voxelAt(volume, 0, 0, 0)).toBe(1)
+    expect(voxelAt(volume, 1, 3, 2)).toBe(1)
     expect([...volume.palette.subarray(4, 8)]).toEqual([255, 0, 0, 255])
+})
+
+test('y is up in an op, and z is up in the volume', () => {
+    // The one thing the model would not learn from the prompt. Measured 2026-08-08: asked for z-up
+    // it built four legs across the x-z plane with the head at high y anyway, so the language is
+    // y-up and the swap lives in the rasteriser.
+    const volume = rasterise(
+        spec([
+            {op: 'box', from: [0, 0, 0], to: [0, 0, 0], color: '#ff0000'},
+            {op: 'box', from: [0, 3, 0], to: [0, 3, 0], color: '#00ff00'}
+        ])
+    )
+
+    // Second op is *above* the first: higher on the volume's z, not deeper on its y.
+    expect(voxelAt(volume, 0, 0, 0)).toBe(1)
+    expect(voxelAt(volume, 0, 0, 3)).toBe(2)
+})
+
+test('the grid fits the ops, not the size the model declared', () => {
+    // Every reply measured against the live model on 2026-08-08 wrote outside its own declared
+    // size, and what got dropped was always the detail — the ears, the tail.
+    const volume = rasterise(
+        spec([{op: 'box', from: [0, 0, 0], to: [11, 13, 9], color: '#ffffff'}], {size: [8, 8, 8]})
+    )
+
+    expect([volume.sx, volume.sy, volume.sz]).toEqual([12, 10, 14])
+    expect(countFilled(volume)).toBe(12 * 14 * 10)
+})
+
+test('an erase cannot grow the grid', () => {
+    // Otherwise "start from empty" as a carve of the whole world allocates the whole world.
+    const volume = rasterise(
+        spec([
+            {op: 'erase', from: [0, 0, 0], to: [31, 31, 31]},
+            {op: 'box', from: [0, 0, 0], to: [1, 1, 1], color: '#ffffff'}
+        ])
+    )
+
+    expect([volume.sx, volume.sy, volume.sz]).toEqual([2, 2, 2])
+})
+
+test('a grid larger than the ceiling is clamped, and the overflow is dropped', () => {
+    const volume = rasterise(
+        spec([{op: 'box', from: [0, 0, 0], to: [40, 40, 40], color: '#ffffff'}])
+    )
+
+    expect([volume.sx, volume.sy, volume.sz]).toEqual([MAX_SIZE, MAX_SIZE, MAX_SIZE])
+    expect(countFilled(volume)).toBe(MAX_SIZE ** 3)
 })
 
 test('reversed bounds are the same box', () => {
@@ -43,33 +92,27 @@ test('later ops paint over earlier ones, and erase carves', () => {
 })
 
 test('a ball is an axis-aligned ellipsoid, and a zero radius is still one voxel thick', () => {
+    // Spans x 1…7, y 3…5, z 3…5, so the grid is 7 x 3 x 3 with origin [1, 3, 3].
     const ball = rasterise(spec([{op: 'ball', at: [4, 4, 4], r: [3, 1, 1], color: '#00ff00'}]))
 
-    expect(voxelAt(ball, 1, 4, 4)).toBe(1)
-    expect(voxelAt(ball, 4, 5, 4)).toBe(1)
-    expect(voxelAt(ball, 4, 6, 4)).toBe(0)
+    expect(voxelAt(ball, 0, 1, 1)).toBe(1)
+    expect(voxelAt(ball, 3, 1, 2)).toBe(1)
+    expect(voxelAt(ball, 3, 1, 3)).toBe(0)
 
     const flat = rasterise(spec([{op: 'ball', at: [4, 4, 4], r: [2, 0, 0], color: '#00ff00'}]))
     expect(countFilled(flat)).toBe(5)
 })
 
-test('a write off the grid is dropped, not clamped onto the wall', () => {
-    const volume = rasterise(
-        spec([{op: 'box', from: [-4, -4, -4], to: [1, 1, 1], color: '#ffffff'}])
-    )
-
-    // A clamp would have smeared 6 x 6 x 6 of a mistyped coordinate across three faces.
-    expect(countFilled(volume)).toBe(2 * 2 * 2)
-})
-
-test('mirror_x reflects the finished model rather than itself', () => {
+test('mirror_x doubles the model about its own far edge', () => {
+    // About the model's edge, not the declared centre: measured 2026-08-08, a half whose declared
+    // plane was wrong got joined to itself in the wrong place, which is a seam or a hollow spine.
     const volume = rasterise(
         spec([{op: 'box', from: [0, 0, 0], to: [1, 0, 0], color: '#ffffff'}], {mirror_x: true})
     )
 
+    expect(volume.sx).toBe(4)
     expect(voxelAt(volume, 0, 0, 0)).toBe(1)
-    expect(voxelAt(volume, 7, 0, 0)).toBe(1)
-    expect(voxelAt(volume, 6, 0, 0)).toBe(1)
+    expect(voxelAt(volume, 3, 0, 0)).toBe(1)
     expect(countFilled(volume)).toBe(4)
 })
 

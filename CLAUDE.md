@@ -94,6 +94,37 @@ Four things are settled and must not be re-litigated. They are measured, and the
 4. **Organic and architectural subjects work; directional machines do not.** A tank comes back
    front-to-back reversed and no prompt fixes it.
 
+Three more, measured 2026-08-08 against the live server after "a cat" came back twelve times as a
+brick. All three are in `src/gen/ops.ts` and `src/gen/llama.ts`, with the numbers:
+
+5. **The op language is y-up, and the rasteriser swaps to the z-up `Volume`.** The prompt said "z =
+   up" and the model ignored it every time — legs at the four corners of the x–z plane, head at high
+   `y`. It writes the convention its training data is written in, whatever it is asked for.
+6. **The grid is fitted to the ops, never to the `size` the reply declared.** Every reply measured
+   painted outside its own declared size, and the dropped writes were always the detail: the ears,
+   the tail. `size` still travels with the record; it just does not decide what survives.
+7. **One worked example, as a prior turn, is worth more than every rule in the system prompt.** A
+   schema-constrained reply starts emitting JSON on the first token, so it has nowhere to think, and
+   rules in prose do not survive that. One example took "a cat" from 0 recognisable of 12 to 4 of 4.
+8. **There are four examples because one is not neutral.** With only the dog in the prompt, "a
+   chicken" came back with four legs and "a fish" came back a slab; cats were fine only because a
+   cat is a quadruped. `EXAMPLES` holds one per body plan and one cheap unconstrained call picks
+   which — `PLAN_SYSTEM`, one word, about two seconds, once per batch rather than per candidate.
+   Anything unrecognised falls back to `building`, the example with no limbs and no posture. Plant
+   and building are the strongest; bird is the weakest and still sometimes leaves a mirror seam.
+
+Four things were tried against the same problem and **all four failed**. Do not spend a session
+re-running them:
+
+- **Feeding the renders back and asking for a revision.** The critique is accurate and specific
+  ("the body is taller than it is long", "the legs do not reach the bottom"). The revision is the
+  same JSON: 434 → 434 → 434 voxels over three rounds. The model re-emits; it does not edit.
+- **Feeding the voxel grid back as ASCII silhouettes** instead of pictures. Identical outcome.
+- **Carrying the critique into a fresh conversation** as notes, with no prior JSON in context. It
+  looked like a fix at n=3 and was a wash at n=6, for three times the wall clock.
+- **The model as a yes/no judge over candidates**, which finding 2 says is its one reliable vision
+  skill. It gave 4/4 and 1/4 to pictures that could not be told apart. It does not rank.
+
 What is different from the legacy build: **nothing rasterises a spec twice.** Legacy shipped the op
 list to Python and re-rasterised and re-rendered it there with the sprite stacker, so two
 rasterisers and two renderers had to agree byte for byte. `py/clipserve.py` now takes the PNGs the

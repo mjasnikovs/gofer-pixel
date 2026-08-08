@@ -15,9 +15,10 @@ const carved = (name: string, colour: string): VoxSpec => ({
     name,
     size: [8, 8, 12],
     mirror_x: false,
+    // Ops are y-up and the grid is fitted to them — see `gen/ops.ts`. 6 wide, 12 tall, 6 deep.
     ops: [
-        {op: 'box', from: [1, 1, 0], to: [6, 6, 11], color: colour},
-        {op: 'erase', from: [2, 2, 4], to: [5, 5, 11]}
+        {op: 'box', from: [1, 0, 1], to: [6, 11, 6], color: colour},
+        {op: 'erase', from: [2, 4, 2], to: [5, 11, 5]}
     ]
 })
 
@@ -25,7 +26,7 @@ const brick: VoxSpec = {
     name: 'brick',
     size: [8, 8, 12],
     mirror_x: false,
-    ops: [{op: 'box', from: [0, 0, 0], to: [7, 7, 11], color: '#808080'}]
+    ops: [{op: 'box', from: [0, 0, 0], to: [7, 11, 7], color: '#808080'}]
 }
 
 interface Picked {
@@ -120,6 +121,7 @@ const cards = (): HTMLElement[] => [...dialog().querySelectorAll<HTMLElement>('.
 test('with no server there is nothing to press, and the dialog says why', async () => {
     const down: Llama = {
         probe: () => Promise.resolve(undefined),
+        bodyPlan: () => Promise.resolve('quadruped'),
         generate: () => Promise.reject(new Error('not running'))
     }
     const {root, host} = await open(down)
@@ -141,7 +143,9 @@ test('a batch fills the grid, and every candidate carries what made it', async (
     await generate(mounted)
 
     // Four is the default batch, and the three canned replies cycle to fill it.
-    expect(said('generate-status')).toBe('4 candidates, 0 failed')
+    // The example the whole batch was shown is named, because it is the strongest single
+    // influence on what came back.
+    expect(said('generate-status')).toBe('4 candidates, 0 failed · built as quadruped')
     expect(cards()).toHaveLength(4)
     expect(said('clip-status')).toContain('clipserve.py is not running')
 
@@ -167,7 +171,9 @@ test('a candidate that failed is counted and named, not silently dropped', async
     await generate(mounted)
 
     // Four asked for, the canned replies alternate: two good, two failed.
-    expect(said('generate-status')).toBe('2 candidates, 2 failed — llama-server 503: busy')
+    expect(said('generate-status')).toBe(
+        '2 candidates, 2 failed · built as quadruped — llama-server 503: busy'
+    )
     expect(cards()).toHaveLength(2)
 
     await close(root, host)
@@ -218,7 +224,8 @@ test('closing the dialog mid-batch stops asking the model for models', async () 
     let asked = 0
     const slow: Llama = {
         probe: () => Promise.resolve('qwen'),
-        generate: (_prompt, _sampler, signal) => {
+        bodyPlan: () => Promise.resolve('quadruped'),
+        generate: (_prompt, _sampler, _plan, signal) => {
             asked += 1
             if (signal?.aborted === true) return Promise.reject(new Error('cancelled'))
             return Promise.resolve({spec: carved('tower', '#808080'), model: 'qwen'})
@@ -296,7 +303,8 @@ test('Cancel stops a batch that is already running, and keeps what landed', asyn
     let asked = 0
     const held: Llama = {
         probe: () => Promise.resolve('qwen'),
-        generate: (_prompt, _sampler, signal) => {
+        bodyPlan: () => Promise.resolve('quadruped'),
+        generate: (_prompt, _sampler, _plan, signal) => {
             asked += 1
             if (signal?.aborted === true) return Promise.reject(new Error('cancelled'))
             // The first candidate lands at once; the second waits for the test to let it go.

@@ -164,17 +164,100 @@ export const readSpec = (value: unknown): VoxSpec | undefined => {
 const channel = (hex: string, at: number): number => parseInt(hex.slice(at, at + 2), 16)
 
 /**
+ * The box the painting ops actually cover, in op coordinates. `undefined` when nothing paints.
+ *
+ * `erase` is excluded on purpose: it removes, so it must not be able to grow the grid. A model that
+ * carves `[0,0,0]…[31,31,31]` to mean "start empty" would otherwise allocate the whole 32³ around a
+ * model the size of a die.
+ */
+const paintedBounds = (ops: readonly VoxOp[]): {lo: Vec3; hi: Vec3} | undefined => {
+    const lo: Vec3 = [Infinity, Infinity, Infinity]
+    const hi: Vec3 = [-Infinity, -Infinity, -Infinity]
+    let any = false
+    for (const op of ops) {
+        if (op.op === 'erase') continue
+        const corners: readonly Vec3[] =
+            op.op === 'ball' ?
+                [
+                    [op.at[0] - op.r[0], op.at[1] - op.r[1], op.at[2] - op.r[2]],
+                    [op.at[0] + op.r[0], op.at[1] + op.r[1], op.at[2] + op.r[2]]
+                ]
+            :   [op.from, op.to]
+        any = true
+        for (const [cx, cy, cz] of corners) {
+            lo[0] = Math.min(lo[0], cx)
+            lo[1] = Math.min(lo[1], cy)
+            lo[2] = Math.min(lo[2], cz)
+            hi[0] = Math.max(hi[0], cx)
+            hi[1] = Math.max(hi[1], cy)
+            hi[2] = Math.max(hi[2], cz)
+        }
+    }
+    return any ? {lo, hi} : undefined
+}
+
+const extent = (low: number, high: number): number =>
+    Math.max(1, Math.min(MAX_SIZE, Math.floor(high) - Math.ceil(low) + 1))
+
+/**
+ * The grid a spec gets, which is the box its ops paint rather than the `size` it declared.
+ *
+ * Measured against the live Qwen3.6-27B on 2026-08-08 over six "a cat" replies: **every one wrote
+ * outside the size it had just declared** — `[20,16,14]` with ops reaching `y = 18`, `[16,20,16]`
+ * with ops reaching `z = 23`. Writes off the grid are dropped, so what vanished was always the
+ * detail: the ears, the tail, the far side of a head. The declared size is the one number in the
+ * reply the model has no picture of, and there is no reason to trust it over the ops themselves.
+ *
+ * `size` is still read and still clamped — it travels with the spec into the saved record — it just
+ * no longer decides how much of the model survives.
+ *
+ * With `mirror_x` the width is doubled about the model's own far edge rather than about the
+ * declared centre, because a half whose declared plane was wrong is a half joined to itself in the
+ * wrong place: a seam, or a body with a hollow down the middle.
+ */
+export const gridFor = (spec: VoxSpec): {readonly size: Vec3; readonly origin: Vec3} => {
+    // Both are in *op* space, so `size` reads [width, height, depth]. `rasterise` swaps.
+    const bounds = paintedBounds(spec.ops)
+    if (!bounds) return {size: [1, 1, 1], origin: [0, 0, 0]}
+    const {lo, hi} = bounds
+    const half = extent(lo[0], hi[0])
+    return {
+        size: [
+            spec.mirror_x ? Math.min(MAX_SIZE, half * 2) : half,
+            extent(lo[1], hi[1]),
+            extent(lo[2], hi[2])
+        ],
+        origin: [Math.ceil(lo[0]), Math.ceil(lo[1]), Math.ceil(lo[2])]
+    }
+}
+
+/**
  * Ops to voxels.
  *
+ * **Op coordinates are y-up; a `Volume` is z-up.** The swap happens here, and it is not a taste
+ * call. The prompt used to say "z = up" and the model ignored it every time — measured on
+ * 2026-08-08, four legs came back at the four corners of the x–z plane with the head at high `y`,
+ * which is y-up whatever the system prompt asked for. Asking a 27B model to work against the
+ * convention its training data is written in bought lying-down cats; asking for y-up and swapping
+ * one line here buys cats that stand.
+ *
  * Palette entries are appended in first-seen order and indices are 1-based, matching `.vox` and the
- * rest of this app. Out-of-bounds writes are dropped rather than clamped — clamping would smear a
- * mistyped coordinate along a wall, which looks like geometry instead of like an error.
+ * rest of this app. Writes outside the fitted grid are dropped rather than clamped — clamping would
+ * smear a mistyped coordinate along a wall, which looks like geometry instead of like an error.
  */
 export const rasterise = (spec: VoxSpec): Volume => {
-    const [sx, sy, sz] = spec.size
+    const {size, origin} = gridFor(spec)
+    const [width, height, depth] = size
+    const [ox, oy, oz] = origin
     const palette = new Uint8Array(256 * 4)
     const slots = new Map<string, number>()
-    const volume = createVolume(sx, sy, sz, palette)
+    // The swap: the grid is as deep as the ops are in z, and as tall as they are in y.
+    const volume = createVolume(width, depth, height, palette)
+
+    /** One op-space cell, in y-up op coordinates, into the z-up grid. */
+    const put = (x: number, y: number, z: number, value: number): void => {
+        setVoxel(volume, x - ox, z - oz, y - oy, value)
+    }
 
     const slot = (css: string): number => {
         const key = css.toLowerCase().replace(/^#/, '')
@@ -196,7 +279,7 @@ export const rasterise = (spec: VoxSpec): Volume => {
             for (let x = Math.min(x0, x1); x <= Math.max(x0, x1); x += 1) {
                 for (let y = Math.min(y0, y1); y <= Math.max(y0, y1); y += 1) {
                     for (let z = Math.min(z0, z1); z <= Math.max(z0, z1); z += 1) {
-                        setVoxel(volume, x, y, z, value)
+                        put(x, y, z, value)
                     }
                 }
             }
@@ -210,7 +293,7 @@ export const rasterise = (spec: VoxSpec): Volume => {
                         const dx = (x - cx) / Math.max(rx, 0.5)
                         const dy = (y - cy) / Math.max(ry, 0.5)
                         const dz = (z - cz) / Math.max(rz, 0.5)
-                        if (dx * dx + dy * dy + dz * dz <= 1) setVoxel(volume, x, y, z, value)
+                        if (dx * dx + dy * dy + dz * dz <= 1) put(x, y, z, value)
                     }
                 }
             }
@@ -221,11 +304,11 @@ export const rasterise = (spec: VoxSpec): Volume => {
         // Over a copy, so the reflection is of the finished model rather than of itself — mirroring
         // in place would fold the half it had just written back over the other side.
         const before = Uint8Array.from(volume.data)
-        for (let z = 0; z < sz; z += 1) {
-            for (let y = 0; y < sy; y += 1) {
-                for (let x = 0; x < sx; x += 1) {
+        for (let z = 0; z < volume.sz; z += 1) {
+            for (let y = 0; y < volume.sy; y += 1) {
+                for (let x = 0; x < volume.sx; x += 1) {
                     const value = before[voxelIndex(volume, x, y, z)] ?? 0
-                    if (value !== 0) setVoxel(volume, sx - 1 - x, y, z, value)
+                    if (value !== 0) setVoxel(volume, volume.sx - 1 - x, y, z, value)
                 }
             }
         }

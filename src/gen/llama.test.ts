@@ -1,6 +1,18 @@
 import {expect, test} from 'bun:test'
 import {countFilled, type VoxSpec} from './ops'
-import {browserLlama, candidatesOf, generateMany, memoryLlama, SYSTEM, type Attempt} from './llama'
+import {
+    BODY_PLANS,
+    browserLlama,
+    candidatesOf,
+    EXAMPLES,
+    generateMany,
+    memoryLlama,
+    readPlan,
+    SYSTEM,
+    type Attempt
+} from './llama'
+import {rasterise, readSpec} from './ops'
+import {scoreModel} from './score'
 
 const tower: VoxSpec = {
     name: 'tower',
@@ -43,6 +55,9 @@ test('a candidate carries the voxels, the spec and what produced it', async () =
         prompt: 'a stone tower',
         sampler: {temperature: 0.5, seed: 7},
         model: 'memory',
+        // Which example the batch was shown, because the pick is its own model call and prompt
+        // plus seed no longer reproduce a candidate without it.
+        plan: 'quadruped',
         at: new Date(0).toISOString()
     })
 })
@@ -119,10 +134,11 @@ test('the browser port sends the schema, the sampler and the system prompt', asy
     }) as unknown as typeof fetch
 
     try {
-        const {spec, model} = await browserLlama('http://x:8080').generate('a tower', {
-            temperature: 0.8,
-            seed: 12
-        })
+        const {spec, model} = await browserLlama('http://x:8080').generate(
+            'a tower',
+            {temperature: 0.8, seed: 12},
+            'building'
+        )
         expect(spec.name).toBe('tower')
         expect(model).toBe('qwen')
     } finally {
@@ -135,6 +151,38 @@ test('the browser port sends the schema, the sampler and the system prompt', asy
     expect(call?.body['temperature']).toBe(0.8)
     expect(call?.body['response_format']).toMatchObject({type: 'json_schema'})
     expect(JSON.stringify(call?.body['messages'])).toContain(SYSTEM.slice(0, 40))
+    // The worked example for the chosen plan goes as a prior turn, not as a quote in the system
+    // prompt, and the plan the batch picked is what decides which one.
+    expect(call?.body['messages']).toMatchObject([
+        {role: 'system'},
+        {role: 'user', content: EXAMPLES.building.prompt},
+        {role: 'assistant', content: EXAMPLES.building.reply},
+        {role: 'user', content: 'a tower'}
+    ])
+})
+
+test('every worked example is a model, not a story about one', () => {
+    // A broken example teaches breakage, and it is the highest-leverage thing in the prompt.
+    for (const plan of BODY_PLANS) {
+        const spec = readSpec(JSON.parse(EXAMPLES[plan].reply))
+        expect(spec).toBeDefined()
+        if (!spec) continue
+
+        const volume = rasterise(spec)
+        const scores = scoreModel(volume)
+        // One connected piece, standing up, and nowhere near a solid brick.
+        expect(scores.connectivity).toBe(1)
+        expect(scores.bboxFill).toBeLessThan(0.75)
+        expect(volume.sz).toBeGreaterThan(8)
+    }
+})
+
+test('an unrecognised body plan falls back to the one with no limbs', () => {
+    expect(readPlan('  Quadruped.\n')).toBe('quadruped')
+    expect(readPlan('bird')).toBe('bird')
+    // Not "the closest animal": a wrong quadruped is a fish with legs.
+    expect(readPlan('I think it is probably a sort of vehicle')).toBe('building')
+    expect(readPlan('')).toBe('building')
 })
 
 test('a reply the grammar did not constrain is an error, not a half-built model', async () => {
@@ -152,7 +200,7 @@ test('a reply the grammar did not constrain is an error, not a half-built model'
         const port = browserLlama()
         for (const _ of bodies) {
             await port
-                .generate('a tower', {temperature: 0.8, seed: 1})
+                .generate('a tower', {temperature: 0.8, seed: 1}, 'building')
                 .catch((error: unknown) => errors.push(String(error)))
         }
     } finally {

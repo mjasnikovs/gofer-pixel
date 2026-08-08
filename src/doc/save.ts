@@ -1,4 +1,4 @@
-import type {GenerationRecord} from '../gen/llama'
+import {BODY_PLANS, type GenerationRecord} from '../gen/llama'
 import type {NamedCamera} from './cameras'
 import type {Objects} from './objects'
 import {readReference, type Reference} from './reference'
@@ -215,14 +215,16 @@ const readOutput = (value: unknown): SavedOutput | undefined => {
  */
 const readOrigin = (value: unknown): GenerationRecord | undefined => {
     if (typeof value !== 'object' || value === null) return undefined
-    const {prompt, sampler, model, at} = value as Record<string, unknown>
+    const {prompt, sampler, model, at, plan} = value as Record<string, unknown>
     if (typeof prompt !== 'string' || typeof model !== 'string' || typeof at !== 'string') {
         return undefined
     }
     if (typeof sampler !== 'object' || sampler === null) return undefined
     const {temperature, seed} = sampler as Record<string, unknown>
     if (typeof temperature !== 'number' || typeof seed !== 'number') return undefined
-    return {prompt, sampler: {temperature, seed}, model, at}
+    // `plan` is not part of "whole": a file written before the example bank existed has none.
+    const known = BODY_PLANS.find(entry => entry === plan)
+    return {prompt, sampler: {temperature, seed}, model, at, ...(known ? {plan: known} : {})}
 }
 
 const readSymmetry = (value: unknown): Symmetry => {

@@ -1313,10 +1313,22 @@ body,
     min-height: 24px;
 }
 
+/*
+ * Scrolls, because the batch is up to 12 and 12 is three rows of cards taller than any window this
+ * dialog fits in. Without this the grid grew past the bottom of the screen and the last two rows
+ * were unreachable — the artist got to choose between the four candidates that happened to fit.
+ *
+ * The cap is `vh` rather than a flex `min-height: 0`, because the dialog does not bound its own
+ * height and a flex item with nothing above it to shrink against never overflows. `52vh` is two
+ * rows of cards on a 900 px window, which leaves the prompt row, the status line and the footnote
+ * their space.
+ */
 .generate-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
     gap: 12px;
+    max-height: 52vh;
+    overflow-y: auto;
 }
 
 .generate-card {

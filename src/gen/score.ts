@@ -71,20 +71,31 @@ export const connectivity = (volume: Volume): number => {
     return largest / total
 }
 
+/**
+ * Filled layers as a fraction of the model's own height, not of the grid's.
+ *
+ * It was the grid's until the generator started fitting the grid to the ops (`gen/ops.ts`), at
+ * which point the top and bottom layers are occupied by construction and the whole term pinned at
+ * 1.00 for every candidate — a sort key that cannot separate anything. Over the model's own extent
+ * it still answers the question it was for: is there a floating hat with a gap under it.
+ */
 export const sliceUsage = (volume: Volume): number => {
     const {sx, sy, sz, data} = volume
-    if (sz === 0) return 0
     let used = 0
+    let lowest = -1
+    let highest = -1
     for (let z = 0; z < sz; z += 1) {
         const base = z * sx * sy
         for (let i = base; i < base + sx * sy; i += 1) {
             if ((data[i] ?? 0) !== 0) {
                 used += 1
+                if (lowest < 0) lowest = z
+                highest = z
                 break
             }
         }
     }
-    return used / sz
+    return used === 0 ? 0 : used / (highest - lowest + 1)
 }
 
 export const bboxFill = (volume: Volume): number => {

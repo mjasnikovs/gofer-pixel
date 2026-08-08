@@ -162,9 +162,19 @@ export const GenerateDialog = ({
         setStatus(`Generating 0/${String(count)}…`)
 
         const landed: Ranked[] = []
+        let shown = ''
         const attempts = await generateMany(llama, prompt, count, {
             seed: randomSeed(),
             signal: controller.signal,
+            /*
+             * Named in the status line rather than left implicit. The batch is shown one worked
+             * example and it is the strongest single influence on what comes back — a chicken built
+             * against the quadruped example comes back with four legs — so an artist looking at
+             * twelve wrong candidates should be able to see *why* without reading the source.
+             */
+            onPlan: plan => {
+                shown = plan
+            },
             onAttempt: (attempt, at, total) => {
                 setDone(at)
                 if (attempt.ok) {
@@ -185,6 +195,7 @@ export const GenerateDialog = ({
         const failures = attempts.filter(attempt => !attempt.ok)
         setStatus(
             `${String(landed.length)} candidates, ${String(failures.length)} failed`
+                + (shown === '' ? '' : ` · built as ${shown}`)
                 + (failures[0]?.ok === false ? ` — ${failures[0].error.slice(0, 90)}` : '')
         )
         setBusy(false)
