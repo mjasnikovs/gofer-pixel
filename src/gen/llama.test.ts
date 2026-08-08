@@ -11,7 +11,8 @@ import {
     SYSTEM,
     type Attempt
 } from './llama'
-import {rasterise, readSpec} from './ops'
+import {specFromCode} from './code'
+import {rasterise} from './ops'
 import {scoreModel} from './score'
 
 const tower: VoxSpec = {
@@ -112,7 +113,7 @@ test('a cancel stops the queue instead of finishing it', async () => {
     expect(llama.seen).toHaveLength(1)
 })
 
-test('the browser port sends the schema, the sampler and the system prompt', async () => {
+test('the browser port sends the sampler, the system prompt and the worked example', async () => {
     const sent: {url: string; body: Record<string, unknown>}[] = []
     const original = globalThis.fetch
     globalThis.fetch = ((url: string, init?: RequestInit) => {
@@ -127,7 +128,7 @@ test('the browser port sends the schema, the sampler and the system prompt', asy
             new Response(
                 JSON.stringify({
                     model: 'qwen',
-                    choices: [{message: {content: JSON.stringify(tower)}}]
+                    choices: [{message: {content: "box(0,0,0, 3,3,7, '#808080')"}}]
                 })
             )
         )
@@ -139,7 +140,8 @@ test('the browser port sends the schema, the sampler and the system prompt', asy
             {temperature: 0.8, seed: 12},
             'building'
         )
-        expect(spec.name).toBe('tower')
+        // The code format carries no name of its own, so the prompt is the name.
+        expect(spec.name).toBe('a tower')
         expect(model).toBe('qwen')
     } finally {
         globalThis.fetch = original
@@ -149,7 +151,9 @@ test('the browser port sends the schema, the sampler and the system prompt', asy
     expect(call?.url).toBe('http://x:8080/v1/chat/completions')
     expect(call?.body['seed']).toBe(12)
     expect(call?.body['temperature']).toBe(0.8)
-    expect(call?.body['response_format']).toMatchObject({type: 'json_schema'})
+    // No decoding grammar: a schema-constrained reply has nowhere to think, and the proportions
+    // comment the code format opens with is where the thinking happens.
+    expect(call?.body['response_format']).toBeUndefined()
     expect(JSON.stringify(call?.body['messages'])).toContain(SYSTEM.slice(0, 40))
     // The worked example for the chosen plan goes as a prior turn, not as a quote in the system
     // prompt, and the plan the batch picked is what decides which one.
@@ -164,7 +168,7 @@ test('the browser port sends the schema, the sampler and the system prompt', asy
 test('every worked example is a model, not a story about one', () => {
     // A broken example teaches breakage, and it is the highest-leverage thing in the prompt.
     for (const plan of BODY_PLANS) {
-        const spec = readSpec(JSON.parse(EXAMPLES[plan].reply))
+        const spec = specFromCode(EXAMPLES[plan].reply, plan)
         expect(spec).toBeDefined()
         if (!spec) continue
 
@@ -185,8 +189,8 @@ test('an unrecognised body plan falls back to the one with no limbs', () => {
     expect(readPlan('')).toBe('building')
 })
 
-test('a reply the grammar did not constrain is an error, not a half-built model', async () => {
-    const bodies = ['not json at all', JSON.stringify({name: 'x'})]
+test('a reply that is not runnable code is an error, not a half-built model', async () => {
+    const bodies = ['this is prose, not a program', 'const x =']
     const original = globalThis.fetch
     let next = 0
     globalThis.fetch = (() => {
@@ -207,7 +211,7 @@ test('a reply the grammar did not constrain is an error, not a half-built model'
         globalThis.fetch = original
     }
 
-    expect(errors[0]).toContain('not JSON')
+    expect(errors[0]).toContain('no usable ops')
     expect(errors[1]).toContain('no usable ops')
 })
 
