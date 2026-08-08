@@ -37,3 +37,46 @@ test('the theme is the one the mockups were sampled from, not the inherited neut
     expect(tokens.get('--color-accent')?.dark).toBe('#7053ef')
     expect(tokens.get('--color-background-body')?.dark).toBe('#13161c')
 })
+
+/*
+ * The two rules that only fire on a theme that is wrong.
+ *
+ * The built theme passes, which is the point of it — so the branches that *report* a violation are
+ * never reached by the gate above. They are driven here against token sets built to fail, because a
+ * rule whose failure path has never run is a rule that might not be able to fail at all.
+ */
+test('a text role too close to another one is reported, with the numbers behind it', () => {
+    const violations = findViolations(
+        new Map([
+            ['--color-text-primary', {light: '#404040', dark: '#c0c0c0'}],
+            ['--color-text-secondary', {light: '#454545', dark: '#c4c4c4'}]
+        ])
+    )
+
+    expect(violations.map(({rule, mode}) => `${rule}:${mode}`)).toEqual([
+        'text-ramp:light',
+        'text-ramp:dark'
+    ])
+    // The detail carries both tokens, both values and the distance, so the fix is obvious from the
+    // failure and nobody has to go and measure it again.
+    expect(violations[0]?.detail).toContain('--color-text-primary (#404040)')
+    expect(violations[0]?.detail).toContain('--color-text-secondary (#454545)')
+    expect(violations[0]?.detail).toMatch(/L\* apart, need \d+/)
+    expect(violations[0]?.why).toBeTruthy()
+})
+
+test('a control border that cannot be found against its background is reported as a ratio', () => {
+    const violations = findViolations(
+        new Map([
+            ['--color-border-emphasized', {light: '#f4f4f4', dark: '#1a1a1a'}],
+            ['--color-background-surface', {light: '#ffffff', dark: '#151515'}]
+        ])
+    )
+
+    expect(violations.map(({rule, mode}) => `${rule}:${mode}`)).toEqual([
+        'control-boundary:light',
+        'control-boundary:dark'
+    ])
+    expect(violations[0]?.detail).toMatch(/:1, need [\d.]+:1/)
+    expect(violations[0]?.why).toContain('WCAG 1.4.11')
+})

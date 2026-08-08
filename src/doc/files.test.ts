@@ -274,3 +274,88 @@ test('without a picker, saving is a download and it says it cannot overwrite', a
         }
     })
 })
+
+/*
+ * Firefox and Safari have no `showOpenFilePicker` either, so opening falls back to an
+ * `<input type=file>` that is created, clicked and dropped. Never kept in the tree: a hidden input
+ * living in the layout is one more node for a bounding-box test to trip over.
+ *
+ * The input's own `click` is what gets stubbed, for the same reason the anchor's is above — it is
+ * the narrowest thing that can stand in for a native dialog, and everything the code does to build
+ * the element is left alone.
+ */
+const withFileInput = async (
+    answer: (input: HTMLInputElement) => void,
+    body: () => Promise<void>
+): Promise<void> => {
+    const pressed = HTMLInputElement.prototype.click
+    HTMLInputElement.prototype.click = function press(this: HTMLInputElement) {
+        answer(this)
+    }
+    try {
+        await withPicker({}, body)
+    } finally {
+        HTMLInputElement.prototype.click = pressed
+    }
+}
+
+test('with no open picker, opening goes through a file input that never joins the page', async () => {
+    let accept = ''
+    let inTree = true
+
+    await withFileInput(
+        input => {
+            accept = input.accept
+            inTree = input.isConnected
+            Object.defineProperty(input, 'files', {
+                configurable: true,
+                value: [new File(['{"format":"gofer-pixel"}'], 'knight.gpix')]
+            })
+            input.dispatchEvent(new Event('change'))
+        },
+        async () => {
+            const picked = await browserFiles().open(PROJECT_ACCEPT)
+
+            expect(picked?.name).toBe('knight.gpix')
+            expect(picked?.text).toBe('{"format":"gofer-pixel"}')
+            expect(picked?.bytes).toEqual(new TextEncoder().encode('{"format":"gofer-pixel"}'))
+        }
+    )
+
+    // The picker is told what the two formats are, and the element is gone by the time it opens.
+    expect(accept).toBe(PROJECT_ACCEPT)
+    expect(inTree).toBe(false)
+})
+
+test('a file input that fires change with nothing chosen opens nothing', async () => {
+    await withFileInput(
+        input => {
+            input.dispatchEvent(new Event('change'))
+        },
+        async () => {
+            expect(await browserFiles().open(PROJECT_ACCEPT)).toBeUndefined()
+        }
+    )
+})
+
+test('a file input the artist cancels opens nothing either', async () => {
+    await withFileInput(
+        input => {
+            input.dispatchEvent(new Event('cancel'))
+        },
+        async () => {
+            expect(await browserFiles().open(PROJECT_ACCEPT)).toBeUndefined()
+        }
+    )
+})
+
+/*
+ * A picker that resolves with no handle at all. Not the cancel path — that throws — but what a
+ * `multiple: false` call is still typed to allow, and the one branch where a missing guard would be
+ * a `TypeError` in the artist's console instead of a shrug.
+ */
+test('an open picker that hands back no handle is not an error', async () => {
+    await withPicker({showOpenFilePicker: () => Promise.resolve([])}, async () => {
+        expect(await browserFiles().open(PROJECT_ACCEPT)).toBeUndefined()
+    })
+})

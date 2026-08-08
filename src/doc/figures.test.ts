@@ -70,3 +70,18 @@ test('every figure stays on the plane it was started on', () => {
         }
     }
 })
+
+/*
+ * The dispatch itself. Every branch is exercised elsewhere through its own function, but `line` is
+ * the one nothing reaches through `figureCells` — and the switch is the only thing that decides
+ * which shape a stroke draws.
+ */
+test('the figure asked for is the figure drawn', () => {
+    const from: Offset = [1, 1, 1]
+    const to: Offset = [4, 1, 1]
+
+    expect(figureCells('line', from, to, 2)).toEqual(lineFigure(from, to))
+    expect(figureCells('rect', from, to, 2)).toEqual(rectFigure(from, to, 2))
+    expect(figureCells('rectFill', from, to, 2)).toEqual(rectFillFigure(from, to, 2))
+    expect(figureCells('ellipse', from, to, 2)).toEqual(ellipseFigure(from, to, 2))
+})

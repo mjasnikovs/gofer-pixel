@@ -3,7 +3,14 @@ import {act} from 'react'
 import {createRoot} from 'react-dom/client'
 import {basisFor, createCamera} from '../render/camera'
 import {createVolume, setVoxel, type Volume} from '../render/volume'
-import {BrushGhost, GroundGrid, HintBar, ViewCube, type GhostHover} from './ViewportOverlay'
+import {
+    BrushGhost,
+    GroundGrid,
+    HintBar,
+    SelectionBox,
+    ViewCube,
+    type GhostHover
+} from './ViewportOverlay'
 import type {Blocked} from './state'
 
 const volume = createVolume(8, 8, 8, new Uint8Array(256 * 4))
@@ -429,6 +436,118 @@ test('the ground fades out, so nothing far from the volume asks to be clicked', 
     // Full strength out to the volume's own corner, gone by the edge of the ground.
     expect(Number(stops[0]?.getAttribute('offset'))).toBeGreaterThan(0)
     expect(Number(stops[0]?.getAttribute('offset'))).toBeLessThan(1)
+
+    await act(async () => {
+        root.unmount()
+    })
+    host.remove()
+})
+
+/*
+ * The selection box, and the rubber band that is choosing it.
+ *
+ * Bounds rather than a per-voxel outline because a selection can be thousands of cells, and twelve
+ * lines say where it is without asking the browser to lay out ten thousand paths. The band is the
+ * other half: it is screen-space, so it is a `div` and not part of the projected drawing.
+ */
+const selection = async (
+    bounds: {min: [number, number, number]; max: [number, number, number]} | undefined,
+    band?: {x0: number; y0: number; x1: number; y1: number},
+    losing = 0
+) => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const root = createRoot(host)
+    await act(async () => {
+        root.render(
+            <SelectionBox
+                volume={volume}
+                camera={createCamera(volume, 0.6, 0.5)}
+                bounds={bounds}
+                band={band}
+                losing={losing}
+            />
+        )
+    })
+    return {
+        host,
+        done: async () => {
+            await act(async () => {
+                root.unmount()
+            })
+            host.remove()
+        }
+    }
+}
+
+test('nothing selected and no drag is nothing drawn', async () => {
+    const drawn = await selection(undefined)
+
+    expect(drawn.host.innerHTML).toBe('')
+    await drawn.done()
+})
+
+test('a selection is its twelve projected edges, and a doomed drag says so on the box', async () => {
+    const drawn = await selection({min: [1, 1, 1], max: [4, 4, 4]})
+    const svg = drawn.host.querySelector('svg.selection-box')
+    // Twelve `<line>`s rather than one path: they are the box's own edges and nothing joins them.
+    expect(svg?.querySelectorAll('line')).toHaveLength(12)
+    expect(svg?.getAttribute('data-losing')).toBeNull()
+    await drawn.done()
+
+    const doomed = await selection({min: [1, 1, 1], max: [4, 4, 4]}, undefined, 7)
+    expect(doomed.host.querySelector('svg')?.getAttribute('data-losing')).toBe('true')
+    await doomed.done()
+})
+
+/*
+ * The band is drawn in screen pixels, not through the basis: it is a rectangle on the glass the
+ * artist is dragging out, and projecting it would make it lean with the model under it.
+ */
+test('the rubber band is a plain rectangle, right way up whichever way it was dragged', async () => {
+    const forwards = await selection(undefined, {x0: 10, y0: 20, x1: 60, y1: 90})
+    const backwards = await selection(undefined, {x0: 60, y0: 90, x1: 10, y1: 20})
+
+    const box = (host: HTMLElement): string | null =>
+        host.querySelector<HTMLElement>('.rubber-band')?.getAttribute('style') ?? null
+
+    expect(box(forwards.host)).toBe(box(backwards.host))
+    expect(box(forwards.host)).toContain('left: 10px')
+    expect(box(forwards.host)).toContain('top: 20px')
+    expect(box(forwards.host)).toContain('width: 50px')
+    expect(box(forwards.host)).toContain('height: 70px')
+
+    await forwards.done()
+    await backwards.done()
+})
+
+/*
+ * The toll a drag is about to take, in the middle of the bar rather than in a corner: a warning
+ * nobody reads is the same as no warning, and it exists only while the drag does.
+ */
+test('the hint bar counts the voxels a drag would destroy, and says voxel once', async () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const root = createRoot(host)
+    const show = async (losing: number): Promise<string> => {
+        await act(async () => {
+            root.render(
+                <HintBar
+                    tool='Move'
+                    hover={undefined}
+                    blocking={undefined}
+                    height={8}
+                    losing={losing}
+                    onCapture={() => undefined}
+                />
+            )
+        })
+        return host.querySelector('.hint-losing')?.textContent ?? ''
+    }
+
+    expect(await show(0)).toBe('')
+    expect(await show(1)).toContain('1 voxel will be destroyed')
+    expect(await show(12)).toContain('12 voxels will be destroyed')
 
     await act(async () => {
         root.unmount()

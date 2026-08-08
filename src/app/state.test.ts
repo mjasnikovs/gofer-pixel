@@ -1845,3 +1845,40 @@ test('a recovered snapshot opens as unsaved work, because that is what it is', (
     expect(recovered.doc.dirty).toBe(true)
     expect(recovered.objects.list).toHaveLength(2)
 })
+
+/*
+ * The two transform kinds the reducer forwards but nothing else in this file asks for.
+ *
+ * `array` is `duplicate` repeated — the reducer only chooses which of `doc/transform.ts`'s
+ * functions runs, and choosing the wrong one is the whole of what can go wrong here.
+ */
+test('an array repeats the selection along a step, as one undo step', () => {
+    const picked = reduce(armed('move'), {type: 'select-color'})
+    const before = occupied(picked.volume)
+
+    const arrayed = reduce(picked, {
+        type: 'transform',
+        op: {kind: 'array', delta: [0, 0, 1], count: 2}
+    })
+
+    expect(occupied(arrayed.volume)).toBeGreaterThan(before)
+    expect(arrayed.selection.size).toBeGreaterThan(picked.selection.size)
+    expect(arrayed.history.past).toHaveLength(1)
+    expect(reduce(arrayed, {type: 'undo'}).volume.data).toEqual(picked.volume.data)
+
+    // A count of zero is not a transform, and neither is an empty selection.
+    expect(
+        reduce(picked, {type: 'transform', op: {kind: 'array', delta: [0, 0, 1], count: 0}})
+    ).toBe(picked)
+})
+
+test('a mirror is its own inverse, and duplicating leaves the original where it was', () => {
+    const picked = reduce(armed('move'), {type: 'select-color'})
+
+    const mirrored = reduce(picked, {type: 'transform', op: {kind: 'mirror', axis: 0}})
+    expect(occupied(mirrored.volume)).toBeGreaterThanOrEqual(occupied(picked.volume))
+
+    const copied = reduce(picked, {type: 'transform', op: {kind: 'duplicate', delta: [0, 0, 1]}})
+    expect(occupied(copied.volume)).toBeGreaterThan(occupied(picked.volume))
+    expect(copied.history.past).toHaveLength(1)
+})

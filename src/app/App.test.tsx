@@ -11,6 +11,7 @@ import {initialObjects} from '../doc/objects'
 import type {Axis} from '../doc/brush'
 import {NO_SYMMETRY} from '../doc/symmetry'
 import {handle} from './handle'
+import {fakeGl, withFakeGl} from '../../test/fake-gl'
 
 const volume = readVox(
     new Uint8Array(await Bun.file(new URL('../assets/car.vox', import.meta.url)).arrayBuffer())
@@ -1608,4 +1609,700 @@ test('the palette writes back out as a .hex file', async () => {
         URL.createObjectURL = realCreate
         HTMLAnchorElement.prototype.click = realClick
     }
+})
+
+/*
+ * The objects panel's three gestures that are not a switch — `FEATURESET.md` §18.
+ *
+ * Rename is a double-click, delete asks first, and reorder is a drag on the name and nowhere else.
+ * All three are state the panel keeps for itself, so none of them show up in a reducer test.
+ */
+const objectRows = (host: HTMLElement): HTMLElement[] => [
+    ...host.querySelectorAll<HTMLElement>('.object-list .object-name')
+]
+
+test('a name renames in place, and Enter and Escape both put the row back', async () => {
+    const mounted = await mount()
+    await act(async () => {
+        handle.dispatch?.({type: 'object', op: {kind: 'add'}})
+    })
+
+    const [, added] = objectRows(mounted.host)
+    if (!added) throw new Error('no second object')
+    await act(async () => {
+        added.dispatchEvent(new MouseEvent('dblclick', {bubbles: true}))
+    })
+
+    const field = mounted.host.querySelector<HTMLInputElement>('.object-list input[type="text"]')
+    if (!field) throw new Error('the row should have turned into a field')
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+    await act(async () => {
+        setter?.call(field, 'Roof')
+        field.dispatchEvent(new Event('input', {bubbles: true}))
+    })
+    expect(handle.state?.objects.list[1]?.name).toBe('Roof')
+
+    await act(async () => {
+        field.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}))
+    })
+    expect(mounted.host.querySelector('.object-list input[type="text"]')).toBeNull()
+    expect(objectRows(mounted.host)[1]?.textContent).toContain('Roof')
+
+    // Escape leaves it too — a field that only closes on Enter is a field with no way out.
+    await act(async () => {
+        objectRows(mounted.host)[1]?.dispatchEvent(new MouseEvent('dblclick', {bubbles: true}))
+    })
+    const again = mounted.host.querySelector<HTMLElement>('.object-list input[type="text"]')
+    await act(async () => {
+        again?.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}))
+    })
+    expect(mounted.host.querySelector('.object-list input[type="text"]')).toBeNull()
+
+    await unmount(mounted)
+})
+
+/*
+ * "You can undo it" is not a reason to let a stray click cost an hour in silence, so the dialog
+ * says the name and the voxel count — the whole of what is about to be lost.
+ */
+test('deleting an object asks first, and says how many voxels go with it', async () => {
+    const mounted = await mount()
+    await act(async () => {
+        handle.dispatch?.({type: 'object', op: {kind: 'add'}})
+    })
+    const empty = handle.state?.objects.list[1]?.name ?? ''
+
+    await act(async () => {
+        control(mounted.host, `Delete ${empty}`).click()
+    })
+    expect(openDialogTitle()).toBe(`Delete ${empty}?`)
+    expect(global.document.querySelector('dialog[open]')?.textContent).toContain('It is empty')
+
+    // Cancelling leaves the object where it was.
+    await act(async () => {
+        control(global.document.body, 'Cancel').click()
+    })
+    expect(handle.state?.objects.list).toHaveLength(2)
+
+    // The one with the voxels in it counts them instead.
+    const model = handle.state?.objects.list[0]?.name ?? ''
+    await act(async () => {
+        control(mounted.host, `Delete ${model}`).click()
+    })
+    expect(global.document.querySelector('dialog[open]')?.textContent).toContain('478 voxels')
+
+    await act(async () => {
+        control(global.document.body, 'Delete').click()
+    })
+    expect(handle.state?.objects.list).toHaveLength(1)
+    expect(handle.state?.objects.list[0]?.name).toBe(empty)
+
+    await unmount(mounted)
+})
+
+test('a row drags along the list to reorder it, and the drag dies with the pointer', async () => {
+    const mounted = await mount()
+    for (let step = 0; step < 2; step += 1)
+        await act(async () => {
+            handle.dispatch?.({type: 'object', op: {kind: 'add'}})
+        })
+    const order = () => (handle.state?.objects.list ?? []).map(entry => entry.name)
+    const before = order()
+    expect(before).toHaveLength(3)
+
+    const rows = objectRows(mounted.host)
+    const [first, , third] = rows
+    if (!first || !third) throw new Error('three rows expected')
+
+    // The drag starts on the name and nowhere else — starting it on the row would arm a reorder
+    // every time one of the switches beside it was pressed.
+    await act(async () => {
+        first.dispatchEvent(new Event('pointerdown', {bubbles: true}))
+    })
+    await act(async () => {
+        third.dispatchEvent(new Event('pointerover', {bubbles: true}))
+    })
+    await act(async () => {
+        third.dispatchEvent(new Event('pointerup', {bubbles: true}))
+    })
+
+    expect(order()).not.toEqual(before)
+    expect(order().toSorted()).toEqual(before.toSorted())
+
+    // A pointer that leaves the list has dropped the row: the next hover must not keep reordering.
+    const dropped = order()
+    await act(async () => {
+        objectRows(mounted.host)[0]?.dispatchEvent(new Event('pointerdown', {bubbles: true}))
+    })
+    await act(async () => {
+        mounted.host
+            .querySelector('.object-list')
+            ?.dispatchEvent(new Event('pointerout', {bubbles: true}))
+    })
+    await act(async () => {
+        objectRows(mounted.host)[2]?.dispatchEvent(new Event('pointerover', {bubbles: true}))
+    })
+    expect(order()).toEqual(dropped)
+
+    await unmount(mounted)
+})
+
+test('a search that matches nothing says so rather than showing an empty box', async () => {
+    const mounted = await mount()
+    for (let step = 0; step < 9; step += 1)
+        await act(async () => {
+            handle.dispatch?.({type: 'object', op: {kind: 'add'}})
+        })
+
+    await act(async () => {
+        handle.dispatch?.({type: 'search', query: 'no-such-object'})
+    })
+
+    expect(objectRows(mounted.host)).toHaveLength(0)
+    expect(mounted.host.querySelector('.object-list')?.textContent).toBe('No object matches that.')
+
+    await unmount(mounted)
+})
+
+/*
+ * The window with a working viewport in it.
+ *
+ * Every other test here runs with no GL context at all — deliberately, because that is what proves
+ * no panel is downstream of one. This is the other half: with a recording context behind the canvas
+ * (see `test/fake-gl.ts`) the five callbacks between the viewport and the reducer come alive, and a
+ * whole gesture can be driven from the pointer to the voxel.
+ */
+const onCanvas = async (
+    run: (mounted: {root: Root; host: HTMLElement}, gl: ReturnType<typeof fakeGl>) => Promise<void>
+): Promise<void> => {
+    const gl = fakeGl()
+    const realObserver = globalThis.ResizeObserver
+    globalThis.ResizeObserver = class {
+        constructor(
+            private readonly fire: (
+                entries: {contentRect: {width: number; height: number}}[]
+            ) => void
+        ) {}
+        observe(): void {
+            this.fire([{contentRect: {width: 512, height: 512}}])
+        }
+        unobserve(): void {
+            /* nothing to stop */
+        }
+        disconnect(): void {
+            /* nothing to stop */
+        }
+    } as unknown as typeof ResizeObserver
+
+    await withFakeGl({webgl2: gl.context}, async () => {
+        const mounted = await mount()
+        try {
+            await run(mounted, gl)
+        } finally {
+            await unmount(mounted)
+            globalThis.ResizeObserver = realObserver
+        }
+    })
+}
+
+/**
+ * The viewport element, given a size.
+ *
+ * Nothing lays anything out under happy-dom, so `clientHeight` is 0 and the basis a press is
+ * measured against would be built at zero pixels — every ray would miss and every assertion below
+ * would pass for the wrong reason. The element is told how big it is instead.
+ */
+const SIDE = 512
+
+const viewportOf = (host: HTMLElement): HTMLElement => {
+    const found = host.querySelector<HTMLElement>('[data-testid="viewport"]')
+    if (!found) throw new Error('no viewport')
+    for (const name of ['clientWidth', 'clientHeight'])
+        Object.defineProperty(found, name, {configurable: true, value: SIDE})
+    Object.defineProperty(found, 'getBoundingClientRect', {
+        configurable: true,
+        value: () => ({
+            x: 0,
+            y: 0,
+            top: 0,
+            left: 0,
+            right: SIDE,
+            bottom: SIDE,
+            width: SIDE,
+            height: SIDE
+        })
+    })
+    return found
+}
+
+const at = (
+    type: 'pointerdown' | 'pointermove' | 'pointerup',
+    x: number,
+    y: number,
+    extra: Partial<PointerEventInit> = {}
+): PointerEvent =>
+    new PointerEvent(type, {bubbles: true, pointerId: 1, clientX: x, clientY: y, ...extra})
+
+test('a working viewport hands its renderer to the handle and reports its frames', async () => {
+    await onCanvas(async (mounted, gl) => {
+        expect(handle.raycaster).toBeDefined()
+        expect(mounted.host.querySelector('.viewport-failure')?.textContent).toBe('')
+        // One frame for the size arriving, drawn through the same basis the CPU would use.
+        expect(gl.of('drawArrays').length).toBeGreaterThan(0)
+        await handle.firstFrame
+    })
+})
+
+test('a drag with the right button orbits the camera', async () => {
+    await onCanvas(async mounted => {
+        const stage = viewportOf(mounted.host)
+        const before = handle.state?.orbit.camera.yaw
+
+        await act(async () => {
+            stage.dispatchEvent(at('pointerdown', 200, 200, {button: 2}))
+        })
+        await act(async () => {
+            stage.dispatchEvent(at('pointermove', 260, 210, {button: 2, buttons: 2}))
+        })
+        await act(async () => {
+            stage.dispatchEvent(at('pointerup', 260, 210))
+        })
+
+        expect(handle.state?.orbit.camera.yaw).not.toBe(before)
+        expect(handle.state?.orbit.gesture).toBeUndefined()
+    })
+})
+
+test('the wheel over the viewport zooms the camera', async () => {
+    await onCanvas(async mounted => {
+        const before = handle.state?.orbit.camera.zoom ?? 0
+
+        await act(async () => {
+            viewportOf(mounted.host).dispatchEvent(
+                new WheelEvent('wheel', {bubbles: true, cancelable: true, deltaY: -240})
+            )
+        })
+
+        expect(handle.state?.orbit.camera.zoom).toBeLessThan(before)
+    })
+})
+
+/*
+ * The whole path a stroke takes: a pointer position, a ray through it, a voxel, an edit, a new
+ * volume object, a texture. Nothing between the mouse and the model is stubbed except the driver.
+ */
+test('a press on the model draws a voxel and the viewport redraws with it', async () => {
+    await onCanvas(async (mounted, gl) => {
+        const stage = viewportOf(mounted.host)
+        const filled = () => handle.state?.volume.data.filter(Boolean).length ?? 0
+        const before = filled()
+        const uploads = gl.of('texImage3D').length
+
+        // The middle of a 512-square viewport is the middle of the model.
+        await act(async () => {
+            stage.dispatchEvent(at('pointerdown', 256, 256))
+        })
+        await act(async () => {
+            stage.dispatchEvent(at('pointerup', 256, 256))
+        })
+
+        expect(filled()).toBeGreaterThan(before)
+        // The grid went back up, so the viewport is showing the edit rather than the document as it
+        // was when the canvas was made.
+        expect(gl.of('texImage3D').length).toBeGreaterThan(uploads)
+    })
+})
+
+test('the pointer leaving the viewport takes the brush ghost with it', async () => {
+    await onCanvas(async mounted => {
+        const stage = viewportOf(mounted.host)
+
+        await act(async () => {
+            stage.dispatchEvent(at('pointermove', 256, 256))
+        })
+        expect(handle.state?.hover).toBeDefined()
+
+        await act(async () => {
+            stage.dispatchEvent(new PointerEvent('pointerout', {bubbles: true}))
+        })
+        expect(handle.state?.hover).toBeUndefined()
+    })
+})
+
+/*
+ * The rest of the keyboard: the six shortcuts that shadow a menu item, plus the arrow keys.
+ *
+ * `Ctrl+S` has to be swallowed or the browser opens its own Save Page dialog over the top of ours,
+ * so "the event was prevented" is part of what is being checked, not an implementation detail.
+ */
+const pressKey = async (
+    key: string,
+    modifiers: Partial<KeyboardEventInit> = {}
+): Promise<Event> => {
+    const event = new KeyboardEvent('keydown', {key, cancelable: true, ...modifiers})
+    await act(async () => {
+        document.dispatchEvent(event)
+    })
+    return event
+}
+
+test('Ctrl-S saves, Ctrl-Shift-S asks, and both are taken off the browser', async () => {
+    const disk = new Map<string, string>()
+    const mounted = await mount(memoryStore(), memoryFiles(disk))
+
+    await act(async () => {
+        handle.dispatch?.({type: 'object', op: {kind: 'add'}})
+    })
+
+    const saved = await pressKey('s', {ctrlKey: true})
+    expect(saved.defaultPrevented).toBe(true)
+    await act(async () => {
+        await Promise.resolve()
+    })
+    expect([...disk.keys()]).toEqual(['car.gpix'])
+
+    // Save As, which always asks — and the memory picker takes the name it is offered.
+    await act(async () => {
+        handle.dispatch?.({type: 'object', op: {kind: 'add'}})
+    })
+    await pressKey('s', {ctrlKey: true, shiftKey: true})
+    await act(async () => {
+        await Promise.resolve()
+    })
+    expect(handle.state?.doc.dirty).toBe(false)
+
+    await unmount(mounted)
+})
+
+test('Ctrl-O and Ctrl-N go through the same guard the menu does', async () => {
+    const mounted = await mount(memoryStore(), memoryFiles())
+
+    await act(async () => {
+        handle.dispatch?.({type: 'object', op: {kind: 'add'}})
+    })
+    expect(handle.state?.doc.dirty).toBe(true)
+
+    // Dirty, so both ask before throwing the work away.
+    const opened = await pressKey('o', {ctrlKey: true})
+    expect(opened.defaultPrevented).toBe(true)
+    expect(openDialogTitle()).toContain('unsaved')
+    await act(async () => {
+        control(global.document.body, 'Cancel').click()
+    })
+
+    await pressKey('n', {ctrlKey: true})
+    expect(openDialogTitle()).toContain('unsaved')
+    await act(async () => {
+        control(global.document.body, 'Cancel').click()
+    })
+
+    // A modifier the app does not claim falls through to the browser untouched.
+    const ignored = await pressKey('q', {ctrlKey: true})
+    expect(ignored.defaultPrevented).toBe(false)
+
+    await unmount(mounted)
+})
+
+/*
+ * The arrow keys nudge a selection. Shift swaps the horizontal pair for the vertical one, which is
+ * the third axis a two-dimensional keyboard cannot otherwise reach.
+ */
+test('the arrow keys move a selection, and Shift moves it up and down instead', async () => {
+    const mounted = await mount()
+    const grid = createVolume(8, 8, 8, volume.palette)
+    grid.data[3 + 8 * (3 + 8 * 3)] = 1
+    await act(async () => {
+        handle.dispatch?.({
+            type: 'new',
+            volume: grid,
+            objects: initialObjects(grid),
+            name: 'one.gpix'
+        })
+    })
+    await act(async () => {
+        handle.dispatch?.({type: 'select-color', color: 1})
+    })
+    const only = () => (handle.state?.volume.data ?? new Uint8Array()).findIndex(Boolean)
+    const start = only()
+
+    const moved = await pressKey('ArrowRight')
+    expect(moved.defaultPrevented).toBe(true)
+    expect(only()).not.toBe(start)
+
+    const sideways = only()
+    await pressKey('ArrowRight', {shiftKey: true})
+    // Up is a whole 8 × 8 layer away, so it cannot be confused with a step along a row.
+    expect(Math.abs(only() - sideways)).toBeGreaterThanOrEqual(64)
+
+    await unmount(mounted)
+})
+
+test('closing the tab with unsaved work is refused until it is saved', async () => {
+    const disk = new Map<string, string>()
+    const mounted = await mount(memoryStore(), memoryFiles(disk))
+    const closing = (): boolean => {
+        const event = new Event('beforeunload', {cancelable: true})
+        globalThis.dispatchEvent(event)
+        return event.defaultPrevented
+    }
+
+    expect(closing()).toBe(false)
+
+    await act(async () => {
+        handle.dispatch?.({type: 'object', op: {kind: 'add'}})
+    })
+    expect(closing()).toBe(true)
+
+    await act(async () => {
+        control(mounted.host, 'Main menu').click()
+    })
+    await act(async () => {
+        menuItem('Save').click()
+    })
+    expect(closing()).toBe(false)
+
+    await unmount(mounted)
+})
+
+test('Save As from the menu writes under a new name and keeps the old file', async () => {
+    const disk = new Map<string, string>([['car.gpix', 'old']])
+    const mounted = await mount(
+        memoryStore(),
+        memoryFiles(disk, () => 'knight.gpix')
+    )
+
+    await act(async () => {
+        control(mounted.host, 'Main menu').click()
+    })
+    await act(async () => {
+        menuItem('Save As…').click()
+    })
+
+    expect([...disk.keys()].toSorted()).toEqual(['car.gpix', 'knight.gpix'])
+    expect(disk.get('car.gpix')).toBe('old')
+    expect(handle.state?.doc.name).toBe('knight.gpix')
+
+    await unmount(mounted)
+})
+
+test('restoring a snapshot brings the work back, and still counts as unsaved', async () => {
+    const backing = new Map<string, string>()
+    const store = memoryStore(backing)
+    const mounted = await mount(store, memoryFiles())
+
+    // Autosave hangs off the history growing, which is a committed *edit* — adding an object is
+    // not one on its own.
+    await act(async () => {
+        handle.dispatch?.({type: 'object', op: {kind: 'add'}})
+        handle.dispatch?.({type: 'select-color', color: 1})
+    })
+    await act(async () => {
+        handle.dispatch?.({type: 'transform', op: {kind: 'delete'}})
+    })
+    expect(snapshots(store)).toHaveLength(1)
+    const kept = handle.state?.volume.data.filter(Boolean).length ?? 0
+
+    // Something else on screen, so the restore has something to replace.
+    await act(async () => {
+        handle.dispatch?.({type: 'object', op: {kind: 'add'}})
+    })
+    expect(handle.state?.objects.list).toHaveLength(3)
+
+    await act(async () => {
+        control(mounted.host, 'Main menu').click()
+    })
+    await act(async () => {
+        restoreItem().click()
+    })
+
+    expect(handle.state?.volume.data.filter(Boolean).length).toBe(kept)
+    expect(handle.state?.objects.list).toHaveLength(2)
+    // A snapshot is an edit that was autosaved and never written to disk. Calling it saved would
+    // let the artist close the tab without a word.
+    expect(handle.state?.doc.dirty).toBe(true)
+
+    await unmount(mounted)
+})
+
+test('forgetting the snapshots empties the list', async () => {
+    const backing = new Map<string, string>()
+    const store = memoryStore(backing)
+    const mounted = await mount(store, memoryFiles())
+
+    await act(async () => {
+        handle.dispatch?.({type: 'object', op: {kind: 'add'}})
+        handle.dispatch?.({type: 'select-color', color: 1})
+    })
+    await act(async () => {
+        handle.dispatch?.({type: 'transform', op: {kind: 'delete'}})
+    })
+    expect(snapshots(store)).not.toHaveLength(0)
+
+    // The autosave is written from an effect and does not itself re-render, so the menu only learns
+    // there is something to forget on the next pass. Anything at all will do.
+    await act(async () => {
+        handle.dispatch?.({type: 'grid', on: false})
+    })
+
+    await act(async () => {
+        control(mounted.host, 'Main menu').click()
+    })
+    await act(async () => {
+        menuItem('Forget every snapshot').click()
+    })
+
+    expect(snapshots(store)).toHaveLength(0)
+    expect(latestSnapshot(store)).toBeUndefined()
+
+    await unmount(mounted)
+})
+
+/*
+ * The palette grid's two modified clicks — `FEATURESET.md` §7. Both are said out loud in the
+ * swatch's own label, because a gesture that exists only in a tooltip does not exist.
+ */
+/** The newest Restore entry in the main menu. */
+const restoreItem = (): HTMLElement => {
+    const found = [...global.document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+        node => node.textContent.trim().startsWith('Restore')
+    )
+    if (!found) throw new Error('no restore point in the menu')
+    return found
+}
+
+const swatch = (host: HTMLElement, index: number): HTMLElement => {
+    const found = [...host.querySelectorAll<HTMLElement>('.swatches .swatch')].find(node =>
+        node.getAttribute('aria-label')?.startsWith(`Colour ${String(index)}`)
+    )
+    if (!found) throw new Error(`no swatch for colour ${String(index)}`)
+    return found
+}
+
+test('shift-clicking a swatch selects every voxel of that colour', async () => {
+    const mounted = await mount()
+    expect(handle.state?.selection.size).toBe(0)
+
+    await act(async () => {
+        swatch(mounted.host, 1).dispatchEvent(
+            new MouseEvent('click', {bubbles: true, shiftKey: true})
+        )
+    })
+
+    expect(handle.state?.selection.size).toBeGreaterThan(0)
+
+    await unmount(mounted)
+})
+
+test('alt-clicking a swatch repaints the loaded colour’s voxels with it', async () => {
+    const mounted = await mount()
+    const loaded = handle.state?.color ?? 1
+    const of = (index: number): number =>
+        (handle.state?.volume.data ?? new Uint8Array()).filter(value => value === index).length
+    const before = of(loaded)
+    expect(before).toBeGreaterThan(0)
+
+    const other = [...(handle.state?.volume.data ?? [])].find(
+        value => value !== 0 && value !== loaded
+    )
+    if (other === undefined) throw new Error('the model should use more than one colour')
+
+    await act(async () => {
+        swatch(mounted.host, other).dispatchEvent(
+            new MouseEvent('click', {bubbles: true, altKey: true})
+        )
+    })
+
+    expect(of(loaded)).toBe(0)
+    expect(of(other)).toBeGreaterThan(before)
+
+    await unmount(mounted)
+})
+
+test('a recent colour loads it back without going hunting in the grid', async () => {
+    const mounted = await mount()
+
+    // Two colours used, so the recent row appears at all.
+    await act(async () => {
+        handle.dispatch?.({type: 'color', color: 2})
+    })
+    await act(async () => {
+        handle.dispatch?.({type: 'color', color: 5})
+    })
+
+    const recent = mounted.host.querySelector<HTMLElement>(
+        '.recent-swatches [aria-label="Recent colour 2"]'
+    )
+    if (!recent) throw new Error('no recent swatch for colour 2')
+    await act(async () => {
+        recent.click()
+    })
+
+    expect(handle.state?.color).toBe(2)
+
+    await unmount(mounted)
+})
+
+test('a preset changes which maps an export writes', async () => {
+    const mounted = await mount()
+    expect(handle.state?.preset).toBe('Sprite Sheet (Auto)')
+
+    // Astryx's Selector keeps its listbox in the tree, so the option is reachable without the
+    // popover having been opened first.
+    const option = [...mounted.host.querySelectorAll<HTMLElement>('[role="option"]')].find(
+        node => node.textContent.trim() === 'Every map'
+    )
+    if (!option) throw new Error('no "Every map" option')
+    await act(async () => {
+        option.click()
+    })
+
+    expect(handle.state?.preset).toBe('Every map')
+
+    await act(async () => {
+        control(mounted.host, 'Export sprite sheet').click()
+    })
+    expect(Object.keys(handle.state?.sheet?.maps ?? {})).toHaveLength(8)
+
+    await unmount(mounted)
+})
+
+test('with every camera deleted the render panel says so instead of showing a blank box', async () => {
+    const mounted = await mount()
+
+    // Selected, deleted, selected again: the button acts on the chosen camera and the choice does
+    // not survive the deletion.
+    for (let step = 0; step < 8; step += 1) {
+        const next = handle.state?.cameras[0]
+        if (!next) break
+        await act(async () => {
+            within(mounted.host, '.views-strip', next.name).click()
+        })
+        await act(async () => {
+            control(mounted.host, 'Delete camera').click()
+        })
+    }
+
+    expect(handle.state?.cameras).toEqual([])
+    expect(mounted.host.querySelector('.render-preview')?.textContent).toBe(
+        'No cameras — capture one to preview its maps.'
+    )
+    expect(mounted.host.querySelector('canvas.render-canvas')).toBeNull()
+
+    await unmount(mounted)
+})
+
+test('dragging a file over the viewport is accepted, so the browser does not open it', async () => {
+    const mounted = await mount()
+    const stage = mounted.host.querySelector('.stage')
+    if (!stage) throw new Error('no stage')
+
+    const over = new Event('dragover', {bubbles: true, cancelable: true})
+    await act(async () => {
+        stage.dispatchEvent(over)
+    })
+
+    // Without this the browser navigates away to the dropped PNG and the document is gone.
+    expect(over.defaultPrevented).toBe(true)
+
+    await unmount(mounted)
 })
