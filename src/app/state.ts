@@ -384,12 +384,33 @@ export interface Hover {
      */
     readonly paint: number | undefined
     /**
-     * The press would change nothing — the brush is entirely off the grid, the voxels are locked, or
-     * they already hold exactly what is about to be written. A press there is silent, so the outline
-     * has to say it before the press rather than after.
+     * Why the press would change nothing, or `undefined` when it would. A press there is silent, so
+     * the outline has to say it — and say *which* silence — before the press rather than after.
      */
-    readonly blocked: boolean
+    readonly blocked: Blocked | undefined
 }
+
+/**
+ * Why a press is about to do nothing.
+ *
+ * One boolean used to carry all of these, and one boolean is what made a locked object read as a
+ * broken tool: the ghost went dashed for "locked", for "already that colour" and for "off the edge
+ * of the grid" alike, so the one case the artist can actually fix looked like the two they cannot.
+ *
+ * - **`locked`** — a locked object owns the cells. `object` names it, so the message can too.
+ * - **`outside`** — the whole footprint is off the grid.
+ * - **`nothing`** — the cells already hold exactly what the press would write. For Erase that is
+ *   empty space; for Draw and Fill it is the loaded colour; for a grab it is nothing to take hold of.
+ */
+export interface Blocked {
+    readonly reason: 'locked' | 'outside' | 'nothing'
+    /** The locked object standing in the way, when that is the reason. */
+    readonly object: number | undefined
+}
+
+/** The two reasons that name nothing. Shared rather than rebuilt, so a hover allocates less. */
+const NOTHING: Blocked = {reason: 'nothing', object: undefined}
+const OUTSIDE: Blocked = {reason: 'outside', object: undefined}
 
 export interface AppState {
     readonly volume: Volume
@@ -736,25 +757,84 @@ const mirrored = (state: AppState, cells: readonly Offset[]): readonly Offset[] 
 }
 
 /**
- * Would writing `value` here change anything? The four ways a write is silently dropped, asked in
- * one place — see `writeOwned`, which is where they are actually enforced.
+ * Why writing `value` here would be dropped, or `undefined` when it would land. The ways a write is
+ * silently dropped, asked in one place — see `writeOwned`, which is where they are actually enforced.
  *
  * Out of bounds, owned by a locked object, or already exactly what is being written. A tool whose
  * click does nothing is not a bug on its own; a tool that gives no sign of it beforehand is.
  */
-const wouldWrite = (
+const writeBlock = (
     state: AppState,
     locked: ReadonlySet<number>,
     [x, y, z]: Offset,
     value: number
-): boolean => {
+): Blocked | undefined => {
     const {sx, sy, sz, data, owner} = state.volume
-    if (x < 0 || y < 0 || z < 0 || x >= sx || y >= sy || z >= sz) return false
+    if (x < 0 || y < 0 || z < 0 || x >= sx || y >= sy || z >= sz) return OUTSIDE
     const index = voxelIndex(state.volume, x, y, z)
     const wasOwner = owner[index] ?? 0
-    if (locked.has(wasOwner)) return false
+    if (locked.has(wasOwner)) return {reason: 'locked', object: wasOwner}
     const nowOwner = value === 0 ? 0 : state.objects.active
-    return (data[index] ?? 0) !== value || wasOwner !== nowOwner
+    if ((data[index] ?? 0) !== value || wasOwner !== nowOwner) return undefined
+    return NOTHING
+}
+
+/**
+ * How informative each reason is, when a footprint straddles more than one of them.
+ *
+ * `locked` wins outright, because it is the only one of the three the artist can do something about
+ * — a brush half off the grid and half over a locked object is, to the hand holding it, a locked
+ * object. Between the other two, "these cells are already like that" says more than "they are not
+ * on the grid", which the outline is already showing by hanging over the edge.
+ */
+const RANK: Record<Blocked['reason'], number> = {outside: 0, nothing: 1, locked: 2}
+
+/**
+ * The one reason to report for a whole footprint, or `undefined` as soon as any cell would write.
+ *
+ * A single blocked cell is not a blocked press: a brush that overlaps a locked object with one
+ * corner still writes with the other three, and saying otherwise would cry wolf on every stroke
+ * along a locked edge.
+ */
+const blockedBy = (
+    state: AppState,
+    locked: ReadonlySet<number>,
+    cells: Iterable<Offset>,
+    value: number
+): Blocked | undefined => {
+    let worst: Blocked | undefined
+    for (const cell of cells) {
+        const block = writeBlock(state, locked, cell, value)
+        if (!block) return undefined
+        if (!worst || RANK[block.reason] > RANK[worst.reason]) worst = block
+    }
+    // No cells at all is a press with nothing to do, which is the same silence by another route.
+    return worst ?? NOTHING
+}
+
+/**
+ * The reason a grab is silent. A grab writes no value of its own, so `blockedBy` cannot answer it:
+ * the question is whether the *transform* that follows would be allowed to move these cells.
+ */
+const blockedGrab = (
+    state: AppState,
+    locked: ReadonlySet<number>,
+    region: Selection
+): Blocked | undefined => {
+    if (region.size === 0) return NOTHING
+    if (locked.size === 0) return undefined
+    let held: number | undefined
+    for (const index of region) {
+        const id = state.volume.owner[index] ?? 0
+        if (!locked.has(id)) return undefined
+        held ??= id
+    }
+    return {reason: 'locked', object: held}
+}
+
+/** A region's cells, one at a time, so a two-million-cell answer costs one triple rather than two million. */
+function* regionCells(volume: Volume, region: Selection): Generator<Cell> {
+    for (const index of region) yield cellOf(volume, index)
 }
 
 /**
@@ -895,7 +975,7 @@ interface AimAnswer {
     readonly region: Selection
     readonly cells: readonly Offset[]
     readonly bounds: {min: Cell; max: Cell} | undefined
-    readonly blocked: boolean
+    readonly blocked: Blocked | undefined
 }
 
 let aimed: {key: AimKey; answer: AimAnswer} | undefined
@@ -973,7 +1053,7 @@ const hoverAt = (state: AppState): AppState => {
             region: undefined,
             bounds: {min: cell, max: cell},
             paint: hit.value,
-            blocked: hit.value === state.color
+            blocked: hit.value === state.color ? NOTHING : undefined
         })
     }
 
@@ -985,7 +1065,7 @@ const hoverAt = (state: AppState): AppState => {
             kind: state.tool === 'erase' ? 'clear' : 'write',
             // The whole footprint, off-grid cells included — `blocked` is exactly the report that
             // some of them are, so it is asked before anything is trimmed.
-            blocked: !cells.some(spot => wouldWrite(state, locked, spot, value)),
+            blocked: blockedBy(state, locked, cells, value),
             cells: cells.length > GHOST_CELLS ? [] : cells,
             region: undefined,
             bounds: footprintBox(cells),
@@ -1069,9 +1149,7 @@ const solveRegion = (
             cells: drawable(state.volume, region),
             bounds: selectionBounds(state.volume, region),
             // A region that is already the loaded colour, or entirely locked, recolours to nothing.
-            blocked: !someCell(state.volume, region, spot =>
-                wouldWrite(state, locked, spot, state.color)
-            )
+            blocked: blockedBy(state, locked, regionCells(state.volume, region), state.color)
         }
     }
     const region = pressSelection(state, volume, hit, event)
@@ -1079,16 +1157,8 @@ const solveRegion = (
         region,
         cells: drawable(state.volume, region),
         bounds: selectionBounds(state.volume, region),
-        // Nothing under the cursor to take hold of. A grab writes nothing by itself, so there is no
-        // other way for it to be silent.
-        blocked: region.size === 0
+        blocked: blockedGrab(state, locked, region)
     }
-}
-
-/** `Array.some` over a region, without expanding two million indices into two million arrays. */
-const someCell = (volume: Volume, region: Selection, ok: (cell: Cell) => boolean): boolean => {
-    for (const index of region) if (ok(cellOf(volume, index))) return true
-    return false
 }
 
 const beginStroke = (state: AppState, event: ViewportPointer): AppState => {

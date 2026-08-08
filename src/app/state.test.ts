@@ -965,6 +965,38 @@ test('a locked object refuses a stroke while the rest of the model takes one', (
     expect(occupied(rubbed.volume)).toBe(occupied(state.volume))
 })
 
+test('a lock says it is a lock, and says which object, before the press that it refuses', () => {
+    const state = armed('erase')
+    const {column, row} = onModel(state)
+    expect(reduce(state, at('move', column, row)).hover?.blocked).toBeUndefined()
+
+    /*
+     * The bug this exists for: erase over a locked object did nothing and gave no reason. The ghost
+     * went dashed, which it also does for a brush hanging off the grid and for a cell that already
+     * holds what is about to be written, so the one case with a switch behind it was unreadable. An
+     * afternoon went into debugging a tool that was working.
+     */
+    const locked = reduce(state, {type: 'object', op: {kind: 'locked', id: 1, on: true}})
+    const blocked = reduce(locked, at('move', column, row)).hover?.blocked
+    expect(blocked?.reason).toBe('locked')
+    // The id, not just the fact. The name is what the artist scans the object list for.
+    expect(blocked?.object).toBe(1)
+
+    // The grab tools are refused by the same lock and have to say the same thing: a selection made
+    // of locked voxels moves nowhere, because every write behind the transform is dropped.
+    const grabbing = reduce(reduce(locked, {type: 'tool', tool: 'move'}), at('move', column, row))
+    expect(grabbing.hover?.blocked?.reason).toBe('locked')
+})
+
+test('one blocked cell is not a blocked press, and locked outranks the reasons nobody can fix', () => {
+    // Draw aims at the empty cell in front of the face, which belongs to nobody, so a lock on the
+    // model underneath must not stop it — the footprint still has somewhere to land.
+    const state = armed('draw')
+    const {column, row} = onModel(state)
+    const locked = reduce(state, {type: 'object', op: {kind: 'locked', id: 1, on: true}})
+    expect(reduce(locked, at('move', column, row)).hover?.blocked).toBeUndefined()
+})
+
 test('solo hides everything else, and deleting an object takes its voxels with it', () => {
     const state = reduce(armed('draw'), {type: 'object', op: {kind: 'add'}})
     const soloed = reduce(state, {type: 'object', op: {kind: 'solo', id: 2}})
@@ -1256,7 +1288,7 @@ test('the outline names the cells the click is about to write, not an approximat
     const aimed = reduce(state, at('move', column, row))
     const hover = aimed.hover
     if (!hover) throw new Error('the pointer is over the model')
-    expect(hover.blocked).toBe(false)
+    expect(hover.blocked).toBeUndefined()
 
     // The same pixel, pressed. What was outlined has to be exactly what was written — a preview
     // that is merely close is a preview the artist learns to distrust.
@@ -1288,8 +1320,10 @@ test('a click that would write nothing says so before the press, not after', () 
     }
     if (!silent || !live) throw new Error('the model has both kinds of pixel from the front')
 
-    expect(reduce(state, at('move', silent.column, silent.row)).hover?.blocked).toBe(true)
-    expect(reduce(state, at('move', live.column, live.row)).hover?.blocked).toBe(false)
+    expect(reduce(state, at('move', silent.column, silent.row)).hover?.blocked?.reason).toBe(
+        'outside'
+    )
+    expect(reduce(state, at('move', live.column, live.row)).hover?.blocked).toBeUndefined()
 })
 
 test('the outline re-aims when the brush changes, without the mouse moving', () => {
@@ -1390,7 +1424,7 @@ test('every tool that does something says what, before the press', () => {
         if (!hover) throw new Error(`${tool} has an answer with the pointer on the model`)
         // Either the cells to draw one cube each for, or a box standing in for too many of them.
         expect(hover.cells.length > 0 || hover.bounds !== undefined).toBe(true)
-        expect(hover.blocked).toBe(false)
+        expect(hover.blocked).toBeUndefined()
     }
 
     // Measure is not built, and a preview of a gesture that does not exist is the worst lie of all.
@@ -1449,7 +1483,7 @@ test('Pick proposes the colour it would take, not the one already loaded', () =>
     expect(hover.paint).not.toBe(state.color)
 
     // Aim at it again with that colour loaded and the press would do nothing, which is `blocked`.
-    expect(reduce(picked, at('move', column, row)).hover?.blocked).toBe(true)
+    expect(reduce(picked, at('move', column, row)).hover?.blocked?.reason).toBe('nothing')
 })
 
 test('the grab tools outline what the press would take hold of', () => {

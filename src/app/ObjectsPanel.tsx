@@ -53,6 +53,7 @@ const Row = ({
     canRemove,
     isActive,
     isSoloed,
+    isBlocking,
     shown,
     isRenaming,
     isDragging,
@@ -70,6 +71,8 @@ const Row = ({
     canRemove: boolean
     isActive: boolean
     isSoloed: boolean
+    /** This object's lock is what is refusing the press under the cursor right now. */
+    isBlocking: boolean
     shown: boolean
     isRenaming: boolean
     isDragging: boolean
@@ -172,9 +175,17 @@ const Row = ({
                 role='switch'
                 aria-checked={entry.locked}
                 aria-label={`Lock ${entry.name}`}
-                title={entry.locked ? `Unlock ${entry.name}` : `Lock ${entry.name} against edits`}
+                title={
+                    isBlocking ? `${entry.name} is locked — this is what is refusing the edit`
+                    : entry.locked ?
+                        `Unlock ${entry.name}`
+                    :   `Lock ${entry.name} against edits`
+                }
                 className='object-flag'
                 data-on={entry.locked || undefined}
+                // Lit while the cursor is over voxels this lock is protecting. The hint bar says
+                // the name; this says which of the eight switches on the row to press.
+                data-blocking={isBlocking || undefined}
                 onClick={() => {
                     onOp({kind: 'locked', id: entry.id, on: !entry.locked})
                 }}
@@ -224,6 +235,7 @@ export const ObjectsPanel = ({
     volume,
     query,
     canRemove,
+    blocking,
     onQuery,
     onOp
 }: {
@@ -231,6 +243,8 @@ export const ObjectsPanel = ({
     volume: Volume
     query: string
     canRemove: boolean
+    /** The locked object refusing the press under the cursor, if one is. */
+    blocking: number | undefined
     onQuery: (query: string) => void
     onOp: (op: ObjectOp) => void
 }) => {
@@ -293,6 +307,7 @@ export const ObjectsPanel = ({
                             canRemove={canRemove}
                             isActive={entry.id === objects.active}
                             isSoloed={objects.solo === entry.id}
+                            isBlocking={blocking === entry.id}
                             shown={isShown(objects, entry.id)}
                             isRenaming={renaming === entry.id}
                             isDragging={dragging === entry.id}

@@ -501,12 +501,18 @@ body,
     border: 1px solid var(--color-border);
     background: var(--color-background-card);
     color: var(--color-icon-secondary);
+    /*
+     * The bar grows to fit its hints instead of wrapping one of them onto a second line. A hint
+     * broken across two lines is taller than the row it sits in and reads as a different control.
+     */
+    white-space: nowrap;
 }
 
 .hint {
     display: flex;
     align-items: center;
     gap: 6px;
+    flex-shrink: 0;
 }
 
 .hint-divider {
@@ -644,6 +650,17 @@ body,
 
 .object-flag[data-on] {
     color: var(--color-icon-accent);
+}
+
+/*
+ * The lock that is refusing the edit under the cursor, right now.
+ *
+ * After `[data-on]` so it wins on a lock that is, by definition, on. It takes the same warning
+ * colour the hint bar's message does, because the two are one sentence said in two places: the bar
+ * names the object, and this points at the switch that lets go of it.
+ */
+.object-flag[data-blocking] {
+    color: var(--color-warning);
 }
 
 /* Hover lights an *off* switch only. Lighting an on one would erase the state under the cursor. */
@@ -1075,6 +1092,14 @@ body,
     stroke-dasharray: 3 3;
 }
 
+/*
+ * Still dashed, because the press still does nothing — but in the colour of the message that names
+ * the object, so the outline and the hint bar are read as one answer rather than two coincidences.
+ */
+.brush-ghost[data-blocked='locked'] .brush-ghost-outline {
+    stroke: var(--color-warning);
+}
+
 .rubber-band {
     position: absolute;
     border: 1px dashed var(--color-accent);
@@ -1216,11 +1241,19 @@ body,
 }
 
 /*
- * What a drop is about to cost. Warning rather than danger: the artist asked for this and undo will
- * take it back, so it is a number to read and not a mistake to feel bad about. It appears only while
- * a drag is in flight, which is why it can afford to be the one coloured thing in the bar.
+ * The two status chips in the bar: what a drop is about to cost, and why a press will do nothing.
+ *
+ * Both are `Badge`, so the pill, the padding and the text-on-colour pairing come from the design
+ * system and are not spelled again here. What was here first was a `background` on a bare span,
+ * which has neither padding nor radius — a tinted rectangle pressed against the letters, which
+ * reads as a text selection somebody forgot to clear rather than as a piece of status.
+ *
+ * Warning rather than danger for both. The drop is something the artist asked for and undo takes
+ * back; the lock is something they set themselves. Neither is a mistake to feel bad about.
+ *
+ * All that is left for this file is that they must not be squeezed when the bar runs out of room.
  */
-.hint-losing {
-    color: var(--color-warning);
-    background: var(--color-warning-muted);
+.hint-losing,
+.hint-blocked {
+    flex-shrink: 0;
 }

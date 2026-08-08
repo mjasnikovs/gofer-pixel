@@ -1,10 +1,12 @@
+import {Badge} from '@astryxdesign/core/Badge'
 import {Kbd} from '@astryxdesign/core/Kbd'
 import {Text} from '@astryxdesign/core/Text'
 import type {Cell} from '../doc/selection'
 import {basisFor, type Camera, type Vec3} from '../render/camera'
 
 import {filledBounds, type Volume} from '../render/volume'
-import {CameraIcon, MouseIcon} from './icons'
+import {CameraIcon, MagnetIcon, MouseIcon} from './icons'
+import type {Blocked} from './state'
 
 /**
  * The three things that float over the render in `docs/editor.png`: which way the axes point, a
@@ -340,7 +342,7 @@ export const BrushGhost = ({
     return (
         <svg
             className='brush-ghost overlay-plane'
-            data-blocked={hover.blocked || undefined}
+            data-blocked={hover.blocked?.reason}
             data-kind={hover.kind}
             style={{color: paintOf(volume, hover.paint)}}
             viewBox={`${String(-half)} ${String(-half)} ${String(camera.zoom)} ${String(camera.zoom)}`}
@@ -370,6 +372,9 @@ export const BrushGhost = ({
 /**
  * What the state hands the ghost. The shape rather than `Hover` itself, so the overlay depends on
  * the four fields it draws from and not on the twenty the reducer keeps.
+ *
+ * `blocked` is the exception: it comes over whole, because the *reason* reaches the screen as words
+ * in the hint bar and as a `data-blocked` value that `app.css` can tell apart.
  */
 export interface GhostHover {
     readonly kind: string
@@ -378,7 +383,7 @@ export interface GhostHover {
     readonly bounds: {min: Cell; max: Cell} | undefined
     /** Palette index, or `undefined` for a proposal that puts no paint anywhere. */
     readonly paint: number | undefined
-    readonly blocked: boolean
+    readonly blocked: Blocked | undefined
 }
 
 /**
@@ -432,7 +437,7 @@ const GhostBox = ({volume, camera, hover}: {volume: Volume; camera: Camera; hove
     return (
         <svg
             className='brush-ghost overlay-plane'
-            data-blocked={hover.blocked || undefined}
+            data-blocked={hover.blocked?.reason}
             data-kind={hover.kind}
             style={{color: paintOf(volume, hover.paint)}}
             viewBox={`${String(-half)} ${String(-half)} ${String(camera.zoom)} ${String(camera.zoom)}`}
@@ -665,16 +670,33 @@ export const ViewCube = ({volume, camera}: {volume: Volume; camera: Camera}) => 
  * right button — the arrangement every voxel editor already uses, and the only one where arming
  * Draw does not cost the artist the ability to look at what they are drawing.
  */
+/**
+ * Why the next press would do nothing, in words.
+ *
+ * The dashed ghost has always said *that* a press is silent. It could not say which of three
+ * silences it was, and the one that matters is the one with a switch behind it: an object that has
+ * been locked looks exactly like an object with nothing left to erase. So the locked case names the
+ * object, because the name is what the artist looks for in the list.
+ */
+const blockedSaid = (blocked: Blocked, name: string | undefined): string => {
+    if (blocked.reason === 'locked') return `${name ?? 'That object'} is locked`
+    if (blocked.reason === 'outside') return 'Outside the grid'
+    return 'Nothing to change here'
+}
+
 export const HintBar = ({
     tool,
     hover,
+    blocking,
     height,
     losing,
     onCapture
 }: {
     tool: string
     /** Where the next click lands, in the grid's own coordinates. */
-    hover: {cell: Cell; blocked: boolean} | undefined
+    hover: {cell: Cell; blocked: Blocked | undefined} | undefined
+    /** The name of the locked object in the way, when that is why the press is blocked. */
+    blocking: string | undefined
     /** How tall the grid is, so the layer reads as a position rather than as a number. */
     height: number
     /** How many voxels the drag in progress would destroy by landing. Zero when there is no drag. */
@@ -696,11 +718,34 @@ export const HintBar = ({
          * and it exists only while the drag does so there is nothing to tune out.
          */}
         {losing > 0 ?
-            <span className='hint hint-losing'>
-                <Text type='supporting'>
-                    {losing} {losing === 1 ? 'voxel' : 'voxels'} will be destroyed
-                </Text>
-            </span>
+            <Badge
+                className='hint-losing'
+                variant='warning'
+                label={`${String(losing)} ${losing === 1 ? 'voxel' : 'voxels'} will be destroyed`}
+            />
+        :   undefined}
+        {/*
+         * Why this press will be silent, beside the coordinate it would have been silent at.
+         *
+         * A `Badge` rather than a coloured run of text. The first cut set a background on a bare
+         * span, which has no padding and no radius, so a tinted rectangle sat tight against the
+         * letters and read as a text selection someone had left behind. This is the widget the
+         * design system already has for a short piece of status, and it brings the pill, the
+         * padding and the on-colour text pairing with it.
+         *
+         * Only `locked` is a warning, and only `locked` gets the emblem — the same magnet the row's
+         * lock switch wears, so the message and the switch that clears it are visibly one thing.
+         * The other two reasons are facts about where the cursor is, not something to act on, and a
+         * neutral pill is enough to read without being something to look at.
+         */}
+        {hover?.blocked ?
+            <Badge
+                className='hint-blocked'
+                data-reason={hover.blocked.reason}
+                variant={hover.blocked.reason === 'locked' ? 'warning' : 'neutral'}
+                icon={hover.blocked.reason === 'locked' ? <MagnetIcon /> : undefined}
+                label={blockedSaid(hover.blocked, blocking)}
+            />
         :   undefined}
         {/*
          * The cell under the cursor, and how high it is.
@@ -711,7 +756,7 @@ export const HintBar = ({
          */}
         <span
             className='hint hint-cell'
-            data-blocked={hover?.blocked === true || undefined}
+            data-blocked={hover?.blocked?.reason}
         >
             {hover ?
                 <>

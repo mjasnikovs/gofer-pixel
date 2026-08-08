@@ -1,5 +1,5 @@
 import {useCallback, useEffect, useMemo, useReducer} from 'react'
-import {canRemove, shownVolume} from '../doc/objects'
+import {canRemove, objectAt, shownVolume} from '../doc/objects'
 import type {Axis} from '../doc/brush'
 import {voxelsFromImage} from '../doc/import'
 import {toHexPalette} from '../doc/palette'
@@ -278,6 +278,17 @@ export const App = ({
         [volume, state.selection]
     )
 
+    /*
+     * The locked object standing between the cursor and the edit — the one thing the artist can act
+     * on when a press is about to be silent. It goes to the hint bar as a name and to the object
+     * list as a row to light up, so "why did nothing happen" and "here is the switch" are the same
+     * answer seen twice.
+     */
+    const blockingId =
+        state.hover?.blocked?.reason === 'locked' ? state.hover.blocked.object : undefined
+    const blocking =
+        blockingId === undefined ? undefined : objectAt(state.objects, blockingId)?.name
+
     return (
         <div className='app'>
             <Header
@@ -425,6 +436,7 @@ export const App = ({
                     <HintBar
                         tool={`${(state.tool[0] ?? '').toUpperCase()}${state.tool.slice(1)}`}
                         hover={state.hover}
+                        blocking={blocking}
                         height={volume.sz}
                         losing={state.losing}
                         onCapture={capture}
@@ -522,6 +534,7 @@ export const App = ({
                         volume={volume}
                         query={state.search}
                         canRemove={canRemove(state.objects)}
+                        blocking={blockingId}
                         onQuery={query => {
                             dispatch({type: 'search', query})
                         }}

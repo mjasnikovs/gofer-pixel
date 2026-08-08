@@ -3,7 +3,8 @@ import {act} from 'react'
 import {createRoot} from 'react-dom/client'
 import {createCamera} from '../render/camera'
 import {createVolume, setVoxel} from '../render/volume'
-import {ViewCube} from './ViewportOverlay'
+import {HintBar, ViewCube} from './ViewportOverlay'
+import type {Blocked} from './state'
 
 const volume = createVolume(8, 8, 8, new Uint8Array(256 * 4))
 setVoxel(volume, 3, 3, 3, 1)
@@ -58,4 +59,53 @@ test('the view cube fits inside its viewBox from every angle', async () => {
 test('the view cube still fills its viewBox at the angle that spreads it widest', async () => {
     // A wireframe that never touches its box is a cube drawn small, which is the other failure.
     expect(await cubeExtent(Math.PI / 4, Math.atan(Math.SQRT1_2))).toBeGreaterThan(0.9)
+})
+
+/** The hint bar, rendered on its own, so the message can be read the way an artist reads it. */
+const hintText = async (
+    blocked: Blocked | undefined,
+    blocking: string | undefined
+): Promise<string> => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const root = createRoot(host)
+    await act(async () => {
+        root.render(
+            <HintBar
+                tool='Erase'
+                hover={{cell: [1, 2, 3], blocked}}
+                blocking={blocking}
+                height={8}
+                losing={0}
+                onCapture={() => undefined}
+            />
+        )
+    })
+    const said = host.querySelector('.hint-blocked')?.textContent ?? ''
+    const reason = host.querySelector('.hint-blocked')?.getAttribute('data-reason') ?? ''
+    await act(async () => {
+        root.unmount()
+    })
+    host.remove()
+    return `${reason}: ${said}`
+}
+
+/**
+ * The bar has to name the lock, not merely register that something is off.
+ *
+ * This is the whole fix for a defect that cost an afternoon: erase over a locked object did nothing,
+ * and the only sign was a dashed outline that means three different things. Words, and the object's
+ * own name, are what tell "this is locked" from "there is nothing here to rub out".
+ */
+test('the hint bar says which silence this is, and names the object when there is one', async () => {
+    expect(await hintText({reason: 'locked', object: 2}, 'Roof')).toBe('locked: Roof is locked')
+    expect(await hintText({reason: 'outside', object: undefined}, undefined)).toBe(
+        'outside: Outside the grid'
+    )
+    expect(await hintText({reason: 'nothing', object: undefined}, undefined)).toBe(
+        'nothing: Nothing to change here'
+    )
+    // A press that will land says nothing at all. A bar with a permanent slot for "fine" is a bar
+    // the artist stops reading.
+    expect(await hintText(undefined, undefined)).toBe(': ')
 })

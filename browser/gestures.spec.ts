@@ -601,3 +601,56 @@ test('a drag that would destroy voxels says so before the button comes up', asyn
     await expect(warning).toHaveCount(0)
     expect((await read(page)).losing).toBe(0)
 })
+
+/**
+ * A locked object refuses every write, and used to refuse them in silence.
+ *
+ * The ghost went dashed, which it also does for a brush hanging off the grid and for a cell that
+ * already holds what is about to be written — so Erase over a locked object was indistinguishable
+ * from Erase being broken, and an afternoon went into finding out which it was. The reducer knew
+ * all along; nothing said it out loud.
+ */
+test('a locked object says which lock is refusing the press, and where the switch is', async ({
+    page
+}) => {
+    for (const tool of ['erase', 'move']) {
+        const {on, was} = await start(page, tool)
+        const lock = page.getByRole('switch', {name: 'Lock Model'})
+
+        // One synchronous read of the DOM. A locator waits for what is not there, and "not there"
+        // is half of what this is measuring.
+        const chip = (): Promise<{said: string; reason: string; ghost: string; lit: number}> =>
+            page.evaluate(() => {
+                const said = document.querySelector('.hint-blocked')
+                return {
+                    said: said?.textContent ?? '',
+                    reason: said?.getAttribute('data-reason') ?? '',
+                    ghost:
+                        document.querySelector('.brush-ghost')?.getAttribute('data-blocked') ?? '',
+                    lit: document.querySelectorAll('.object-flag[data-blocking]').length
+                }
+            })
+
+        await page.mouse.move(on.x, on.y)
+        expect((await chip()).reason, `${tool}: an allowed press says nothing`).toBe('')
+
+        await lock.click()
+        await page.mouse.move(on.x, on.y)
+        const blocked = await chip()
+        expect(blocked.reason, `${tool}: the bar names the silence`).toBe('locked')
+        expect(blocked.said, `${tool}: and names the object`).toBe('Model is locked')
+        expect(blocked.ghost, `${tool}: the outline agrees with the bar`).toBe('locked')
+        expect(blocked.lit, `${tool}: the row carrying the lock is lit`).toBe(1)
+
+        // And the warning is true: the press it warned about really does nothing.
+        await page.mouse.down()
+        await page.mouse.up()
+        const now = await read(page)
+        expect(now.hash, `${tool}: a locked object is not edited`).toBe(was.hash)
+        expect(now.undo, `${tool}: and leaves no undo step`).toBe(0)
+
+        await lock.click()
+        await page.mouse.move(on.x, on.y)
+        expect((await chip()).reason, `${tool}: unlocking clears it`).toBe('')
+    }
+})
