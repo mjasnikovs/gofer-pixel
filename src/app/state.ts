@@ -14,6 +14,7 @@ import {
     eightDirections,
     focusOn,
     ISOMETRIC_PITCH,
+    lastSerial,
     type NamedCamera
 } from '../doc/cameras'
 import {
@@ -28,6 +29,8 @@ import {
     type Draft
 } from '../doc/edits'
 import {figureCells} from '../doc/figures'
+import type {Reference} from '../doc/reference'
+import {DEFAULT_OUTPUT, type Document} from '../doc/save'
 import {
     addObject,
     duplicateOffset,
@@ -260,22 +263,6 @@ export interface Clipboard {
     readonly cells: readonly {offset: Cell; value: number}[]
 }
 
-/**
- * A picture to build against — `FEATURESET.md` §33.
- *
- * One per plane, stretched to the grid's own box in that plane, so an artist who drew a 32×32 front
- * view gets it lined up with a 32-wide model without doing arithmetic. It is a `data:` URL rather
- * than a path, because a document that referred to a file on disk would open blank on the next
- * machine, and it is not part of the model: nothing here is ever rendered into a sprite.
- */
-export interface Reference {
-    readonly plane: Axis
-    readonly url: string
-    readonly opacity: number
-    /** Locked means the panel will not change or drop it — `FEATURESET.md` §33's "lock it". */
-    readonly locked: boolean
-}
-
 /** A rubber band while the pointer is down, in the viewport's own pixels. */
 export interface Band {
     readonly x0: number
@@ -412,7 +399,23 @@ export interface Blocked {
 const NOTHING: Blocked = {reason: 'nothing', object: undefined}
 const OUTSIDE: Blocked = {reason: 'outside', object: undefined}
 
+/**
+ * Which file is open, and whether it has been written since it last changed.
+ *
+ * It is state rather than a prop because Save As, New and Open all rename the document, and a name
+ * that only `main.tsx` can set is a name nothing can change.
+ */
+export interface DocumentIdentity {
+    /** With its extension: `knight.gpix`, or `car.vox` for something imported. */
+    readonly name: string
+    /** Milliseconds since the epoch of the last successful write, or `undefined` for never. */
+    readonly savedAt: number | undefined
+    /** Whether there is something in this document that no file on disk holds. */
+    readonly dirty: boolean
+}
+
 export interface AppState {
+    readonly doc: DocumentIdentity
     readonly volume: Volume
     readonly cameras: readonly NamedCamera[]
     /** Which stored camera the viewport is currently showing, if it still matches one. */
@@ -584,6 +587,8 @@ export type AppAction =
     | {type: 'reference-drop'; plane: Axis}
     | {type: 'import-image'; volume: Volume; name: string}
     | {type: 'open'; document: OpenedDocument}
+    | {type: 'new'; volume: Volume; objects: Objects; name: string}
+    | {type: 'saved'; name: string; at: number}
     | {type: 'slice'; on: boolean}
     | {type: 'slice-step'; delta: number}
     | {type: 'bake'}
@@ -638,16 +643,27 @@ const opening = (cameras: readonly NamedCamera[]): NamedCamera | undefined =>
     cameras[1] ?? cameras[0]
 
 /**
- * A document opened from somewhere other than a `.vox` file — a recovered autosave, which brings
- * its own objects and its own cameras and must not have them regenerated over the top.
+ * A document opened from somewhere other than a `.vox` file — a `.gpix` off the disk or a recovered
+ * autosave, which brings its own objects, cameras, references and export settings and must not have
+ * any of them regenerated over the top.
+ *
+ * It is `doc/save.ts`'s own `Document` plus the name the file had, so there is one shape between the
+ * format and the app and no field can be added to one and forgotten in the other.
  */
-export interface OpenedDocument {
-    readonly volume: Volume
-    readonly objects: Objects
-    readonly cameras: readonly NamedCamera[]
+export interface OpenedDocument extends Document {
+    readonly name: string
+    /**
+     * Whether what is arriving is work no file on disk holds.
+     *
+     * True for a snapshot, false for a `.gpix`, and the distinction is the whole point. An autosave
+     * is written on every *committed edit*, so a snapshot is by definition an edit that was never
+     * saved — and a recovery that opened claiming to be saved would let the artist close the tab
+     * without a word and lose exactly the work the recovery just handed back.
+     */
+    readonly unsaved?: boolean
 }
 
-export const initialState = (source: Volume, opened?: OpenedDocument): AppState => {
+export const initialState = (source: Volume, name: string, opened?: OpenedDocument): AppState => {
     /*
      * Every document opens on a palette worth painting from — see `freshenPalette`. It runs here
      * rather than in the `.vox` reader because it is an editor decision, not a format one: the
@@ -657,7 +673,15 @@ export const initialState = (source: Volume, opened?: OpenedDocument): AppState 
     const volume = {...source, palette: freshenPalette(source)}
     const cameras = opened?.cameras.length ? [...opened.cameras] : eightDirections(volume)
     const first = opening(cameras)
+    /*
+     * A version-1 file, and every document that was never saved, carries `DEFAULT_OUTPUT` — whose
+     * `preset` is the empty string, because the format may not know the app's preset names. That
+     * empty string becomes the first built-in preset here, which is the one place that mapping
+     * belongs.
+     */
+    const output = opened?.output
     return {
+        doc: {name, savedAt: undefined, dirty: opened?.unsaved === true},
         volume,
         cameras,
         selected: first?.id,
@@ -668,15 +692,15 @@ export const initialState = (source: Volume, opened?: OpenedDocument): AppState 
             gesture: undefined
         },
         map: MODE_COLOR,
-        cell: 64,
-        padding: 0,
-        bounds: false,
-        presets: [],
-        references: [],
+        cell: output?.cell ?? 64,
+        padding: output?.padding ?? 0,
+        bounds: output?.bounds ?? false,
+        presets: output?.presets ?? [],
+        references: opened?.references ?? [],
         preview: 64,
         sheet: undefined,
         exporting: false,
-        serial: 0,
+        serial: lastSerial(cameras),
         history: EMPTY_HISTORY,
         stroke: undefined,
         selection: EMPTY_SELECTION,
@@ -685,7 +709,7 @@ export const initialState = (source: Volume, opened?: OpenedDocument): AppState 
         losing: 0,
         aim: undefined,
         hover: undefined,
-        symmetry: NO_SYMMETRY,
+        symmetry: opened?.symmetry ?? NO_SYMMETRY,
         objects: opened?.objects ?? initialObjects(volume),
         search: '',
         plane: undefined,
@@ -701,7 +725,8 @@ export const initialState = (source: Volume, opened?: OpenedDocument): AppState 
         snap: true,
         invert: false,
         workspace: 'model',
-        preset: PRESETS[0].name,
+        preset:
+            output?.preset === undefined || output.preset === '' ? PRESETS[0].name : output.preset,
         fps: 24,
         frame: 1
     }
@@ -2040,20 +2065,56 @@ const step = (state: AppState, action: AppAction): AppState => {
          * would need a resize and a palette remap, and neither is what "instantly gives artists
          * something to sculpt from" means.
          */
+        /*
+         * A PNG extruded into voxels — `FEATURESET.md` §34.
+         *
+         * The reference art and the export presets do carry over, unlike `open` below, because this
+         * is not another project arriving: it is the artist turning the sketch they are already
+         * tracing into something to sculpt, in the session they are already in. It starts dirty
+         * because there are voxels here that no file holds.
+         */
         case 'import-image': {
-            const opened = initialState(action.volume)
-            return {...opened, references: state.references, presets: state.presets}
+            const imported = initialState(action.volume, action.name)
+            return {
+                ...imported,
+                doc: {...imported.doc, dirty: true},
+                references: state.references,
+                presets: state.presets
+            }
         }
 
         /*
-         * Restoring a snapshot — `FEATURESET.md` §32. It replaces the document and empties the
-         * history, because the history is a list of diffs against a grid that is no longer there
-         * and undoing one of them would apply it to the wrong model.
+         * A document replacing this one — a `.gpix` off the disk, or a snapshot being restored
+         * (`FEATURESET.md` §32). It empties the undo history, because the history is a list of
+         * diffs against a grid that is no longer there and undoing one would apply it to the wrong
+         * model.
+         *
+         * It takes the references and the export presets from the file. They used to be carried
+         * over from the state being replaced, which was right when the only caller was a snapshot
+         * restore inside one session. It is wrong for a file: a `.gpix` brings its own, and keeping
+         * the old ones would put one project's reference art over another project's model.
          */
-        case 'open': {
-            const opened = initialState(action.document.volume, action.document)
-            return {...opened, references: state.references, presets: state.presets}
-        }
+        case 'open':
+            return initialState(action.document.volume, action.document.name, action.document)
+
+        /*
+         * A new grid, and nothing else carried over. The empty camera list is what asks
+         * `initialState` to regenerate them: `eightDirections` frames the grid it is given, and a
+         * new grid is a different size from the one that was open.
+         */
+        case 'new':
+            return initialState(action.volume, action.name, {
+                name: action.name,
+                volume: action.volume,
+                objects: action.objects,
+                cameras: [],
+                references: [],
+                symmetry: NO_SYMMETRY,
+                output: DEFAULT_OUTPUT
+            })
+
+        case 'saved':
+            return {...state, doc: {name: action.name, savedAt: action.at, dirty: false}}
 
         case 'reorder-camera': {
             const from = state.cameras.findIndex(({id}) => id === action.id)
@@ -2209,8 +2270,70 @@ const AIMED_AT: readonly (keyof AppState)[] = [
     'selection'
 ]
 
+/**
+ * Everything a `.gpix` file holds, as fields of the state. Read against `doc/save.ts`.
+ *
+ * The document is dirty when one of these changes, and that is a *comparison* rather than a list of
+ * actions on purpose. An action list would have to be right about fifty cases and about which of
+ * them are no-ops — `pointer` fires on every mouse-move and changes the model on perhaps one in a
+ * hundred — and a case that got it wrong would leave the artist a document claiming to be saved
+ * when it is not. That is the failure that loses work, so it is not left to a list anyone has to
+ * remember to update.
+ *
+ * Everything absent from this is chrome: tool, brush, colour, the grid switches, the orbit, the
+ * selection, the clipboard and the undo history. None of them survives a save and a reload, so
+ * changing one cannot make a document unsaved.
+ */
+const DOCUMENT_FIELDS: readonly (keyof AppState)[] = [
+    'volume',
+    'objects',
+    'cameras',
+    'references',
+    'symmetry',
+    // The export settings — `SavedOutput`.
+    'cell',
+    'padding',
+    'bounds',
+    'preset',
+    'presets'
+]
+
+/**
+ * The state as the thing `doc/save.ts` writes down — the other half of `DOCUMENT_FIELDS`.
+ *
+ * One function, so a save and a dirty check can never disagree about what the document is: add a
+ * field to the format and both the list above and this stop compiling until it is handled.
+ */
+export const asDocument = (state: AppState): Document => ({
+    volume: state.volume,
+    objects: state.objects,
+    cameras: state.cameras,
+    references: state.references,
+    symmetry: state.symmetry,
+    output: {
+        cell: state.cell,
+        padding: state.padding,
+        bounds: state.bounds,
+        preset: state.preset,
+        presets: state.presets
+    }
+})
+
 export const reduce = (state: AppState, action: AppAction): AppState => {
-    const next = step(state, action)
-    if (next === state) return state
+    const acted = step(state, action)
+    if (acted === state) return state
+    /*
+     * An action that set the identity itself — `open`, `new`, `saved` — is left alone. Each one
+     * replaces the whole document, so every field below differs and the comparison would call a
+     * file that has just been opened unsaved.
+     */
+    const next =
+        (
+            acted.doc === state.doc
+            && !state.doc.dirty
+            && DOCUMENT_FIELDS.some(key => acted[key] !== state[key])
+        ) ?
+            {...acted, doc: {...acted.doc, dirty: true}}
+        :   acted
     return AIMED_AT.some(key => next[key] !== state[key]) ? hoverAt(next) : next
 }

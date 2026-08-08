@@ -44,8 +44,19 @@ const restoreLabels = (
     })
 }
 
+/**
+ * What the header says about the file — the mockup's `Knight • Unsaved`.
+ *
+ * Three states rather than two, because "never written" and "written, then changed" are different
+ * amounts of trouble to be in and the artist should be able to tell them apart at a glance.
+ */
+const savedLabel = ({dirty, savedAt}: AppState['doc']): string => {
+    if (dirty) return 'Unsaved changes'
+    if (savedAt === undefined) return 'Not saved'
+    return `Saved ${new Date(savedAt).toLocaleTimeString()}`
+}
+
 export const Header = ({
-    name,
     state,
     onWorkspace,
     onExport,
@@ -53,9 +64,13 @@ export const Header = ({
     onRedo,
     restores,
     onRestore,
-    onForget
+    onForget,
+    overwrites,
+    onNew,
+    onOpen,
+    onSave,
+    onSaveAs
 }: {
-    name: string
     state: AppState
     onWorkspace: (workspace: AppState['workspace']) => void
     onExport: () => void
@@ -64,20 +79,25 @@ export const Header = ({
     restores: readonly {key: string; at: number; name: string}[]
     onRestore: (key: string) => void
     onForget: () => void
+    /** Whether Save can write back over the open file — see `doc/files.ts`. */
+    overwrites: boolean
+    onNew: () => void
+    onOpen: () => void
+    onSave: () => void
+    onSaveAs: () => void
 }) => (
     <header className='app-header'>
         <div className='header-group'>
             <span className='app-mark' />
             <Text weight='semibold'>gofer-pixel</Text>
             <span className='app-divider' />
-            <Text type='supporting'>{name}</Text>
+            <Text type='supporting'>{state.doc.name}</Text>
             <Text
                 type='supporting'
                 color='disabled'
             >
                 · {state.volume.sx} × {state.volume.sy} × {state.volume.sz} ·{' '}
-                {countVoxels(state.volume)} voxels ·{' '}
-                {state.history.past.length === 0 ? 'Unsaved' : 'Autosaved'}
+                {countVoxels(state.volume)} voxels · {savedLabel(state.doc)}
             </Text>
         </div>
 
@@ -173,21 +193,34 @@ export const Header = ({
                 onClick={onExport}
             />
             {/*
-             * Snapshots — `FEATURESET.md` §32. Restoring is not undo: undo covers the last 512
-             * strokes of this session, and these cover the last few sessions, which is the case
-             * undo cannot reach because the browser was closed.
+             * The file menu, and below it the snapshots — `FEATURESET.md` §32. Restoring is not
+             * undo: undo covers the last 512 strokes of this session, and these cover the last few
+             * sessions, which is the case undo cannot reach because the browser was closed.
+             *
+             * Save says what it will actually do. On a browser without the File System Access API
+             * it cannot overwrite anything — every save is another file in the downloads folder —
+             * and a menu item promising otherwise would be the disabled-control lie this header
+             * already argues against, in its worse form: a control that lies while working.
              */}
             <MoreMenu
                 label='Main menu'
                 size='sm'
                 items={[
+                    {label: 'New project…', onClick: onNew},
+                    {label: 'Open…', onClick: onOpen},
+                    {
+                        label: overwrites ? 'Save' : 'Save a copy',
+                        onClick: onSave
+                    },
+                    {label: 'Save As…', onClick: onSaveAs},
+                    ...(restores.length > 0 ? [{type: 'divider' as const}] : []),
                     ...restoreLabels(restores).map(entry => ({
                         label: entry.label,
                         onClick: () => {
                             onRestore(entry.key)
                         }
                     })),
-                    ...(restores.length > 0 ? [{type: 'divider' as const}] : []),
+                    {type: 'divider' as const},
                     {
                         label: 'Forget every snapshot',
                         isDisabled: restores.length === 0,

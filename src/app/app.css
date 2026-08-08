@@ -1257,3 +1257,30 @@ body,
 .hint-blocked {
     flex-shrink: 0;
 }
+
+/*
+ * The two file dialogs — New project and the unsaved-changes guard.
+ *
+ * Layout only. Every colour, border and control inside them is astryx's, because a dialog is the
+ * one place a bespoke surface looks most obviously bolted on.
+ */
+.new-project {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+/* Three equal fields, so 256 and 8 line up rather than the fields sizing to their contents. */
+.new-project-axes {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+}
+
+.new-project-actions,
+.dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 8px;
+}

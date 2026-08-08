@@ -9,6 +9,38 @@ export default defineConfig((): UserConfig => ({
     // resolves in dev and silently emits nothing in a production build.
     assetsInclude: ['**/*.vox'],
     clearScreen: false,
+    /*
+     * Every astryx entrypoint the app imports, named up front.
+     *
+     * Vite discovers dependencies by crawling from `index.html`, and a subpath it has not
+     * pre-bundled yet is found *while the page is loading* — at which point it optimizes and
+     * **full-reloads the page**. That reload lands between `page.goto` returning and the browser
+     * suite reading `window.goferPixel`, so the handle is gone and `firstFrame` is undefined. It
+     * fails only on a cold `node_modules/.vite`, which is exactly when nobody is looking: the first
+     * run after a fresh checkout, or the first run after a component is added here.
+     *
+     * Listing them is the fix rather than making the suite wait for the handle to reappear, because
+     * a wait would hide a real boot failure behind a timeout — see the testing law in `CLAUDE.md`.
+     */
+    optimizeDeps: {
+        include: [
+            '@astryxdesign/core',
+            '@astryxdesign/core/AlertDialog',
+            '@astryxdesign/core/Badge',
+            '@astryxdesign/core/Button',
+            '@astryxdesign/core/Dialog',
+            '@astryxdesign/core/IconButton',
+            '@astryxdesign/core/Kbd',
+            '@astryxdesign/core/MoreMenu',
+            '@astryxdesign/core/NumberInput',
+            '@astryxdesign/core/RadioList',
+            '@astryxdesign/core/SegmentedControl',
+            '@astryxdesign/core/Selector',
+            '@astryxdesign/core/Switch',
+            '@astryxdesign/core/Text',
+            '@astryxdesign/core/TextInput'
+        ]
+    },
     server: {
         port: 1430,
         strictPort: true

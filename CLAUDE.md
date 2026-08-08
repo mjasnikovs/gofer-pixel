@@ -41,6 +41,7 @@ What is there now, and roughly in dependency order:
 | `src/render/`   | the CPU raycaster, the shader it is mirrored by, the camera, the WebGL2 renderer |
 | `src/vox/`      | `.vox` → `Volume`                                                                |
 | `src/doc/`      | cameras, the brush, edits, undo, selection, transforms, symmetry, figures        |
+| `src/doc/files` | the `.gpix` save format, the disk behind a port, and the new-project templates   |
 | `src/sheet/`    | packing cameras into the six output sheets                                       |
 | `src/image/`    | PNG encoding                                                                     |
 | `src/viewport/` | orbit/pan/zoom as a pure function, and the React canvas                          |

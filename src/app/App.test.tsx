@@ -2,10 +2,13 @@ import {expect, test} from 'bun:test'
 import {act} from 'react'
 import {createRoot, type Root} from 'react-dom/client'
 import {readVox} from '../vox/vox-file'
+import {createVolume} from '../render/volume'
 import {App} from './App'
-import {loadDocument, saveDocument} from '../doc/save'
+import {DEFAULT_OUTPUT, loadDocument, saveDocument} from '../doc/save'
 import {latestSnapshot, memoryStore, snapshots, type Store} from '../doc/store'
+import {memoryFiles, type Files} from '../doc/files'
 import {initialObjects} from '../doc/objects'
+import {NO_SYMMETRY} from '../doc/symmetry'
 import {handle} from './handle'
 
 const volume = readVox(
@@ -18,7 +21,7 @@ const volume = readVox(
  * fails to get a context and every other panel still works, because none of them are downstream of
  * one.
  */
-const mount = async (store?: Store): Promise<{root: Root; host: HTMLElement}> => {
+const mount = async (store?: Store, files?: Files): Promise<{root: Root; host: HTMLElement}> => {
     const host = document.createElement('div')
     document.body.appendChild(host)
     const root = createRoot(host)
@@ -28,11 +31,22 @@ const mount = async (store?: Store): Promise<{root: Root; host: HTMLElement}> =>
                 volume={volume}
                 name='car.vox'
                 {...(store ? {store} : {})}
+                {...(files ? {files} : {})}
             />
         )
     })
     return {root, host}
 }
+
+/** The document as `saveDocument` wants it, with nothing interesting in the version-2 half. */
+const asSaved = (grid = volume) => ({
+    volume: grid,
+    objects: initialObjects(grid),
+    cameras: [],
+    references: [],
+    symmetry: NO_SYMMETRY,
+    output: DEFAULT_OUTPUT
+})
 
 const unmount = async ({root, host}: {root: Root; host: HTMLElement}): Promise<void> => {
     await act(async () => {
@@ -49,6 +63,31 @@ const control = (host: HTMLElement, label: string): HTMLElement => {
     if (!found) throw new Error(`nothing labelled "${label}"`)
     return found
 }
+
+/**
+ * A menu item by its label. Menus render into a portal on `document.body`, not inside the mount, so
+ * they are the one thing `control(mounted.host, …)` cannot reach.
+ */
+const menuItem = (label: string): HTMLElement => {
+    const found = [...global.document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+        node => node.textContent.trim() === label
+    )
+    if (!found) throw new Error(`no menu item "${label}"`)
+    return found
+}
+
+/** A radio by its value. Its label is a sibling `<label>`, not a name on the input. */
+const radio = (value: string): HTMLElement => {
+    const found = global.document.querySelector<HTMLElement>(
+        `dialog[open] input[type="radio"][value="${value}"]`
+    )
+    if (!found) throw new Error(`no radio for "${value}"`)
+    return found
+}
+
+/** The title of whichever dialog is open. Both of the file dialogs are portalled too. */
+const openDialogTitle = (): string =>
+    global.document.querySelector('dialog[open] h1, dialog[open] h2')?.textContent.trim() ?? ''
 
 const within = (host: HTMLElement, selector: string, label: string): HTMLElement => {
     const region = host.querySelector<HTMLElement>(selector)
@@ -268,7 +307,7 @@ test('two snapshots in the same second are two distinct entries in the menu', as
     // inside a second used to render two menu items with one React key and log a warning.
     const backing = new Map<string, string>()
     const store = memoryStore(backing)
-    const document_ = saveDocument(volume, initialObjects(volume), [], 'car.vox')
+    const document_ = saveDocument(asSaved(), 'car.vox')
     const at = Date.parse('2026-08-07T19:11:18.000Z')
     backing.set('gofer-pixel/snapshot/' + String(at), JSON.stringify({...document_, at}))
     backing.set('gofer-pixel/snapshot/' + String(at + 400), JSON.stringify({...document_, at}))
@@ -330,5 +369,255 @@ test('an edit is autosaved, and the save reopens as the document that made it', 
     expect(back?.objects.list).toHaveLength(2)
     expect(back?.cameras).toHaveLength(8)
 
+    await unmount(mounted)
+})
+
+/*
+ * The file menu. It drives a `memoryFiles` disk rather than the browser's, for the same reason the
+ * snapshot tests drive a `memoryStore`: the picker is a native dialog with no automation surface,
+ * and what can lose an artist's work is the logic around it. See `doc/files.ts`.
+ */
+test('Save writes the open document to disk and the header stops saying unsaved', async () => {
+    const disk = new Map<string, string>()
+    const mounted = await mount(memoryStore(), memoryFiles(disk))
+
+    // Draw something, so there is a document worth writing and a dirty flag worth clearing.
+    await act(async () => {
+        handle.dispatch?.({type: 'object', op: {kind: 'add'}})
+    })
+    expect(handle.state?.doc.dirty).toBe(true)
+    expect(mounted.host.querySelector('.app-header')?.textContent).toContain('Unsaved changes')
+
+    await act(async () => {
+        control(mounted.host, 'Main menu').click()
+    })
+    await act(async () => {
+        menuItem('Save').click()
+    })
+
+    // `car.vox` is somebody else's format, so it saves as `car.gpix` rather than over their model.
+    expect([...disk.keys()]).toEqual(['car.gpix'])
+    expect(handle.state?.doc).toMatchObject({name: 'car.gpix', dirty: false})
+    expect(mounted.host.querySelector('.app-header')?.textContent).not.toContain('Unsaved')
+
+    // And what landed on the disk opens as the document that was on screen.
+    const back = loadDocument(disk.get('car.gpix') ?? '')
+    expect(back?.volume.data).toEqual(handle.state?.volume.data ?? new Uint8Array())
+    expect(back?.objects.list).toHaveLength(2)
+
+    await unmount(mounted)
+})
+
+test('a cancelled save leaves the document unsaved rather than claiming it was written', async () => {
+    const disk = new Map<string, string>()
+    const mounted = await mount(
+        memoryStore(),
+        memoryFiles(disk, () => undefined)
+    )
+
+    await act(async () => {
+        handle.dispatch?.({type: 'object', op: {kind: 'add'}})
+    })
+    await act(async () => {
+        control(mounted.host, 'Main menu').click()
+    })
+    await act(async () => {
+        menuItem('Save').click()
+    })
+
+    expect(disk.size).toBe(0)
+    expect(handle.state?.doc.dirty).toBe(true)
+    expect(handle.state?.doc.savedAt).toBeUndefined()
+
+    await unmount(mounted)
+})
+
+test('a .gpix on the disk opens over what is on screen', async () => {
+    const other = createVolume(8, 8, 8, volume.palette)
+    other.data[0] = 1
+    const saved = saveDocument(
+        {...asSaved(other), symmetry: {x: true, y: false, z: false, radial: false}},
+        'knight.gpix'
+    )
+    const disk = new Map([['knight.gpix', JSON.stringify(saved)]])
+    const mounted = await mount(memoryStore(), memoryFiles(disk))
+
+    await act(async () => {
+        control(mounted.host, 'Main menu').click()
+    })
+    await act(async () => {
+        menuItem('Open…').click()
+    })
+
+    expect(handle.state?.doc.name).toBe('knight.gpix')
+    expect([handle.state?.volume.sx, handle.state?.volume.sy]).toEqual([8, 8])
+    expect(handle.state?.symmetry.x).toBe(true)
+    expect(handle.state?.doc.dirty).toBe(false)
+
+    await unmount(mounted)
+})
+
+test('New with unsaved work asks first, and cancelling leaves the model alone', async () => {
+    const mounted = await mount(memoryStore(), memoryFiles())
+
+    await act(async () => {
+        handle.dispatch?.({type: 'object', op: {kind: 'add'}})
+    })
+    const before = handle.state?.volume
+
+    await act(async () => {
+        control(mounted.host, 'Main menu').click()
+    })
+    await act(async () => {
+        menuItem('New project…').click()
+    })
+
+    // The guard, not the new-project dialog.
+    expect(openDialogTitle()).toContain('unsaved')
+    await act(async () => {
+        control(global.document.body, 'Cancel').click()
+    })
+    expect(handle.state?.volume).toBe(before)
+
+    await unmount(mounted)
+})
+
+test('New on a clean document goes straight to the templates and builds the box they name', async () => {
+    const mounted = await mount(memoryStore(), memoryFiles())
+
+    await act(async () => {
+        control(mounted.host, 'Main menu').click()
+    })
+    await act(async () => {
+        menuItem('New project…').click()
+    })
+    expect(openDialogTitle()).toBe('New project')
+
+    await act(async () => {
+        radio('Isometric tile').click()
+    })
+    await act(async () => {
+        control(global.document.body, 'Create').click()
+    })
+
+    expect([handle.state?.volume.sx, handle.state?.volume.sy, handle.state?.volume.sz]).toEqual([
+        32, 32, 16
+    ])
+    expect(handle.state?.doc).toMatchObject({name: 'untitled.gpix', dirty: false})
+    expect(handle.state?.volume.data.some(value => value !== 0)).toBe(false)
+
+    await unmount(mounted)
+})
+
+/*
+ * The guard's own three buttons. Discard and Save-first both end with the artist somewhere new, and
+ * the third case — Save first, then back out of the picker — is the one that would lose the work
+ * the dialog was protecting.
+ */
+const guard = async (host: HTMLElement): Promise<void> => {
+    await act(async () => {
+        handle.dispatch?.({type: 'object', op: {kind: 'add'}})
+    })
+    await act(async () => {
+        control(host, 'Main menu').click()
+    })
+    await act(async () => {
+        menuItem('New project…').click()
+    })
+    expect(openDialogTitle()).toContain('unsaved')
+}
+
+test('Discard goes on to the thing that was asked for', async () => {
+    const mounted = await mount(memoryStore(), memoryFiles())
+    await guard(mounted.host)
+
+    await act(async () => {
+        control(global.document.body, 'Discard').click()
+    })
+
+    // Straight through to the templates, with nothing written.
+    expect(openDialogTitle()).toBe('New project')
+    await unmount(mounted)
+})
+
+test('Save first writes the file and then goes on', async () => {
+    const disk = new Map<string, string>()
+    const mounted = await mount(memoryStore(), memoryFiles(disk))
+    await guard(mounted.host)
+
+    await act(async () => {
+        control(global.document.body, 'Save first').click()
+    })
+
+    expect([...disk.keys()]).toEqual(['car.gpix'])
+    expect(handle.state?.doc).toMatchObject({name: 'car.gpix', dirty: false})
+    expect(openDialogTitle()).toBe('New project')
+    await unmount(mounted)
+})
+
+test('Save first, then backing out of the picker, is not a silent Discard', async () => {
+    const disk = new Map<string, string>()
+    const mounted = await mount(
+        memoryStore(),
+        memoryFiles(disk, () => undefined)
+    )
+    await guard(mounted.host)
+    const before = handle.state?.objects.list.length
+
+    await act(async () => {
+        control(global.document.body, 'Save first').click()
+    })
+
+    // Nothing written, and nothing thrown away: no new-project dialog, no new document.
+    expect(disk.size).toBe(0)
+    expect(openDialogTitle()).toBe('')
+    expect(handle.state?.objects.list.length).toBe(before)
+    expect(handle.state?.doc.dirty).toBe(true)
+    await unmount(mounted)
+})
+
+test('a typed custom size is the box that gets built', async () => {
+    const mounted = await mount(memoryStore(), memoryFiles())
+    await act(async () => {
+        control(mounted.host, 'Main menu').click()
+    })
+    await act(async () => {
+        menuItem('New project…').click()
+    })
+
+    /*
+     * Typing, as React sees it. React keeps its own copy of an input's value and ignores an event
+     * whose value it thinks it already has, so assigning `.value` and firing `input` is a no-op —
+     * the assignment has to go through the prototype's setter, which is what a real keystroke does.
+     */
+    const type = (field: HTMLInputElement, text: string): void => {
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+        setter?.call(field, text)
+        field.dispatchEvent(new Event('input', {bubbles: true}))
+    }
+
+    const [x, , z] = [
+        ...global.document.querySelectorAll<HTMLInputElement>('dialog[open] input[type="number"]')
+    ]
+    if (!x || !z) throw new Error('the dialog has an X, a Y and a Z')
+
+    // A number field picks Custom on its own, so nothing changes what is selected out from under
+    // the artist while they are still typing into it.
+    await act(async () => {
+        type(x, '48')
+    })
+    await act(async () => {
+        type(z, '8')
+    })
+
+    await act(async () => {
+        control(global.document.body, 'Create').click()
+    })
+
+    // What was typed is what gets built, on the two axes touched and the one left alone.
+    // `clampAxis` guards the out-of-range end of this and is tested in `doc/templates.test.ts`.
+    expect([handle.state?.volume.sx, handle.state?.volume.sy, handle.state?.volume.sz]).toEqual([
+        48, 32, 8
+    ])
     await unmount(mounted)
 })

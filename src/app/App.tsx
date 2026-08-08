@@ -1,9 +1,12 @@
-import {useCallback, useEffect, useMemo, useReducer} from 'react'
-import {canRemove, objectAt, shownVolume} from '../doc/objects'
+import {useCallback, useEffect, useMemo, useReducer, useState} from 'react'
+import {canRemove, initialObjects, objectAt, shownVolume} from '../doc/objects'
 import type {Axis} from '../doc/brush'
 import {voxelsFromImage} from '../doc/import'
 import {toHexPalette} from '../doc/palette'
 import {loadDocument, saveDocument} from '../doc/save'
+import {browserFiles, projectName, PROJECT_ACCEPT, type Files} from '../doc/files'
+import {newDocument} from '../doc/templates'
+import {readVox} from '../vox/vox-file'
 import {browserStore, clearSnapshots, putSnapshot, snapshots, type Store} from '../doc/store'
 import {sheetMetadata} from '../sheet/metadata'
 import {selectionBounds} from '../doc/selection'
@@ -27,6 +30,7 @@ import {AxisGizmo, BrushGhost, GroundGrid, HintBar, SelectionBox, ViewCube} from
 import {ViewsStrip} from './ViewsStrip'
 import {
     allPresets,
+    asDocument,
     initialState,
     presetMaps,
     previewVolume,
@@ -34,6 +38,8 @@ import {
     TOOLS,
     type OpenedDocument
 } from './state'
+import {NewProjectDialog} from './NewProjectDialog'
+import {UnsavedDialog} from './UnsavedDialog'
 import {handle} from './handle'
 
 /**
@@ -56,6 +62,22 @@ import {handle} from './handle'
  */
 const DEFAULT_EXTRUSION = 4
 
+/**
+ * A blob as a `data:` URL.
+ *
+ * `FileReader` rather than `btoa` over the bytes, because the base64 of a megabyte of PNG through
+ * `String.fromCharCode` is the argument-stack blowout `doc/save.ts` already comments on, and the
+ * platform has a reader that does not have the problem.
+ */
+const dataUrl = async (blob: Blob): Promise<string> =>
+    new Promise<string>(resolve => {
+        const reader = new FileReader()
+        reader.addEventListener('load', () => {
+            resolve(typeof reader.result === 'string' ? reader.result : '')
+        })
+        reader.readAsDataURL(blob)
+    })
+
 const NUDGES: Record<string, readonly [number, number, number] | undefined> = {
     ArrowRight: [1, 0, 0],
     ArrowLeft: [-1, 0, 0],
@@ -67,14 +89,16 @@ export const App = ({
     volume: source,
     name,
     opened,
-    store = browserStore()
+    store = browserStore(),
+    files = browserFiles()
 }: {
     volume: Volume
     name: string
     opened?: OpenedDocument | undefined
     store?: Store
+    files?: Files
 }) => {
-    const [state, dispatch] = useReducer(reduce, source, start => initialState(start, opened))
+    const [state, dispatch] = useReducer(reduce, source, start => initialState(start, name, opened))
     // Everything below reads the *document's* volume, not the one the file was opened with. They
     // are the same object until the first stroke, and after it the difference is the whole point.
     const {volume} = state
@@ -138,7 +162,13 @@ export const App = ({
                 return
             }
             if (!asVoxels) {
-                dispatch({type: 'reference', plane: onto, url: URL.createObjectURL(blob)})
+                /*
+                 * A `data:` URL, not `URL.createObjectURL`. An object URL is a handle into this
+                 * page's memory: it is dead on the next reload and it cannot be written into a
+                 * `.gpix`, so a project saved with reference art would have opened blank. The cost
+                 * is the PNG's own bytes, base64'd, inside the file.
+                 */
+                dispatch({type: 'reference', plane: onto, url: await dataUrl(blob)})
                 return
             }
             const canvas = document.createElement('canvas')
@@ -157,6 +187,94 @@ export const App = ({
             dispatch({type: 'import-image', volume: built, name: file.name})
         })()
     }, [])
+
+    /*
+     * The file menu — New, Open, Save, Save As.
+     *
+     * All four go through the `Files` port rather than touching the browser, for the same reason
+     * the snapshots go through `Store`: the logic that can lose an artist's work is *which* file
+     * gets written and whether the picker was cancelled, and that has to be testable without a
+     * browser. See `doc/files.ts`.
+     */
+    const doSave = useCallback(
+        async (reuse: boolean): Promise<boolean> => {
+            const current = handle.state ?? state
+            const suggested = projectName(current.doc.name)
+            const text = JSON.stringify(saveDocument(asDocument(current), suggested))
+            const written = await files.save(suggested, text, reuse)
+            // A cancelled picker leaves the document exactly as it was, still dirty. It must not
+            // report a save that did not happen.
+            if (written === undefined) return false
+            dispatch({type: 'saved', name: written, at: Date.now()})
+            return true
+        },
+        [files, state]
+    )
+
+    /*
+     * A `.gpix` is ours; a `.vox` is MagicaVoxel's and arrives as an untitled document. Anything
+     * else that will not parse is refused without touching what is open — a half-loaded document
+     * is the one outcome `doc/save.ts` exists to prevent.
+     */
+    const doOpen = useCallback(async () => {
+        const picked = await files.open(PROJECT_ACCEPT)
+        if (!picked) return
+        if (picked.name.toLowerCase().endsWith('.vox')) {
+            try {
+                const built = readVox(picked.bytes)
+                dispatch({
+                    type: 'new',
+                    volume: built,
+                    objects: initialObjects(built),
+                    name: picked.name
+                })
+            } catch {
+                // Not a `.vox` whatever it was called. The open document is untouched.
+            }
+            return
+        }
+        const loaded = loadDocument(picked.text)
+        if (loaded) dispatch({type: 'open', document: {...loaded, name: picked.name}})
+    }, [files])
+
+    const doNew = useCallback(
+        (size: readonly [number, number, number], fresh: string) => {
+            const {volume: built, objects} = newDocument(size)
+            files.forget()
+            dispatch({
+                type: 'new',
+                volume: built,
+                objects,
+                name: projectName(fresh)
+            })
+        },
+        [files]
+    )
+
+    /*
+     * The guard in front of New and Open — what stops an hour of work leaving without being asked
+     * about. It is the *pending* action rather than a boolean, so the dialog's Discard knows what
+     * the artist was trying to do and does it, instead of dismissing itself and making them click
+     * the menu a second time.
+     */
+    const [pending, setPending] = useState<'new' | 'open' | undefined>(undefined)
+    const [asking, setAsking] = useState(false)
+
+    const continueWith = useCallback(
+        (what: 'new' | 'open' | undefined) => {
+            if (what === 'new') setAsking(true)
+            else if (what === 'open') void doOpen()
+        },
+        [doOpen]
+    )
+
+    const guarded = useCallback(
+        (what: 'new' | 'open') => {
+            if (state.doc.dirty) setPending(what)
+            else continueWith(what)
+        },
+        [state.doc.dirty, continueWith]
+    )
 
     const loadPalette = useCallback(() => {
         const input = document.createElement('input')
@@ -203,6 +321,11 @@ export const App = ({
                 if (key === 'z') dispatch({type: event.shiftKey ? 'redo' : 'undo'})
                 else if (key === 'c') dispatch({type: 'copy'})
                 else if (key === 'v') dispatch({type: 'paste'})
+                // `Ctrl+S` must be swallowed or the browser opens its own Save Page dialog over
+                // the top of ours. Shift is Save As, which always asks.
+                else if (key === 's') void doSave(!event.shiftKey)
+                else if (key === 'o') guarded('open')
+                else if (key === 'n') guarded('new')
                 else return
                 event.preventDefault()
                 return
@@ -241,7 +364,25 @@ export const App = ({
         return () => {
             document.removeEventListener('keydown', onKey)
         }
-    }, [capture, state.slice])
+    }, [capture, state.slice, doSave, guarded])
+
+    /*
+     * Closing the tab with unsaved work asks first.
+     *
+     * An event, not a duration, so it is inside the testing law. The browser shows its own wording
+     * and ignores ours — `preventDefault` is the whole of the API — which is why there is nothing
+     * here to phrase.
+     */
+    useEffect(() => {
+        if (!state.doc.dirty) return undefined
+        const onClosing = (event: BeforeUnloadEvent): void => {
+            event.preventDefault()
+        }
+        globalThis.addEventListener('beforeunload', onClosing)
+        return () => {
+            globalThis.removeEventListener('beforeunload', onClosing)
+        }
+    }, [state.doc.dirty])
 
     /*
      * Autosave — `FEATURESET.md` §32.
@@ -254,7 +395,7 @@ export const App = ({
     const commits = state.history.past.length
     useEffect(() => {
         if (commits === 0) return
-        putSnapshot(store, saveDocument(state.volume, state.objects, state.cameras, name))
+        putSnapshot(store, saveDocument(asDocument(state), state.doc.name))
         // Only `commits` and the store: this must fire once per committed edit, not once per
         // camera turn, and the volume it reads is whatever the latest one is when it does.
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -292,12 +433,24 @@ export const App = ({
     return (
         <div className='app'>
             <Header
-                name={name}
                 state={state}
                 onWorkspace={workspace => {
                     dispatch({type: 'workspace', workspace})
                 }}
                 onExport={onExport}
+                overwrites={files.overwrites}
+                onNew={() => {
+                    guarded('new')
+                }}
+                onOpen={() => {
+                    guarded('open')
+                }}
+                onSave={() => {
+                    void doSave(true)
+                }}
+                onSaveAs={() => {
+                    void doSave(false)
+                }}
                 onUndo={() => {
                     dispatch({type: 'undo'})
                 }}
@@ -308,7 +461,10 @@ export const App = ({
                 onRestore={key => {
                     const text = store.get(key)
                     const back = text ? loadDocument(text) : undefined
-                    if (back) dispatch({type: 'open', document: back})
+                    // `unsaved`, because a snapshot is an edit that was autosaved and never
+                    // written to disk. Restoring one and calling it saved would let the artist
+                    // close the tab without a word.
+                    if (back) dispatch({type: 'open', document: {...back, unsaved: true}})
                 }}
                 onForget={() => {
                     clearSnapshots(store)
@@ -617,6 +773,41 @@ export const App = ({
              *     }}
              * />
              */}
+
+            {asking && (
+                <NewProjectDialog
+                    onClose={() => {
+                        setAsking(false)
+                    }}
+                    onCreate={(size, fresh) => {
+                        setAsking(false)
+                        doNew(size, fresh)
+                    }}
+                />
+            )}
+
+            <UnsavedDialog
+                isOpen={pending !== undefined}
+                name={state.doc.name}
+                everSaved={state.doc.savedAt !== undefined}
+                onCancel={() => {
+                    setPending(undefined)
+                }}
+                onDiscard={() => {
+                    const what = pending
+                    setPending(undefined)
+                    continueWith(what)
+                }}
+                onSave={() => {
+                    const what = pending
+                    setPending(undefined)
+                    // Only on a save that actually happened. A cancelled picker must not be a
+                    // silent Discard — that is the exact click that loses the work.
+                    void doSave(true).then(saved => {
+                        if (saved) continueWith(what)
+                    })
+                }}
+            />
         </div>
     )
 }

@@ -93,6 +93,27 @@ export const captureCamera = (camera: Camera, serial: number): NamedCamera => ({
 })
 
 /**
+ * The highest serial any camera on this list was minted with.
+ *
+ * Derived from the ids rather than saved beside them, because it has to be right for a file that
+ * was written before anyone thought about it — and because a counter stored next to the thing it
+ * counts is a second copy of the same fact, free to drift.
+ *
+ * Without it a document reopened with `Camera 1` and `Camera 2` on it starts counting from zero
+ * again, and the next capture is a *second* `cam-1`. Ids are how a camera is selected, renamed,
+ * reordered and deleted, so the duplicate does not fail — it acts on the wrong camera.
+ */
+export const lastSerial = (cameras: readonly NamedCamera[]): number => {
+    let highest = 0
+    for (const {id} of cameras) {
+        const found = /^cam-(\d+)$/.exec(id)
+        const serial = found?.[1] === undefined ? 0 : Number(found[1])
+        if (Number.isFinite(serial) && serial > highest) highest = serial
+    }
+    return highest
+}
+
+/**
  * Point the current view at one box and fill the frame with it — `FEATURESET.md` §1's "focus /
  * isolate selected object".
  *

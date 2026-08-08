@@ -38,6 +38,7 @@ const recovered = (() => {
 
 const volume =
     recovered?.volume ?? readVox(new Uint8Array(await (await fetch(carVox)).arrayBuffer()))
+const name = recovered?.name ?? 'car.vox'
 
 const host = document.getElementById('root')
 if (host) {
@@ -47,10 +48,15 @@ if (host) {
                 theme={goferPixelTheme}
                 mode='dark'
             >
+                {/*
+                 * `unsaved`, because a snapshot only exists when an edit was committed and not
+                 * written to disk. Handing it back as a saved document would let the artist close
+                 * the tab without a word and lose the very work this recovery just returned.
+                 */}
                 <App
                     volume={volume}
-                    name={recovered?.name ?? 'car.vox'}
-                    opened={recovered}
+                    name={name}
+                    opened={recovered ? {...recovered, name, unsaved: true} : undefined}
                 />
             </Theme>
         </StrictMode>

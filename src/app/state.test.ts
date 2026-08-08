@@ -1,6 +1,12 @@
 import {expect, test} from 'bun:test'
 import {voxelsFromImage} from '../doc/import'
-import {duplicateOffset, objectBounds, objectCells, shownVolume} from '../doc/objects'
+import {
+    duplicateOffset,
+    initialObjects,
+    objectBounds,
+    objectCells,
+    shownVolume
+} from '../doc/objects'
 import {SHEET_MAPS} from '../sheet/sheet'
 import {basisFor} from '../render/camera'
 import {render} from '../render/raycast'
@@ -8,8 +14,11 @@ import {MODE_NORMAL} from '../render/raycast.glsl'
 import {createVolume, voxelAt, voxelIndex, type Volume} from '../render/volume'
 import type {ViewportPointer} from '../viewport/orbit'
 import {readVox} from '../vox/vox-file'
+import {loadDocument, saveDocument} from '../doc/save'
+import {newDocument} from '../doc/templates'
 import {
     allPresets,
+    asDocument,
     GHOST_CELLS,
     initialState,
     MAX_BRUSH,
@@ -18,6 +27,7 @@ import {
     reduce,
     TOOLS,
     USES_BRUSH,
+    type AppAction,
     type AppState,
     type Tool
 } from './state'
@@ -25,7 +35,7 @@ import {
 const volume = readVox(
     new Uint8Array(await Bun.file(new URL('../assets/car.vox', import.meta.url)).arrayBuffer())
 )
-const fresh = (): AppState => initialState(volume)
+const fresh = (): AppState => initialState(volume, 'car.vox')
 
 /** The viewport is square here so a pixel is a pixel; nothing in the maths cares which size. */
 const SIZE = 64
@@ -552,7 +562,7 @@ test('the rotate tool turns what it grabbed, a quarter for every drag of the han
     // One corner knocked out, so the bar is chiral. A solid box turns to the same set of cells
     // whichever way it goes round, and a test on a solid box cannot tell left from right.
     bar.data[voxelIndex(bar, 8, 8, 7)] = 0
-    const state = reduce(initialState(bar), {type: 'tool', tool: 'rotate'})
+    const state = reduce(initialState(bar, 'bar.gpix'), {type: 'tool', tool: 'rotate'})
     const {column, row} = onModel(state)
 
     // The press is Move's press. What differs is what the drag then does with what it took.
@@ -1518,7 +1528,7 @@ test('a footprint too large to draw arrives as a box instead', () => {
      */
     const block = createVolume(12, 12, 12, volume.palette)
     block.data.fill(1)
-    const big = initialState(block)
+    const big = initialState(block, 'block.gpix')
     const spot = onModel(big)
     const hover = reduce(
         reduce(big, {type: 'tool', tool: 'fill'}),
@@ -1649,4 +1659,189 @@ test('duplicating an object copies its voxels beside it, under a new name', () =
     // stand. The panel disables the menu item for exactly this; the reducer refuses it too.
     expect(duplicateOffset(drawn.volume, objectBounds(drawn.volume, 1))).toBeUndefined()
     expect(reduce(drawn, {type: 'object', op: {kind: 'copy', id: 1}})).toBe(drawn)
+})
+
+/*
+ * The document identity — what Save, New and Open move. See `DOCUMENT_FIELDS` in `state.ts`: dirty
+ * is a comparison over the fields the format carries, not a flag every case has to remember.
+ */
+test('a fresh document is named, unsaved and clean', () => {
+    const state = fresh()
+    expect(state.doc).toEqual({name: 'car.vox', savedAt: undefined, dirty: false})
+})
+
+test('changing the model makes the document dirty; changing the session does not', () => {
+    const state = fresh()
+    const {column, row} = onModel(state)
+
+    // Chrome. None of it survives a save and a reload, so none of it can make a document unsaved.
+    const chrome: readonly AppAction[] = [
+        {type: 'tool', tool: 'erase'},
+        {type: 'color', color: 3},
+        {type: 'grid', on: false},
+        {type: 'edges', on: false},
+        {type: 'invert', on: true},
+        {type: 'preview', size: 32},
+        {type: 'map', map: MODE_NORMAL},
+        {type: 'search', query: 'wheel'},
+        {type: 'plane', axis: 2},
+        {type: 'palette-lock', on: true},
+        // A mouse crossing the viewport is the case an action list would have got wrong: it
+        // changes the state on every move and the model on almost none of them.
+        at('move', column, row)
+    ]
+    for (const action of chrome) {
+        expect(reduce(state, action).doc.dirty).toBe(false)
+    }
+
+    // The document. Each of these is a field `doc/save.ts` writes down.
+    const drawn = reduce(reduce(state, at('down', column, row)), at('up', column, row))
+    expect(drawn.doc.dirty).toBe(true)
+    expect(reduce(state, {type: 'capture'}).doc.dirty).toBe(true)
+    expect(reduce(state, {type: 'cell', cell: 32}).doc.dirty).toBe(true)
+    expect(reduce(state, {type: 'padding', padding: 2}).doc.dirty).toBe(true)
+    expect(reduce(state, {type: 'bounds', on: true}).doc.dirty).toBe(true)
+    expect(reduce(state, {type: 'symmetry', axis: 'x', on: true}).doc.dirty).toBe(true)
+    expect(reduce(state, {type: 'palette-color', color: 1, css: '#ff0000'}).doc.dirty).toBe(true)
+    expect(reduce(state, {type: 'object', op: {kind: 'add'}}).doc.dirty).toBe(true)
+    expect(
+        reduce(state, {type: 'reference', plane: 1, url: 'data:image/png;base64,aa'}).doc.dirty
+    ).toBe(true)
+})
+
+test('saving clears the flag and names the file; the next edit sets it again', () => {
+    const state = fresh()
+    const {column, row} = onModel(state)
+    const drawn = reduce(reduce(state, at('down', column, row)), at('up', column, row))
+
+    const saved = reduce(drawn, {type: 'saved', name: 'knight.gpix', at: 1234})
+    expect(saved.doc).toEqual({name: 'knight.gpix', savedAt: 1234, dirty: false})
+    // The voxels are untouched by being written down.
+    expect(saved.volume).toBe(drawn.volume)
+
+    const again = reduce(saved, {type: 'object', op: {kind: 'add'}})
+    expect(again.doc.dirty).toBe(true)
+    expect(again.doc.name).toBe('knight.gpix')
+    expect(again.doc.savedAt).toBe(1234)
+})
+
+test('a new project is empty, its own size, and clean', () => {
+    const state = fresh()
+    const {volume: built, objects} = newDocument([16, 16, 24])
+    const made = reduce(state, {type: 'new', volume: built, objects, name: 'knight.gpix'})
+
+    expect([made.volume.sx, made.volume.sy, made.volume.sz]).toEqual([16, 16, 24])
+    expect(made.doc).toEqual({name: 'knight.gpix', savedAt: undefined, dirty: false})
+    // Cameras are regenerated for the new box rather than kept from the old one.
+    expect(made.cameras).toHaveLength(8)
+    expect(made.history.past).toHaveLength(0)
+    expect(made.color).toBeGreaterThan(0)
+})
+
+/*
+ * Opening a file used to keep the *current* references and presets, which was right when a
+ * snapshot restore was the only caller and wrong the moment a second project could be opened.
+ */
+test('opening a document takes its references and presets, not the ones already on screen', () => {
+    const mine = reduce(fresh(), {
+        type: 'reference',
+        plane: 0,
+        url: 'data:image/png;base64,mine'
+    })
+    expect(mine.references).toHaveLength(1)
+
+    const theirs = reduce(mine, {
+        type: 'open',
+        document: {
+            name: 'theirs.gpix',
+            volume: createVolume(8, 8, 8, volume.palette),
+            objects: initialObjects(createVolume(8, 8, 8)),
+            cameras: [],
+            references: [
+                {plane: 2, url: 'data:image/png;base64,theirs', opacity: 0.3, locked: false}
+            ],
+            symmetry: {x: true, y: false, z: false, radial: false},
+            output: {cell: 16, padding: 4, bounds: true, preset: '', presets: []}
+        }
+    })
+
+    expect(theirs.references.map(({url}) => url)).toEqual(['data:image/png;base64,theirs'])
+    expect(theirs.doc).toEqual({name: 'theirs.gpix', savedAt: undefined, dirty: false})
+    expect([theirs.cell, theirs.padding, theirs.bounds]).toEqual([16, 4, true])
+    expect(theirs.symmetry.x).toBe(true)
+})
+
+test('a PNG becomes a document that has never been saved, and knows it', () => {
+    const state = fresh()
+    const pixels = new Uint8Array(4 * 4 * 4).fill(255)
+    const {volume: built} = voxelsFromImage(pixels, 4, 4, 2)
+    const imported = reduce(state, {type: 'import-image', volume: built, name: 'sprite.png'})
+
+    expect(imported.doc.name).toBe('sprite.png')
+    expect(imported.doc.savedAt).toBeUndefined()
+    // Voxels exist here that no file holds, so leaving without saving must be asked about.
+    expect(imported.doc.dirty).toBe(true)
+})
+
+test('what the state says the document is, is what gets written down', () => {
+    const state = reduce(fresh(), {type: 'cell', cell: 32})
+    const written = asDocument(state)
+
+    expect(written.volume).toBe(state.volume)
+    expect(written.objects).toBe(state.objects)
+    expect(written.cameras).toBe(state.cameras)
+    expect(written.references).toBe(state.references)
+    expect(written.symmetry).toBe(state.symmetry)
+    expect(written.output.cell).toBe(32)
+    expect(written.output.preset).toBe(state.preset)
+
+    // Round-tripped through the format, it opens as the same document.
+    const back = loadDocument(JSON.stringify(saveDocument(written, state.doc.name)))
+    if (!back) throw new Error('what we just wrote is one of ours')
+    const reopened = reduce(state, {type: 'open', document: {...back, name: 'car.gpix'}})
+    expect(reopened.volume.data).toEqual(state.volume.data)
+    expect(reopened.cell).toBe(32)
+    expect(reopened.doc.dirty).toBe(false)
+})
+
+/*
+ * Two things that only show up on the *second* session with a document, found by round-tripping
+ * one rather than by reading the reducer.
+ */
+test('reopening a document does not mint a camera id it already has', () => {
+    const captured = reduce(reduce(fresh(), {type: 'capture'}), {type: 'capture'})
+    expect(captured.cameras.map(({id}) => id)).toContain('cam-2')
+
+    const back = loadDocument(JSON.stringify(saveDocument(asDocument(captured), 'car.gpix')))
+    if (!back) throw new Error('what we just wrote is one of ours')
+    const opened = reduce(captured, {type: 'open', document: {...back, name: 'car.gpix'}})
+
+    // The counter is read off the ids rather than carried beside them, so it is right for a file
+    // written before anyone thought about it.
+    expect(opened.serial).toBe(2)
+
+    const again = reduce(opened, {type: 'capture'})
+    const ids = again.cameras.map(({id}) => id)
+    expect(new Set(ids).size).toBe(ids.length)
+    expect(ids).toContain('cam-3')
+})
+
+test('a recovered snapshot opens as unsaved work, because that is what it is', () => {
+    const edited = reduce(fresh(), {type: 'object', op: {kind: 'add'}})
+    const back = loadDocument(JSON.stringify(saveDocument(asDocument(edited), 'knight.gpix')))
+    if (!back) throw new Error('what we just wrote is one of ours')
+
+    // Off the disk: a file holds this, so there is nothing to warn about.
+    expect(reduce(edited, {type: 'open', document: {...back, name: 'knight.gpix'}}).doc.dirty).toBe(
+        false
+    )
+
+    // Out of the snapshot ring: autosave writes one per committed edit, so by definition no file
+    // holds it. Opening it clean would let the artist close the tab without a word.
+    const recovered = reduce(edited, {
+        type: 'open',
+        document: {...back, name: 'knight.gpix', unsaved: true}
+    })
+    expect(recovered.doc.dirty).toBe(true)
+    expect(recovered.objects.list).toHaveLength(2)
 })

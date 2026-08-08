@@ -1,5 +1,5 @@
 import type {Axis} from '../doc/brush'
-import type {Reference} from './state'
+import type {Reference} from '../doc/reference'
 import {basisFor, type Camera, type Vec3} from '../render/camera'
 import type {Volume} from '../render/volume'
 

@@ -29,8 +29,9 @@ Each item ends with `bun run check` green. Nothing waits — see `CLAUDE.md`.
 | 14  | Sheet workspace and export                     | 16, 17, 37, 38 | done  |
 | 15  | Reference images and PNG import                | 33, 34         | done  |
 | 16  | Autosave, crash recovery, snapshots            | 32             | done  |
+| 17  | Save, open and new project files               | 32, 36         | done  |
 
-All sixteen are built. Item 11 was taken out of order because 12, 13 and 14 all read the maps it
+All seventeen are built. Item 11 was taken out of order because 12, 13 and 14 all read the maps it
 adds and it is the one that touches the two-backend parity contract, so it was better closed early
 than late.
 
@@ -74,6 +75,107 @@ is the empty room `FEATURESET.md` §29 rejects for the command palette. The voxe
 addition the mockup does not draw.
 
 `browser/objects.spec.ts` is the record. Every failure above is a test in it.
+
+## Files, added 2026-08-08
+
+Item 16 gave the document a way to be written down, and put it in `localStorage`. Item 17 puts it on
+a disk. Three things were missing and all three are now built: a file, a new document, and a name
+the app can change.
+
+**The extension is `.gpix`** and the file is the same JSON `saveDocument` already produced —
+uncompressed, greppable, one format between a snapshot and a saved file so the two cannot drift.
+`.gpx` was not available: it is GPS Exchange Format and Guitar Pro 6. Measured while deciding:
+`car.vox` saves as 4.6 KB, and a busy 64³ model — 113 000 voxels, 40 colours — as 486 KB. Fine on a
+disk. Half a `localStorage` budget, which is a separate problem noted below.
+
+**The format is at version 2.** It gained reference art, draw-time symmetry and the export settings.
+Version 1 is still read, with those three at defaults, because refusing it would throw away the
+crash recovery of anyone upgrading mid-session — the one moment §32 exists for.
+
+**The disk is a port**, `src/doc/files.ts`, shaped exactly like `src/doc/store.ts` and for the same
+reason. Chrome and Edge get the File System Access API, so Save writes back over the open file with
+no dialog. Firefox has recorded its position on that spec as "harmful" and Safari has never shipped
+it, so both get an anchor download — and the menu says `Save a copy` rather than `Save` when that is
+what it is going to do. A control that lies while working is worse than one that is greyed out.
+
+**New offers `FEATURESET.md` §36's templates** — Character, Character (large), Isometric tile, Prop,
+Diorama — plus a custom X/Y/Z clamped to 256, which is MagicaVoxel's own ceiling. It is a dialog
+rather than one default size because the grid cannot be resized afterwards.
+
+Two things were found by building this rather than reasoned about:
+
+1. **Reference images could never have been saved.** `Reference.url` was a `blob:` object URL — a
+   handle into the page's memory, dead on the next reload — while the comment above it had said
+   `data:` since the day it was written. They are data URLs now.
+2. **`open` kept the current document's references and presets.** That was right when a snapshot
+   restore inside one session was the only caller, and wrong the moment a second project could be
+   opened: it would put one project's reference art over another project's model.
+
+Two more were found by round-tripping a document rather than by reading the reducer, and both only
+appear on the _second_ session with a file:
+
+3. **Reopening a document minted a camera id it already had.** `serial` was not saved, so a file
+   with `Camera 1` and `Camera 2` on it started counting from zero again and the next capture was a
+   second `cam-1`. Ids are how a camera is selected, renamed, reordered and deleted, so the
+   duplicate did not fail — it acted on the wrong camera. `lastSerial` reads the counter off the
+   ids, which is right for files written before anyone thought about it.
+4. **A recovered snapshot opened claiming to be saved.** Autosave writes one per committed edit, so
+   a snapshot is by definition work no file holds — and the recovery handed it back clean, with no
+   `beforeunload` guard behind it. Closing the tab would have lost exactly what the recovery had
+   just returned. `OpenedDocument.unsaved` is the difference between a `.gpix` and a snapshot.
+
+**Dirty is a comparison, not a list of actions.** `DOCUMENT_FIELDS` in `state.ts` names the fields
+the format carries, and the document is unsaved when one of them changes. An action list was written
+first and thrown away: it has to be right about fifty cases and about which of them are no-ops —
+`pointer` fires on every mouse-move and changes the model on perhaps one in a hundred — and a case
+that got it wrong would tell an artist their work was safe when it was not.
+
+**What is deliberately not in the file**, having been checked one by one: the current tool, brush,
+colour, the recent-colours row, the palette lock, grid/edges/snap/invert, the selection, the
+clipboard, the undo history, the plane lock, slice mode, the preview size, which camera is selected
+and where the view is pointing. They describe the half-hour you were having. What _is_ in it, also
+checked: every palette entry and emissive value, every object with its name, hidden, locked, solo
+and active flags, every camera, the reference art, the symmetry planes and the export settings.
+
+Note that `hidden` and `solo` travel with the document, so a project saved while an object was
+soloed reopens showing only that object — and the sheet bakes what is shown. That is intended; it is
+how one piece of a model gets rendered on its own.
+
+**Not in this, and worth writing down.** Resizing an existing document; writing `.vox`, which would
+mean re-deriving MagicaVoxel's RIFF chunks to export a model this app is not the source of truth
+for; the §36 project browser, still postponed. And **snapshots are not compressed**: 486 KB of JSON
+for a busy 64³ model, five of them, against a five-megabyte `localStorage`. Gzip through
+`CompressionStream` takes that to 15 KB, measured. It is a real problem and it is not this one.
+Reference art makes it worse now that it is base64 in the document: three 45 KB PNGs take a snapshot
+from 5.7 KB to 186 KB, so five of them are 0.9 MB, measured. `browserStore.set` swallows a quota
+failure by design, so the way this fails is that autosave quietly stops.
+
+Two more left alone on purpose. The snapshot ring is **one ring for every document**, so a reload
+recovers the newest snapshot whichever project it came from; and `savedAt` is not in the format, so
+a recovered document does not know when its file was last written. Both are only visible across
+sessions and neither loses anything.
+
+**Coverage.** `save.ts`, `templates.ts` and `reference.ts` are at 100 % of lines and functions.
+`files.ts` is at 95 % of functions and 86 % of lines; the ten uncovered are `inputOpen`, the
+`<input type=file>` fallback, which needs a real picker to hand it a real file. Everything else in
+`browserFiles` — which handle is held, whether a cancel is silent, whether a `.vox` can ever become
+the file Save writes back to — is driven in `bun test` against a stubbed `showSaveFilePicker` on
+`globalThis`. That was worth doing: the first pass tested only `memoryFiles` and left the whole
+browser half at 19 % of lines, including `projectName`, which is the one function standing between
+Save and somebody's `.vox`.
+
+`browser/files.spec.ts` is three tests, and they are the three things only a browser shows: the menu
+is a portal, so nothing about it is provable from a reducer; a Save the artist backs out of must not
+report success, which headless Chromium gives for free because a native picker has no automation
+surface; and the guard in front of New. What the picker writes when it is not cancelled is
+`src/doc/files.test.ts`'s job, against `memoryFiles`.
+
+One thing outside `src/` had to change with it. `vite.config.ts` now lists every astryx entrypoint
+in `optimizeDeps.include`. Vite discovers a subpath it has not pre-bundled _while the page loads_,
+optimizes it, and full-reloads — which lands between `page.goto` returning and the browser suite
+reading `window.goferPixel`. It failed only on a cold `node_modules/.vite`, which is exactly when
+nobody is looking. Listing them is the fix; making the suite wait for the handle would hide a real
+boot failure behind a timeout.
 
 Items 2, 39 and 40 are not tasks. They are the rules the other sixteen are judged by: everything on
 integer coordinates, nearest everywhere, the preview is the export, and the beginner sees six
