@@ -643,22 +643,20 @@ const withReference = async (plane: Axis = 1) => {
 
 const references = () => handle.state?.references ?? []
 
-test('a dropped reference gets a row of controls and a picture under the viewport', async () => {
-    const mounted = await withReference()
+test('a reference appears with its row, and only once something has been dropped', async () => {
+    const mounted = await mount()
+
+    expect(mounted.host.textContent).not.toContain(' ref')
+    expect(mounted.host.querySelector('.reference-layer')).toBeNull()
+
+    await act(async () => {
+        handle.dispatch?.({type: 'reference', plane: 1, url: PICTURE})
+    })
 
     expect(references()).toEqual([{plane: 1, url: PICTURE, opacity: 0.5, locked: false}])
     expect(mounted.host.querySelector('.reference-layer image')?.getAttribute('href')).toBe(PICTURE)
     // The row names the plane it belongs to, so two references are told apart.
     expect(mounted.host.textContent).toContain('XZ ref')
-
-    await unmount(mounted)
-})
-
-test('there is no reference row until something has been dropped', async () => {
-    const mounted = await mount()
-
-    expect(mounted.host.textContent).not.toContain(' ref')
-    expect(mounted.host.querySelector('.reference-layer')).toBeNull()
 
     await unmount(mounted)
 })
@@ -692,13 +690,25 @@ test('fainter and brighter step the reference opacity and stop at the ends', asy
     await unmount(mounted)
 })
 
+/*
+ * The lock, and what replacing a picture means — one window, because neither depends on the other
+ * having started from a clean one and each says what it changed.
+ */
 test('a locked reference cannot be faded or dropped by accident', async () => {
     const mounted = await withReference()
 
+    const lock = control(mounted.host, 'Lock the reference')
+    expect(lock.getAttribute('aria-checked')).toBe('false')
+    // The button says which way it goes, rather than only which state it is in.
+    expect(lock.getAttribute('title')).toContain('Lock it')
+
     await act(async () => {
-        control(mounted.host, 'Lock the reference').click()
+        lock.click()
     })
     expect(references()[0]?.locked).toBe(true)
+    expect(control(mounted.host, 'Lock the reference').getAttribute('title')).toBe(
+        'Unlock the reference'
+    )
 
     await act(async () => {
         control(mounted.host, 'Fainter reference').click()
@@ -717,23 +727,6 @@ test('a locked reference cannot be faded or dropped by accident', async () => {
     })
     expect(references()).toEqual([])
     expect(mounted.host.querySelector('.reference-layer')).toBeNull()
-
-    await unmount(mounted)
-})
-
-test('the lock button says which way it goes', async () => {
-    const mounted = await withReference()
-
-    const lock = control(mounted.host, 'Lock the reference')
-    expect(lock.getAttribute('aria-checked')).toBe('false')
-    expect(lock.getAttribute('title')).toContain('Lock it')
-
-    await act(async () => {
-        lock.click()
-    })
-    expect(control(mounted.host, 'Lock the reference').getAttribute('title')).toBe(
-        'Unlock the reference'
-    )
 
     await unmount(mounted)
 })
@@ -898,22 +891,17 @@ test('the shortcuts that only exist in the hint bar’s caption still dispatch',
     await press('f', {altKey: true})
     expect(handle.state?.orbit.camera.zoom).toBe(framed)
 
-    await unmount(mounted)
-})
-
-test('copy and paste go through the keyboard and put the voxels back', async () => {
-    const mounted = await mount()
-    const filled = () => handle.state?.volume.data.filter(Boolean).length ?? 0
-
+    // Copy and paste, which put back what Delete took. The redo above left the model without its
+    // colour-1 voxels, so they come back first or there would be nothing to copy.
+    await press('z', {ctrlKey: true})
     await act(async () => {
         handle.dispatch?.({type: 'select-color', color: 1})
     })
     await press('c', {ctrlKey: true})
     await press('Delete')
-    const emptied = filled()
-
+    const emptied = handle.state?.volume.data.filter(Boolean).length ?? 0
     await press('v', {ctrlKey: true})
-    expect(filled()).toBeGreaterThan(emptied)
+    expect(handle.state?.volume.data.filter(Boolean).length).toBeGreaterThan(emptied)
 
     await unmount(mounted)
 })
@@ -1169,7 +1157,7 @@ test('saving a preset takes the name the artist typed, and a cancelled prompt sa
  * The objects panel — `FEATURESET.md` §18. Show, solo, lock, duplicate, delete and the search box,
  * driven from the row rather than from the reducer, because the row is where the wiring can rot.
  */
-test('the objects panel’s switches reach the document', async () => {
+test('the objects panel’s switches and its search reach the document', async () => {
     const mounted = await mount()
     const objects = () => handle.state?.objects.list ?? []
 
@@ -1205,18 +1193,12 @@ test('the objects panel’s switches reach the document', async () => {
     })
     expect(objects()).toHaveLength(3)
 
-    await unmount(mounted)
-})
-
-test('the search box hides the rows that do not match', async () => {
-    const mounted = await mount()
-    const rows = () => mounted.host.querySelectorAll('.object-list [role="radio"]').length
-
-    // The box only appears past `SEARCH_FROM`, so there is something to search.
-    for (let step = 0; step < 9; step += 1)
+    // The search box only appears past `SEARCH_FROM`, so there has to be something to search.
+    for (let step = 0; step < 7; step += 1)
         await act(async () => {
             handle.dispatch?.({type: 'object', op: {kind: 'add'}})
         })
+    const rows = () => mounted.host.querySelectorAll('.object-list [role="radio"]').length
     const all = rows()
     expect(all).toBeGreaterThan(8)
 
@@ -1228,7 +1210,10 @@ test('the search box hides the rows that do not match', async () => {
         field.dispatchEvent(new Event('input', {bubbles: true}))
     })
     expect(handle.state?.search).toBe('nothing-matches-this')
-    expect(rows()).toBeLessThan(all)
+
+    // Nothing left, and the list says so rather than showing an empty box.
+    expect(rows()).toBe(0)
+    expect(mounted.host.querySelector('.object-list')?.textContent).toBe('No object matches that.')
 
     await unmount(mounted)
 })
@@ -1747,23 +1732,6 @@ test('a row drags along the list to reorder it, and the drag dies with the point
     await unmount(mounted)
 })
 
-test('a search that matches nothing says so rather than showing an empty box', async () => {
-    const mounted = await mount()
-    for (let step = 0; step < 9; step += 1)
-        await act(async () => {
-            handle.dispatch?.({type: 'object', op: {kind: 'add'}})
-        })
-
-    await act(async () => {
-        handle.dispatch?.({type: 'search', query: 'no-such-object'})
-    })
-
-    expect(objectRows(mounted.host)).toHaveLength(0)
-    expect(mounted.host.querySelector('.object-list')?.textContent).toBe('No object matches that.')
-
-    await unmount(mounted)
-})
-
 /*
  * The window with a working viewport in it.
  *
@@ -1843,21 +1811,25 @@ const at = (
 ): PointerEvent =>
     new PointerEvent(type, {bubbles: true, pointerId: 1, clientX: x, clientY: y, ...extra})
 
-test('a working viewport hands its renderer to the handle and reports its frames', async () => {
+/*
+ * One window for the whole gesture, because the mount is the bill.
+ *
+ * A window with a live canvas in it costs ~350 ms to raise under happy-dom, and none of what
+ * follows needs a *fresh* one: orbit, zoom, a press and a leave are independent of each other and
+ * each states what it changed. Splitting them into five tests bought five mounts and nothing else.
+ */
+test('a live viewport carries a pointer all the way to a voxel', async () => {
     await onCanvas(async (mounted, gl) => {
+        const stage = viewportOf(mounted.host)
+
+        // The renderer reaches the browser-test seam, and a frame has really landed.
         expect(handle.raycaster).toBeDefined()
         expect(mounted.host.querySelector('.viewport-failure')?.textContent).toBe('')
-        // One frame for the size arriving, drawn through the same basis the CPU would use.
         expect(gl.of('drawArrays').length).toBeGreaterThan(0)
         await handle.firstFrame
-    })
-})
 
-test('a drag with the right button orbits the camera', async () => {
-    await onCanvas(async mounted => {
-        const stage = viewportOf(mounted.host)
-        const before = handle.state?.orbit.camera.yaw
-
+        // The right button orbits, and the gesture ends with the press.
+        const turned = handle.state?.orbit.camera.yaw
         await act(async () => {
             stage.dispatchEvent(at('pointerdown', 200, 200, {button: 2}))
         })
@@ -1867,65 +1839,44 @@ test('a drag with the right button orbits the camera', async () => {
         await act(async () => {
             stage.dispatchEvent(at('pointerup', 260, 210))
         })
-
-        expect(handle.state?.orbit.camera.yaw).not.toBe(before)
+        expect(handle.state?.orbit.camera.yaw).not.toBe(turned)
         expect(handle.state?.orbit.gesture).toBeUndefined()
-    })
-})
 
-test('the wheel over the viewport zooms the camera', async () => {
-    await onCanvas(async mounted => {
-        const before = handle.state?.orbit.camera.zoom ?? 0
-
+        // The wheel zooms.
+        const zoom = handle.state?.orbit.camera.zoom ?? 0
         await act(async () => {
-            viewportOf(mounted.host).dispatchEvent(
+            stage.dispatchEvent(
                 new WheelEvent('wheel', {bubbles: true, cancelable: true, deltaY: -240})
             )
         })
+        expect(handle.state?.orbit.camera.zoom).toBeLessThan(zoom)
 
-        expect(handle.state?.orbit.camera.zoom).toBeLessThan(before)
-    })
-})
+        // A hover puts the brush ghost somewhere, and leaving takes it away again.
+        await act(async () => {
+            stage.dispatchEvent(at('pointermove', 256, 256))
+        })
+        expect(handle.state?.hover).toBeDefined()
+        await act(async () => {
+            stage.dispatchEvent(new PointerEvent('pointerout', {bubbles: true}))
+        })
+        expect(handle.state?.hover).toBeUndefined()
 
-/*
- * The whole path a stroke takes: a pointer position, a ray through it, a voxel, an edit, a new
- * volume object, a texture. Nothing between the mouse and the model is stubbed except the driver.
- */
-test('a press on the model draws a voxel and the viewport redraws with it', async () => {
-    await onCanvas(async (mounted, gl) => {
-        const stage = viewportOf(mounted.host)
+        /*
+         * And the whole path a stroke takes: a pointer position, a ray through it, a voxel, an
+         * edit, a new volume object, a texture. Nothing between the mouse and the model is stubbed
+         * except the driver.
+         */
         const filled = () => handle.state?.volume.data.filter(Boolean).length ?? 0
         const before = filled()
         const uploads = gl.of('texImage3D').length
-
-        // The middle of a 512-square viewport is the middle of the model.
         await act(async () => {
             stage.dispatchEvent(at('pointerdown', 256, 256))
         })
         await act(async () => {
             stage.dispatchEvent(at('pointerup', 256, 256))
         })
-
         expect(filled()).toBeGreaterThan(before)
-        // The grid went back up, so the viewport is showing the edit rather than the document as it
-        // was when the canvas was made.
         expect(gl.of('texImage3D').length).toBeGreaterThan(uploads)
-    })
-})
-
-test('the pointer leaving the viewport takes the brush ghost with it', async () => {
-    await onCanvas(async mounted => {
-        const stage = viewportOf(mounted.host)
-
-        await act(async () => {
-            stage.dispatchEvent(at('pointermove', 256, 256))
-        })
-        expect(handle.state?.hover).toBeDefined()
-
-        await act(async () => {
-            stage.dispatchEvent(new PointerEvent('pointerout', {bubbles: true}))
-        })
-        expect(handle.state?.hover).toBeUndefined()
     })
 })
 
@@ -2258,6 +2209,11 @@ test('a preset changes which maps an export writes', async () => {
 
     expect(handle.state?.preset).toBe('Every map')
 
+    // The smallest sprite the panel offers: what is being checked is which maps get baked, and
+    // eight PNG encodes of a 256 × 128 sheet cost a second to prove nothing about that.
+    await act(async () => {
+        control(mounted.host, '32 px').click()
+    })
     await act(async () => {
         control(mounted.host, 'Export sprite sheet').click()
     })
