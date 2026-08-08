@@ -426,6 +426,21 @@ test('the ground beyond the volume is coarser than the cells inside it, and reac
     await drawn.done()
 })
 
+test('the ground sits centred on the volume, whatever the coarse cell divides into', async () => {
+    // 32 is not a whole number of coarse cells, which is exactly when a from-the-edge walk drifts.
+    const box = createVolume(32, 32, 32, new Uint8Array(256 * 4))
+    const drawn = await floor(box)
+
+    const middle = drawn.project([box.sx / 2, box.sy / 2, 0])
+    const xs = ends(drawn.ground).map(p => p.x - middle.x)
+    const ys = ends(drawn.ground).map(p => p.y - middle.y)
+
+    expect(Math.max(...xs) + Math.min(...xs)).toBeCloseTo(0, 6)
+    expect(Math.max(...ys) + Math.min(...ys)).toBeCloseTo(0, 6)
+
+    await drawn.done()
+})
+
 test('the ground fades out, so nothing far from the volume asks to be clicked', async () => {
     const box = createVolume(32, 32, 32, new Uint8Array(256 * 4))
     const camera = createCamera(box, 0.9, 0.5)

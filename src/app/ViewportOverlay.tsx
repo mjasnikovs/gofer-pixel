@@ -86,11 +86,11 @@ export const GroundGrid = ({volume, camera}: {volume: Volume; camera: Camera}) =
      * nothing says how high anything is floating.
      *
      * So the two regions are drawn as different things. Inside, one line per voxel, stopping dead on
-     * the boundary — small squares read as pixels. Outside, a lattice four times coarser that fades
+     * the boundary — small squares read as pixels. Outside, a lattice five times coarser that fades
      * out before it reaches the edge of the pad — big squares read as ground, and nothing far out
      * invites a click. The fine lattice's own last line is the boundary; it needs no separate edge.
      */
-    const coarse = step * 4
+    const coarse = step * 5
     const pad = coarse * 2
 
     /** Every gridline coordinate from `from` to `to`, always including `to` itself. */
@@ -106,13 +106,31 @@ export const GroundGrid = ({volume, camera}: {volume: Volume; camera: Camera}) =
         ...ticks(0, volume.sx, step).map(x => span([x, 0, 0], [x, volume.sy, 0])),
         ...ticks(0, volume.sy, step).map(y => span([0, y, 0], [volume.sx, y, 0]))
     ]
+    /*
+     * The ground is laid out from the middle, not from the volume's near edge.
+     *
+     * Walking from `-pad` in steps of `coarse` only lands on the far edge when `coarse` divides the
+     * volume. It divided 32 at four voxels and does not at five, so the lattice gained a stub cell
+     * on two sides and the whole floor read as pushed off-centre. Anchoring on the middle makes it
+     * symmetric whatever the two numbers are; the middle is rounded to a fine line so the coarse
+     * lattice still lands on voxel boundaries.
+     */
+    const around = (mid: number, out: number, by: number): number[] => {
+        const n = Math.ceil(out / by)
+        const line: number[] = []
+        for (let k = -n; k <= n; k += 1) line.push(mid + k * by)
+        return line
+    }
+    const midOf = (size: number): number => Math.round(size / 2 / step) * step
+    const xs = around(midOf(volume.sx), volume.sx / 2 + pad, coarse)
+    const ys = around(midOf(volume.sy), volume.sy / 2 + pad, coarse)
+    const x0 = xs[0] ?? 0
+    const x1 = xs[xs.length - 1] ?? 0
+    const y0 = ys[0] ?? 0
+    const y1 = ys[ys.length - 1] ?? 0
     const ground = [
-        ...ticks(-pad, volume.sx + pad, coarse).map(x =>
-            span([x, -pad, 0], [x, volume.sy + pad, 0])
-        ),
-        ...ticks(-pad, volume.sy + pad, coarse).map(y =>
-            span([-pad, y, 0], [volume.sx + pad, y, 0])
-        )
+        ...xs.map(x => span([x, y0, 0], [x, y1, 0])),
+        ...ys.map(y => span([x0, y, 0], [x1, y, 0]))
     ]
 
     /*
@@ -127,12 +145,7 @@ export const GroundGrid = ({volume, camera}: {volume: Volume; camera: Camera}) =
         return Math.hypot(p.x - middle.x, p.y - middle.y)
     }
     const inner = Math.max(reach(0, 0), reach(volume.sx, 0), reach(0, volume.sy), reach(volume.sx, volume.sy)) // prettier-ignore
-    const outer = Math.max(
-        reach(-pad, -pad),
-        reach(volume.sx + pad, -pad),
-        reach(-pad, volume.sy + pad),
-        reach(volume.sx + pad, volume.sy + pad)
-    )
+    const outer = Math.max(reach(x0, y0), reach(x1, y0), reach(x0, y1), reach(x1, y1))
 
     /*
      * The hole is cut around the *voxels*, not around the grid.
