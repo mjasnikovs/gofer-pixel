@@ -4,6 +4,7 @@ import {beginEdit, commitEdit, revertEdit, writeVoxel} from './edits'
 import {
     addObject,
     canRemove,
+    duplicateOffset,
     initialObjects,
     isShown,
     lockedIds,
@@ -12,6 +13,7 @@ import {
     moveObject,
     objectBounds,
     objectCells,
+    objectExtents,
     ownerAt,
     removeObject,
     renameObject,
@@ -159,4 +161,35 @@ test('every cell of a shown volume still points at the owner it had', () => {
     // Masking empties `data` and leaves `owner` alone, so unhiding is not a rebuild.
     expect(shown.owner).toBe(volume.owner)
     expect(shown.owner[voxelIndex(volume, 1, 0, 0)]).toBe(1)
+})
+
+test('every object reports its own extent in one pass over the grid', () => {
+    const {volume} = twoBlobs()
+    const extents = objectExtents(volume)
+
+    expect(extents.get(1)).toEqual({min: [0, 0, 0], max: [2, 0, 0], count: 3})
+    expect(extents.get(2)).toEqual({min: [5, 0, 0], max: [7, 0, 0], count: 3})
+    // An object nobody has drawn into owns no cell, so it is not in the map at all.
+    expect(extents.get(3)).toBeUndefined()
+
+    // One pass and many passes have to say the same thing, or the panel is lying about a row.
+    for (const [id, extent] of extents) expect(objectBounds(volume, id)).toEqual(extent)
+})
+
+test('a copy stands beside its original, and nowhere when there is no room', () => {
+    const {volume} = twoBlobs()
+
+    // Object 1 is three wide at x 0..2 in an eight-wide grid, so +X clears it.
+    expect(duplicateOffset(volume, objectBounds(volume, 1))).toEqual([3, 0, 0])
+    // Object 2 ends at x 7, so +X would fall off and -X is taken instead.
+    expect(duplicateOffset(volume, objectBounds(volume, 2))).toEqual([-3, 0, 0])
+    // Nothing to move out of the way.
+    expect(duplicateOffset(volume, undefined)).toEqual([0, 0, 0])
+
+    // An object that fills the grid has no room on any axis, in either direction.
+    const full = createVolume(2, 2, 2, new Uint8Array(256 * 4))
+    for (let x = 0; x < 2; x += 1)
+        for (let y = 0; y < 2; y += 1) for (let z = 0; z < 2; z += 1) setVoxel(full, x, y, z, 4)
+    initialObjects(full)
+    expect(duplicateOffset(full, objectBounds(full, 1))).toBeUndefined()
 })

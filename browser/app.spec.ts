@@ -119,8 +119,16 @@ test('a double-click takes the connected colour, not one voxel', async ({page}) 
     await page.mouse.dblclick(centre.x, centre.y)
     expect(await selected()).toBeGreaterThan(1)
 
-    // A press somewhere else is a fresh count, not the third of a run.
-    await page.mouse.click(centre.x + 40, centre.y + 24)
+    /*
+     * A press somewhere else is a fresh count, not the third of a run.
+     *
+     * The offset is a fraction of the viewport rather than pixels, because the viewport grows and
+     * shrinks with the panels beside it — a fixed 40 × 24 stopped landing outside the doubled
+     * region the moment the objects panel lost a row, and the test failed for a reason that had
+     * nothing to do with click counting. Swept: 0.12–0.24 across and 0.08–0.16 down all give a
+     * single voxel, so this sits in the middle of that plateau.
+     */
+    await page.mouse.click(centre.x + box.width * 0.18, centre.y + box.height * 0.12)
     expect(await selected()).toBe(1)
 })
 

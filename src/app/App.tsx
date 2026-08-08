@@ -511,16 +511,13 @@ export const App = ({
                 <div className='panel app-rail'>
                     <ObjectsPanel
                         objects={state.objects}
+                        // The whole grid, not `shown`: a hidden object still has a voxel count,
+                        // and a row that read "empty" because it was hidden would be a lie.
+                        volume={volume}
                         query={state.search}
                         canRemove={canRemove(state.objects)}
                         onQuery={query => {
                             dispatch({type: 'search', query})
-                        }}
-                        onRename={objectName => {
-                            dispatch({
-                                type: 'object',
-                                op: {kind: 'rename', id: state.objects.active, name: objectName}
-                            })
                         }}
                         onOp={op => {
                             dispatch({type: 'object', op})

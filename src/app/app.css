@@ -595,6 +595,20 @@ body,
     background: var(--color-accent-muted);
 }
 
+/* The row being dragged along the list. Faded, so the gap it leaves is the thing being read. */
+.object-row[data-dragging] {
+    opacity: 0.5;
+}
+
+/* How many voxels the object holds. Right up against the menu, away from the name. */
+.object-count {
+    flex: 0 0 auto;
+    padding: 0 4px;
+    font-size: var(--font-size-supporting);
+    color: var(--color-text-disabled);
+    font-variant-numeric: tabular-nums;
+}
+
 .object-name {
     flex: 1 1 auto;
     min-width: 0;
@@ -627,6 +641,17 @@ body,
 
 .object-flag[data-on] {
     color: var(--color-icon-accent);
+}
+
+/* Hover lights an *off* switch only. Lighting an on one would erase the state under the cursor. */
+.object-flag:hover:not(:disabled):not([data-on]) {
+    color: var(--color-text-primary);
+}
+
+/* Duplicate with no room, delete on the last object. Still there, still says why on hover. */
+.object-flag:disabled {
+    opacity: 0.35;
+    cursor: default;
 }
 
 .view-add,

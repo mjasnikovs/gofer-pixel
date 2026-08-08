@@ -92,11 +92,53 @@ export const objectCells = (volume: Volume, id: number): Selection => {
     return found
 }
 
+/** How much of the grid an object takes up: the box, and how many cells inside it are its own. */
+export interface Extent {
+    readonly min: Cell
+    readonly max: Cell
+    readonly count: number
+}
+
+/**
+ * Every object's extent, in one pass over `owner`.
+ *
+ * The panel needs a count and a "would a copy fit" for every row on every render, and asking
+ * `objectBounds` once per row is that many passes over a grid that can be two million cells.
+ */
+export const objectExtents = (volume: Volume): ReadonlyMap<number, Extent> => {
+    const {sx, sy, owner} = volume
+    const found = new Map<number, {min: number[]; max: number[]; count: number}>()
+    for (let i = 0; i < owner.length; i += 1) {
+        const id = owner[i] ?? 0
+        if (id === 0) continue
+        const z = Math.floor(i / (sx * sy))
+        const rest = i - z * sx * sy
+        const x = rest % sx
+        const y = Math.floor(rest / sx)
+        const seen = found.get(id)
+        if (!seen) {
+            found.set(id, {min: [x, y, z], max: [x, y, z], count: 1})
+            continue
+        }
+        seen.count += 1
+        for (const [axis, value] of [x, y, z].entries()) {
+            seen.min[axis] = Math.min(seen.min[axis] ?? value, value)
+            seen.max[axis] = Math.max(seen.max[axis] ?? value, value)
+        }
+    }
+    const extents = new Map<number, Extent>()
+    for (const [id, {min, max, count}] of found) {
+        extents.set(id, {
+            min: [min[0] ?? 0, min[1] ?? 0, min[2] ?? 0],
+            max: [max[0] ?? 0, max[1] ?? 0, max[2] ?? 0],
+            count
+        })
+    }
+    return extents
+}
+
 /** The box an object fills, for focusing the camera on it. `undefined` when it holds nothing. */
-export const objectBounds = (
-    volume: Volume,
-    id: number
-): {min: Cell; max: Cell; count: number} | undefined => {
+export const objectBounds = (volume: Volume, id: number): Extent | undefined => {
     const {sx, sy, owner} = volume
     let count = 0
     let [x0, y0, z0] = [Infinity, Infinity, Infinity]
@@ -117,6 +159,36 @@ export const objectBounds = (
     }
     if (count === 0) return undefined
     return {min: [x0, y0, z0], max: [x1, y1, z1], count}
+}
+
+/**
+ * Where a copy of an object can stand — `FEATURESET.md` §8's "duplicate".
+ *
+ * A copy cannot sit on top of its original, because a cell of this grid has exactly one owner (see
+ * the note at the top of this file). So it stands *beside* itself, one full width along the first
+ * axis with room for it, and the search order is X, then Z, then Y: sideways first, because a
+ * model is usually wider than it is tall and a duplicate the artist cannot see is a dead button.
+ *
+ * `[0, 0, 0]` for an empty object — there is nothing to move out of the way. `undefined` when the
+ * grid has no room anywhere, which is the panel's cue to disable the menu item and say why.
+ *
+ * Takes the extent rather than an id so the panel can pass one it already has. See
+ * `objectExtents`: a row that asked for its own would be a second pass over the whole grid.
+ */
+export const duplicateOffset = (volume: Volume, box: Extent | undefined): Cell | undefined => {
+    if (!box) return [0, 0, 0]
+    const {min, max} = box
+    const size: Cell = [max[0] - min[0] + 1, max[1] - min[1] + 1, max[2] - min[2] + 1]
+    const limit: Cell = [volume.sx, volume.sy, volume.sz]
+    for (const axis of [0, 2, 1] as const) {
+        for (const sign of [1, -1] as const) {
+            const shift = size[axis] * sign
+            if (min[axis] + shift < 0) continue
+            if (max[axis] + shift >= limit[axis]) continue
+            return [axis === 0 ? shift : 0, axis === 1 ? shift : 0, axis === 2 ? shift : 0]
+        }
+    }
+    return undefined
 }
 
 const nextId = ({list}: Objects): number => {

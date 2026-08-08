@@ -547,10 +547,10 @@ test('the keys that are not about the selection reach their own corners', async 
  */
 test('typing in a field is typing, not a shortcut', async ({page}) => {
     const {was} = await start(page, 'move')
-    // Focused rather than clicked: the field sits under a floating panel, and the only thing this
-    // test needs is for the keypress to have a text field as its target.
-    const field = page.locator('input[type="text"]').first()
-    await field.focus()
+    // The one text field the app puts up on demand: an object row renames in place. Nothing is
+    // typed into it that matters — all this test needs is a keypress whose target is a text field.
+    await page.getByRole('radio', {name: 'Draw into Model'}).dblclick()
+    await page.getByRole('textbox', {name: 'Rename Model'}).focus()
     await page.keyboard.press('c')
     await page.keyboard.press('s')
 

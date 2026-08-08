@@ -1,6 +1,6 @@
 import {expect, test} from 'bun:test'
 import {voxelsFromImage} from '../doc/import'
-import {objectCells, shownVolume} from '../doc/objects'
+import {duplicateOffset, objectBounds, objectCells, shownVolume} from '../doc/objects'
 import {SHEET_MAPS} from '../sheet/sheet'
 import {basisFor} from '../render/camera'
 import {render} from '../render/raycast'
@@ -1533,4 +1533,69 @@ test('a drag says how many voxels its landing would destroy, while it can still 
 
     // The gesture ends and the warning goes with it: it was about a drop, not about the document.
     expect(reduce(down, at('up', column, row)).losing).toBe(0)
+})
+
+test('undo puts a deleted object back on the list, not just its voxels on the grid', () => {
+    const state = reduce(armed('draw'), {type: 'object', op: {kind: 'add'}})
+    const {column, row} = onModel(state)
+    const drawn = reduce(reduce(state, at('down', column, row)), at('up', column, row))
+    expect(objectCells(drawn.volume, 2).size).toBe(4)
+
+    const gone = reduce(drawn, {type: 'object', op: {kind: 'remove', id: 2}})
+    expect(gone.objects.list.map(entry => entry.id)).toEqual([1])
+
+    /*
+     * The bug this covers: undo restored the cells and left the list alone, so four voxels came
+     * back owned by an id no row named. They could not be hidden, locked or soloed, and the next
+     * `add` took id 2 again and silently adopted them. Measured in a browser, not reasoned about.
+     */
+    const back = reduce(gone, {type: 'undo'})
+    expect(back.objects.list.map(entry => entry.id)).toEqual([1, 2])
+    expect(objectCells(back.volume, 2).size).toBe(4)
+    expect(back.objects.active).toBe(2)
+
+    // And forward again, both halves together.
+    const again = reduce(back, {type: 'redo'})
+    expect(again.objects.list.map(entry => entry.id)).toEqual([1])
+    expect(objectCells(again.volume, 2).size).toBe(0)
+})
+
+test('deleting an empty object is still one Ctrl-Z away', () => {
+    const state = reduce(armed('draw'), {type: 'object', op: {kind: 'add'}})
+    const gone = reduce(state, {type: 'object', op: {kind: 'remove', id: 2}})
+
+    // No cell changed, so there is no diff — and the delete has to be recorded anyway, or Ctrl-Z
+    // steps straight over it to whatever the artist did before.
+    expect(gone.objects.list).toHaveLength(1)
+    expect(gone.history.past).toHaveLength(1)
+    expect(reduce(gone, {type: 'undo'}).objects.list).toHaveLength(2)
+})
+
+test('duplicating an object copies its voxels beside it, under a new name', () => {
+    const state = reduce(armed('draw'), {type: 'object', op: {kind: 'add'}})
+    const {column, row} = onModel(state)
+    const drawn = reduce(reduce(state, at('down', column, row)), at('up', column, row))
+
+    const copied = reduce(drawn, {type: 'object', op: {kind: 'copy', id: 2}})
+    expect(copied.objects.list).toHaveLength(3)
+    expect(copied.objects.list[2]?.name).toBe('Object 2 copy')
+    expect(copied.objects.active).toBe(3)
+
+    // The copy is as big as the original and stands somewhere else, because one cell has one owner.
+    expect(objectCells(copied.volume, 3).size).toBe(objectCells(drawn.volume, 2).size)
+    expect(objectCells(copied.volume, 2).size).toBe(4)
+    expect(objectBounds(copied.volume, 3)?.min).not.toEqual(objectBounds(copied.volume, 2)?.min)
+
+    // One undo takes the list and the cells back together.
+    const back = reduce(copied, {type: 'undo'})
+    expect(back.objects.list).toHaveLength(2)
+    expect(objectCells(back.volume, 3).size).toBe(0)
+
+    // Copying an object that is not there changes nothing at all.
+    expect(reduce(drawn, {type: 'object', op: {kind: 'copy', id: 99}})).toBe(drawn)
+
+    // The car is object 1 and it fills its grid, so there is nowhere beside it for a copy to
+    // stand. The panel disables the menu item for exactly this; the reducer refuses it too.
+    expect(duplicateOffset(drawn.volume, objectBounds(drawn.volume, 1))).toBeUndefined()
+    expect(reduce(drawn, {type: 'object', op: {kind: 'copy', id: 1}})).toBe(drawn)
 })

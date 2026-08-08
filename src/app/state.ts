@@ -21,16 +21,20 @@ import {
     commitEdit,
     connected,
     fillRegion,
+    NO_CELLS,
     strokeCells,
     writeCells,
+    writeOwned,
     type Draft
 } from '../doc/edits'
 import {figureCells} from '../doc/figures'
 import {
     addObject,
+    duplicateOffset,
     initialObjects,
     lockedIds,
     moveObject,
+    objectAt,
     objectBounds,
     objectCells,
     ownerAt,
@@ -42,7 +46,14 @@ import {
     soloObject,
     type Objects
 } from '../doc/objects'
-import {EMPTY_HISTORY, record, redo, undo, type History} from '../doc/history'
+import {
+    EMPTY_HISTORY,
+    record,
+    redo,
+    undo,
+    type History,
+    type Step as HistoryStep
+} from '../doc/history'
 import {
     firstColor,
     freeSlot,
@@ -87,7 +98,7 @@ import {basisFor, createCamera, type Camera} from '../render/camera'
 import {FACE_STEP} from '../render/faces'
 import {pick, pickPlane, pickRay} from '../render/pick'
 import {MODE_COLOR} from '../render/raycast.glsl'
-import {voxelIndex, type Volume} from '../render/volume'
+import {voxelAt, voxelIndex, type Volume} from '../render/volume'
 import {renderSheet, SHEET_MAPS, type Sheet, type SheetMap} from '../sheet/sheet'
 import {
     apply as applyOrbit,
@@ -195,6 +206,7 @@ export type TransformOp =
  */
 export type ObjectOp =
     | {kind: 'add'}
+    | {kind: 'copy'; id: number}
     | {kind: 'active'; id: number}
     | {kind: 'rename'; id: number; name: string}
     | {kind: 'hidden'; id: number; on: boolean}
@@ -1433,6 +1445,25 @@ const endStroke = (state: AppState): AppState => {
     }
 }
 
+/**
+ * Land one step of the history.
+ *
+ * The object list comes back with the voxels when the step carried one, because the two are one
+ * change. Undoing a delete used to restore only the cells, which left them owned by an id that had
+ * no row — unhideable, unlockable, and adopted by the next object added, since ids are reused.
+ *
+ * The selection is dropped rather than restored. It is not in the history, so the cells it names
+ * may no longer hold what the artist chose, and a stale selection is worse than none.
+ */
+const stepped = (state: AppState, taken: HistoryStep): AppState => ({
+    ...state,
+    volume: taken.volume,
+    history: taken.history,
+    objects: taken.objects ?? state.objects,
+    selection: taken.objects ? EMPTY_SELECTION : state.selection,
+    sheet: undefined
+})
+
 const step = (state: AppState, action: AppAction): AppState => {
     switch (action.type) {
         case 'orbit': {
@@ -1514,13 +1545,13 @@ const step = (state: AppState, action: AppAction): AppState => {
             // Mid-stroke there is nothing coherent to undo *to*: the draft is not an edit yet.
             if (state.stroke) return state
             const back = undo(state.volume, state.history)
-            return back ? {...state, ...back, sheet: undefined} : state
+            return back ? stepped(state, back) : state
         }
 
         case 'redo': {
             if (state.stroke) return state
             const forward = redo(state.volume, state.history)
-            return forward ? {...state, ...forward, sheet: undefined} : state
+            return forward ? stepped(state, forward) : state
         }
 
         /*
@@ -1651,6 +1682,37 @@ const step = (state: AppState, action: AppAction): AppState => {
                     const added = addObject(objects)
                     return added ? {...state, objects: added} : state
                 }
+                /*
+                 * `FEATURESET.md` §8's duplicate. The copy lands beside the original rather than
+                 * inside it, because one cell has one owner — see `duplicateOffset`. It carries
+                 * voxels, so it is an edit and goes into the history with the list stamped on it.
+                 */
+                case 'copy': {
+                    const source = objectAt(objects, op.id)
+                    const delta = duplicateOffset(state.volume, objectBounds(state.volume, op.id))
+                    if (!source || !delta) return state
+                    const added = addObject(objects, `${source.name} copy`)
+                    if (!added) return state
+                    const draft = beginEdit(state.volume, added.active, lockedIds(objects))
+                    const [dx, dy, dz] = delta
+                    for (const index of objectCells(state.volume, op.id)) {
+                        const [x, y, z] = cellOf(state.volume, index)
+                        const value = voxelAt(state.volume, x, y, z)
+                        writeOwned(draft, x + dx, y + dy, z + dz, value, added.active)
+                    }
+                    const edit = commitEdit(draft) ?? NO_CELLS
+                    return {
+                        ...state,
+                        objects: added,
+                        volume: draft.volume,
+                        selection: EMPTY_SELECTION,
+                        history: record(state.history, {
+                            ...edit,
+                            objects: {from: objects, to: added}
+                        }),
+                        sheet: undefined
+                    }
+                }
                 case 'active':
                     return {...state, objects: {...objects, active: op.id}}
                 case 'rename':
@@ -1679,13 +1741,21 @@ const step = (state: AppState, action: AppAction): AppState => {
                         const [x, y, z] = cellOf(state.volume, index)
                         writeCells(draft, [[x, y, z]], 0)
                     }
-                    const edit = commitEdit(draft)
+                    /*
+                     * An empty object has no cells to commit, so `commitEdit` hands back nothing
+                     * — and the delete still has to be undoable, because losing a name is a loss.
+                     * `NO_CELLS` is the edit that says "the list changed and the grid did not".
+                     */
+                    const edit = commitEdit(draft) ?? NO_CELLS
                     return {
                         ...state,
                         objects: list,
-                        volume: edit ? draft.volume : state.volume,
+                        volume: draft.volume,
                         selection: EMPTY_SELECTION,
-                        history: edit ? record(state.history, edit) : state.history,
+                        history: record(state.history, {
+                            ...edit,
+                            objects: {from: objects, to: list}
+                        }),
                         sheet: undefined
                     }
                 }

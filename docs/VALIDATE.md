@@ -80,5 +80,10 @@ Validate <TOOL / GESTURE> in a real browser. Do not reason about it from the red
 - **Four quarter turns is not the identity** on a dense model. The first turn overwrites the
   neighbours it lands on and the fourth cannot bring them back. Assert the bijection instead: the
   selection never changes size.
+- **A pixel offset from the viewport centre is not a place on the model.** The viewport grows and
+  shrinks with the panels beside it, so `centre + 40, centre + 24` moves to a different voxel when a
+  panel loses a row — and a press that lands back inside the current selection keeps it instead of
+  replacing it, which reads as a broken click counter. Offset by a fraction of the box, and sweep
+  for the plateau rather than taking the first number that passes.
 - **`[` before `]` empties the selection.** Shrink erodes anything touching air, and a blob on the
   surface is all surface.

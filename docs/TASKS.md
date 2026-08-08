@@ -40,6 +40,41 @@ at an offset — so every tool, transform, selection and symmetry plane already 
 in world coordinates, and the renderer never learned what an object is. What that gives up is two
 objects sharing a cell, which a voxel grid could not hold anyway.
 
+## The objects panel, reworked 2026-08-08
+
+Item 8 shipped a panel that was reasoned about rather than driven, and five things were wrong. Four
+were found by putting a real mouse on it, per `docs/VALIDATE.md`; the fifth was found by looking at
+the mockup again.
+
+1. **Undo did not undo a delete.** The `remove` case recorded only the voxel diff, so Ctrl-Z put the
+   cells back owned by an id that was no longer on the list — invisible to hide, lock and solo, and
+   silently adopted by the next object added, because ids are reused. `Edit` now carries the object
+   list either side of it and `undo`/`redo` hand it back. Deleting an _empty_ object was not
+   recorded at all; `NO_CELLS` is the edit that says the list changed and the grid did not.
+2. **Delete asked nothing and said nothing.** It is an `AlertDialog` naming the object and its voxel
+   count — the same debt the drag hint pays with `lossCount`.
+3. **Duplicate did not exist**, though `FEATURESET.md` §8 asks for it. A copy cannot sit on its
+   original, because one cell has one owner, so it stands beside it — see `duplicateOffset`. When
+   nothing fits, and the opening `car.vox` is one such object, the button says so on hover.
+4. **Reorder did not exist either**, though `moveObject` and the `reorder` op had been written and
+   tested. Nothing dispatched them. Rows drag now.
+5. **The panel had been built against the wrong page.** `docs/editor.png` draws no object list, and
+   the panel's comment concluded the mockups were silent. Panel 4 of `docs/featureset.png` draws
+   one: eye, name, `…`. The always-open search box and the separate rename field are gone, and
+   rename happens on the row.
+
+The `…` is the one place this departs from the mockup, and it was built first and then taken out. A
+menu costs a click and a read before anything happens, and it hides state — whether an object is
+soloed or locked is a fact about the row, and a fact behind a menu is a fact nobody has. Every
+switch is a lit button on the row instead: eye, solo, lock, duplicate, delete. Rename stays a
+double-click on the name, because there is nothing to show and a sixth button would be noise.
+
+Search survives behind `SEARCH_FROM`, because a filter over the one object a fresh `.vox` file has
+is the empty room `FEATURESET.md` §29 rejects for the command palette. The voxel count is the other
+addition the mockup does not draw.
+
+`browser/objects.spec.ts` is the record. Every failure above is a test in it.
+
 Items 2, 39 and 40 are not tasks. They are the rules the other sixteen are judged by: everything on
 integer coordinates, nearest everywhere, the preview is the export, and the beginner sees six
 controls.

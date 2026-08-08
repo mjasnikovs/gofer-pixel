@@ -1,5 +1,6 @@
 import {voxelAt, voxelIndex, type Volume} from '../render/volume'
 import {brushOffsets, type Brush, type Offset} from './brush'
+import type {Objects} from './objects'
 
 /**
  * Writing voxels, as a diff rather than as a new volume.
@@ -20,6 +21,18 @@ export interface Edit {
     /** Which object owned each cell before and after. Moves carry ownership with the voxels. */
     readonly ownerFrom: Uint8Array
     readonly ownerTo: Uint8Array
+    /**
+     * The object list either side of this edit, when the edit changed it — delete and duplicate.
+     *
+     * It lives here because `owner` already does. Restoring the cells of a deleted object without
+     * restoring the object itself leaves voxels owned by an id no row can name: invisible to hide,
+     * to lock and to solo, and quietly adopted by the next object to be added, because ids are
+     * reused. That was the state undo actually left the document in, measured in a browser.
+     *
+     * The whole list rather than a diff. It is a handful of names and flags, the two operations
+     * that carry one are rare, and a diff of a list is a second thing that can be wrong.
+     */
+    readonly objects?: {readonly from: Objects; readonly to: Objects}
 }
 
 export interface Draft {
@@ -224,6 +237,21 @@ export const fillRegion = (draft: Draft, x: number, y: number, z: number, value:
         const rest = index - cz * sx * sy
         writeVoxel(draft, rest % sx, Math.floor(rest / sx), cz, value)
     }
+}
+
+/**
+ * An edit that touches no cell.
+ *
+ * Deleting an *empty* object is a change to the list and to nothing else, so `commitEdit` has
+ * nothing to hand back — and without this the delete would go unrecorded and Ctrl-Z would step
+ * over it to whatever the artist did before. Stamp `objects` onto a copy of this instead.
+ */
+export const NO_CELLS: Edit = {
+    at: new Int32Array(0),
+    from: new Uint8Array(0),
+    to: new Uint8Array(0),
+    ownerFrom: new Uint8Array(0),
+    ownerTo: new Uint8Array(0)
 }
 
 /** `undefined` when the stroke changed nothing, which is what keeps a stray click out of undo. */
