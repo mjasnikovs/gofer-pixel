@@ -8,6 +8,8 @@ import {browserFiles, projectName, PROJECT_ACCEPT, type Files} from '../doc/file
 import {newDocument} from '../doc/templates'
 import {readVox} from '../vox/vox-file'
 import {browserStore, clearSnapshots, putSnapshot, snapshots, type Store} from '../doc/store'
+import {browserScorer, type Scorer} from '../gen/clip'
+import {browserLlama, type Llama} from '../gen/llama'
 import {sheetMetadata} from '../sheet/metadata'
 import {selectionBounds} from '../doc/selection'
 import {canRadial} from '../doc/symmetry'
@@ -38,6 +40,7 @@ import {
     TOOLS,
     type OpenedDocument
 } from './state'
+import {GenerateDialog} from './GenerateDialog'
 import {NewProjectDialog} from './NewProjectDialog'
 import {UnsavedDialog} from './UnsavedDialog'
 import {handle} from './handle'
@@ -78,6 +81,9 @@ const dataUrl = async (blob: Blob): Promise<string> =>
         reader.readAsDataURL(blob)
     })
 
+/** The three things that replace the open document, and therefore have to ask about it first. */
+type Guarded = 'new' | 'open' | 'generate'
+
 const NUDGES: Record<string, readonly [number, number, number] | undefined> = {
     ArrowRight: [1, 0, 0],
     ArrowLeft: [-1, 0, 0],
@@ -90,13 +96,19 @@ export const App = ({
     name,
     opened,
     store = browserStore(),
-    files = browserFiles()
+    files = browserFiles(),
+    llama = browserLlama(),
+    scorer = browserScorer()
 }: {
     volume: Volume
     name: string
     opened?: OpenedDocument | undefined
     store?: Store
     files?: Files
+    /** The local model — see `src/gen/llama.ts`. A port, so a test needs no GPU. */
+    llama?: Llama
+    /** The local CLIP service — see `src/gen/clip.ts`. Optional at runtime as well as in a test. */
+    scorer?: Scorer
 }) => {
     const [state, dispatch] = useReducer(reduce, source, start => initialState(start, name, opened))
     // Everything below reads the *document's* volume, not the one the file was opened with. They
@@ -257,19 +269,24 @@ export const App = ({
      * the artist was trying to do and does it, instead of dismissing itself and making them click
      * the menu a second time.
      */
-    const [pending, setPending] = useState<'new' | 'open' | undefined>(undefined)
+    const [pending, setPending] = useState<Guarded | undefined>(undefined)
     const [asking, setAsking] = useState(false)
+    const [generating, setGenerating] = useState(false)
 
     const continueWith = useCallback(
-        (what: 'new' | 'open' | undefined) => {
+        (what: Guarded | undefined) => {
             if (what === 'new') setAsking(true)
             else if (what === 'open') void doOpen()
+            // Generation is guarded at the *dialog*, not at the pick: the dialog is modal and the
+            // pick inside it is the last click of a minute-long wait, which is the worst possible
+            // moment to be asked whether the work it is about to replace matters.
+            else if (what === 'generate') setGenerating(true)
         },
         [doOpen]
     )
 
     const guarded = useCallback(
-        (what: 'new' | 'open') => {
+        (what: Guarded) => {
             if (state.doc.dirty) setPending(what)
             else continueWith(what)
         },
@@ -450,6 +467,9 @@ export const App = ({
                 }}
                 onSaveAs={() => {
                     void doSave(false)
+                }}
+                onGenerate={() => {
+                    guarded('generate')
                 }}
                 onUndo={() => {
                     dispatch({type: 'undo'})
@@ -782,6 +802,21 @@ export const App = ({
                     onCreate={(size, fresh) => {
                         setAsking(false)
                         doNew(size, fresh)
+                    }}
+                />
+            )}
+
+            {generating && (
+                <GenerateDialog
+                    llama={llama}
+                    scorer={scorer}
+                    onClose={() => {
+                        setGenerating(false)
+                    }}
+                    onPick={(built, made, record) => {
+                        setGenerating(false)
+                        files.forget()
+                        dispatch({type: 'generate', volume: built, name: made, record})
                     }}
                 />
             )}

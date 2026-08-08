@@ -20,7 +20,8 @@
         "preview": "vite preview",
         "astryx": "bun node_modules/@astryxdesign/cli/bin/astryx.mjs",
         "theme": "bun run --silent astryx -- theme build src/theme/theme.ts --out src/theme/gofer-pixel-theme.css",
-        "test:browser": "playwright test"
+        "test:browser": "playwright test",
+        "clip": ".venv/bin/python py/clipserve.py"
     },
     "dependencies": {
         "@astryxdesign/core": "0.2.0",

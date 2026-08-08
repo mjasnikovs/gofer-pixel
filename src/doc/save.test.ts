@@ -37,6 +37,12 @@ const document = (): Document => {
             bounds: true,
             preset: 'Sprite Sheet (Auto)',
             presets: [{name: 'Mine', maps: ['color', 'normal']}]
+        },
+        origin: {
+            prompt: 'a stone tower',
+            sampler: {temperature: 0.9, seed: 1234},
+            model: 'Qwen3.6-27B',
+            at: '2026-08-08T10:00:00.000Z'
         }
     }
 }
@@ -69,13 +75,43 @@ test('what version 2 added comes back too', () => {
     expect(back?.output).toEqual(doc.output)
 })
 
+test('what version 3 added — where the model came from — comes back too', () => {
+    const doc = document()
+    const back = loadDocument(JSON.stringify(saveDocument(doc, 'tower.gpix')))
+
+    expect(back?.version).toBe(3)
+    expect(back?.origin).toEqual(doc.origin)
+})
+
+test('a document nobody generated says nothing about generation', () => {
+    const written = saveDocument({...document(), origin: undefined}, 'drawn.gpix')
+
+    // Absent rather than `null`: a hand-drawn model has no provenance, which is not the same fact
+    // as a provenance that is empty.
+    expect('origin' in written).toBe(false)
+    expect(loadDocument(JSON.stringify(written))?.origin).toBeUndefined()
+})
+
+test('half a generation record is not a record, and does not take the voxels with it', () => {
+    const doc = document()
+    const written = saveDocument(doc, 'tower.gpix')
+    const broken = {...written, origin: {prompt: 'a stone tower', model: 'qwen'}}
+    const back = loadDocument(JSON.stringify(broken))
+
+    // The only thing the record is for is reproducing the model, and a record with no seed in it
+    // cannot. It is dropped; the model is not.
+    expect(back?.origin).toBeUndefined()
+    expect(back?.volume.data).toEqual(doc.volume.data)
+})
+
 test('a version 1 file still opens, with the fields it never had at their defaults', () => {
     const doc = document()
     const v2 = saveDocument(doc, 'old.gpix', 3)
-    const {references, symmetry, output, ...rest} = v2
+    const {references, symmetry, output, origin, ...rest} = v2
     const back = loadDocument(JSON.stringify({...rest, version: 1}))
 
     expect(back?.version).toBe(1)
+    expect(back?.origin).toBeUndefined()
     expect(back?.volume.data).toEqual(doc.volume.data)
     expect(back?.references).toEqual([])
     expect(back?.symmetry).toEqual({x: false, y: false, z: false, radial: false})

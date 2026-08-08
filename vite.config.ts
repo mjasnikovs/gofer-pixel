@@ -33,6 +33,7 @@ export default defineConfig((): UserConfig => ({
             '@astryxdesign/core/Kbd',
             '@astryxdesign/core/MoreMenu',
             '@astryxdesign/core/NumberInput',
+            '@astryxdesign/core/ProgressBar',
             '@astryxdesign/core/RadioList',
             '@astryxdesign/core/SegmentedControl',
             '@astryxdesign/core/Selector',

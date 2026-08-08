@@ -1,3 +1,4 @@
+import type {GenerationRecord} from '../gen/llama'
 import type {NamedCamera} from './cameras'
 import type {Objects} from './objects'
 import {readReference, type Reference} from './reference'
@@ -37,18 +38,28 @@ export interface SavedDocument {
     readonly symmetry: Symmetry
     /** Version 2. What the sheet is packed and written as — `FEATURESET.md` §16, §37, §38. */
     readonly output: SavedOutput
+    /**
+     * Version 3. What generated this model, when one did — see `src/gen/llama.ts`.
+     *
+     * Absent on everything an artist drew or imported, which is most documents. A generated asset
+     * whose prompt, seed and sampler were not written down cannot be reproduced or nudged, only
+     * regenerated and hoped over — and the one place that record survives a reload is the file.
+     */
+    readonly origin?: GenerationRecord
 }
 
 /**
  * `1` is what shipped as the autosave-only format, and it is still read.
  *
- * Refusing it would throw away the crash recovery of every artist who upgrades mid-session, which
- * is the one moment `FEATURESET.md` §32 exists for. A v1 payload loads with the v2 fields at their
- * defaults, because none of them can be inferred and a guess would be a lie about their document.
+ * Refusing an old one would throw away the crash recovery of every artist who upgrades mid-session,
+ * which is the one moment `FEATURESET.md` §32 exists for. Older payloads load with the newer fields
+ * at their defaults, because none of them can be inferred and a guess would be a lie about their
+ * document. A v1 or v2 file has no `origin` and that is not a gap: it means nobody recorded one,
+ * which is exactly what `undefined` says.
  */
-export type SaveVersion = 1 | 2
+export type SaveVersion = 1 | 2 | 3
 
-export const SAVE_VERSION = 2
+export const SAVE_VERSION = 3
 
 /**
  * The export settings, which belong to the model rather than to the session.
@@ -121,6 +132,8 @@ export interface Document {
     readonly references: readonly Reference[]
     readonly symmetry: Symmetry
     readonly output: SavedOutput
+    /** What generated this model, or `undefined` for one that was drawn or imported. */
+    readonly origin: GenerationRecord | undefined
 }
 
 export const saveDocument = (document: Document, name: string, at = Date.now()): SavedDocument => {
@@ -141,7 +154,10 @@ export const saveDocument = (document: Document, name: string, at = Date.now()):
         cameras: document.cameras,
         references: document.references,
         symmetry: document.symmetry,
-        output: document.output
+        output: document.output,
+        // Omitted rather than written as `null`, so a hand-drawn document says nothing about
+        // generation instead of saying it was not generated.
+        ...(document.origin === undefined ? {} : {origin: document.origin})
     }
 }
 
@@ -190,6 +206,25 @@ const readOutput = (value: unknown): SavedOutput | undefined => {
     }
 }
 
+/**
+ * A generation record, or `undefined` for anything that is not a whole one.
+ *
+ * Whole, not partial: a record missing its seed is not a record, because the only thing it is for is
+ * reproducing the model, and half a sampler cannot. Dropped rather than fatal — the voxels are the
+ * document and a lost provenance line costs nobody their work.
+ */
+const readOrigin = (value: unknown): GenerationRecord | undefined => {
+    if (typeof value !== 'object' || value === null) return undefined
+    const {prompt, sampler, model, at} = value as Record<string, unknown>
+    if (typeof prompt !== 'string' || typeof model !== 'string' || typeof at !== 'string') {
+        return undefined
+    }
+    if (typeof sampler !== 'object' || sampler === null) return undefined
+    const {temperature, seed} = sampler as Record<string, unknown>
+    if (typeof temperature !== 'number' || typeof seed !== 'number') return undefined
+    return {prompt, sampler: {temperature, seed}, model, at}
+}
+
 const readSymmetry = (value: unknown): Symmetry => {
     if (typeof value !== 'object' || value === null) return NO_SYMMETRY
     const {x, y, z, radial} = value as Record<string, unknown>
@@ -210,7 +245,7 @@ export const loadDocument = (text: string): LoadedDocument | undefined => {
     const saved: Record<string, unknown> = {...parsed}
     if (saved['format'] !== 'gofer-pixel/document') return undefined
     const version = saved['version']
-    if (version !== 1 && version !== 2) return undefined
+    if (version !== 1 && version !== 2 && version !== 3) return undefined
 
     const size = saved['size']
     if (!Array.isArray(size) || size.length !== 3) return undefined
@@ -262,6 +297,7 @@ export const loadDocument = (text: string): LoadedDocument | undefined => {
         references,
         symmetry: readSymmetry(saved['symmetry']),
         output,
+        origin: readOrigin(saved['origin']),
         name: typeof saved['name'] === 'string' ? saved['name'] : 'Recovered',
         at: typeof saved['at'] === 'number' ? saved['at'] : 0,
         version

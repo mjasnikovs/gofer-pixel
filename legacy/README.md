@@ -30,9 +30,11 @@ tests, GLSL on the GPU for the viewport. See `docs/techstack.md` §2 for the mea
 - `src/vox/vox-file.ts`, `src/vox/vox-scene.ts` — `.vox` read and write, byte-identical to
   `py/voxgen.py`. Format code, still correct.
 - `src/image/png.ts` — a working PNG encoder with no dependencies.
-- `src/gen/` — the LLM pipeline. `ops.ts` is a port of `py/voxgen.py:rasterise`; `llama.ts` talks to
-  `localhost:8080`; `clip.ts` is the client for `py/voxserve.py`. `evolve.ts` optimises reliably
-  against an objective that makes the sprite worse, and was never wired in.
+- `src/gen/` — the LLM pipeline. **Carried over 2026-08-08 into `src/gen/`**, minus `evolve.ts`,
+  which optimises reliably against an objective that makes the sprite worse and was never wired in.
+  `py/voxserve.py` was replaced by `py/clipserve.py`, which takes rendered PNGs instead of op lists —
+  so `ops.ts`'s byte-for-byte parity with `py/voxgen.py:rasterise` is no longer required and the
+  Python rasteriser has no caller. See `docs/TASKS.md`.
 - `src/vox/render.ts`, `src/vox/slice.ts`, `src/vox/render-worker.ts`, `py/voxrender.py` — the
   sprite-stacking renderer. **Superseded.** Read it only for the centring-offset story below.
 - `src/fx/expr.ts` — a hand-written expression evaluator used instead of `new Function`, because a

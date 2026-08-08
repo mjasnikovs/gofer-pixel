@@ -1,5 +1,6 @@
 import {expect, test} from 'bun:test'
 import {voxelsFromImage} from '../doc/import'
+import {rasterise} from '../gen/ops'
 import {
     duplicateOffset,
     initialObjects,
@@ -1815,7 +1816,8 @@ test('opening a document takes its references and presets, not the ones already 
                 {plane: 2, url: 'data:image/png;base64,theirs', opacity: 0.3, locked: false}
             ],
             symmetry: {x: true, y: false, z: false, radial: false},
-            output: {cell: 16, padding: 4, bounds: true, preset: '', presets: []}
+            output: {cell: 16, padding: 4, bounds: true, preset: '', presets: []},
+            origin: undefined
         }
     })
 
@@ -1835,6 +1837,46 @@ test('a PNG becomes a document that has never been saved, and knows it', () => {
     expect(imported.doc.savedAt).toBeUndefined()
     // Voxels exist here that no file holds, so leaving without saving must be asked about.
     expect(imported.doc.dirty).toBe(true)
+})
+
+test('a generated candidate becomes an ordinary unsaved document, with what made it', () => {
+    const state = reduce(fresh(), {
+        type: 'reference',
+        plane: 0,
+        url: 'data:image/png;base64,mine'
+    })
+    const record = {
+        prompt: 'a stone tower',
+        sampler: {temperature: 0.9, seed: 41},
+        model: 'Qwen3.6-27B',
+        at: '2026-08-08T10:00:00.000Z'
+    }
+    const made = rasterise({
+        name: 'tower',
+        size: [8, 8, 16],
+        mirror_x: false,
+        ops: [{op: 'box', from: [2, 2, 0], to: [5, 5, 15], color: '#808080'}]
+    })
+
+    const next = reduce(state, {type: 'generate', volume: made, name: 'tower', record})
+
+    expect([next.volume.sx, next.volume.sy, next.volume.sz]).toEqual([8, 8, 16])
+    expect(next.doc).toEqual({name: 'tower', savedAt: undefined, dirty: true})
+    expect(next.origin).toEqual(record)
+    // It is a document like any other from here: one object, cameras around it, drawable.
+    expect(next.objects.list).toHaveLength(1)
+    expect(next.cameras.length).toBeGreaterThan(0)
+    expect(next.history.past).toHaveLength(0)
+    // The reference art is the artist's desk rather than the model, and survives.
+    expect(next.references).toHaveLength(1)
+    // And it is what gets written down, so the seed outlives the session.
+    expect(asDocument(next).origin).toEqual(record)
+})
+
+test('a document that nobody generated has no origin, and drawing does not give it one', () => {
+    const state = fresh()
+    expect(state.origin).toBeUndefined()
+    expect(asDocument(reduce(state, {type: 'color', color: 2})).origin).toBeUndefined()
 })
 
 test('what the state says the document is, is what gets written down', () => {

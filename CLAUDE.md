@@ -46,7 +46,9 @@ What is there now, and roughly in dependency order:
 | `src/image/`    | PNG encoding                                                                     |
 | `src/viewport/` | orbit/pan/zoom as a pure function, and the React canvas                          |
 | `src/app/`      | the whole app as one value and one `reduce`, plus the panels that show it        |
+| `src/gen/`      | the local-AI pipeline: prompt → primitives → voxels, and the two scorers         |
 | `src/theme/`    | `theme.ts` and the CSS it generates; never edit the CSS                          |
+| `py/`           | `clipserve.py`, the CLIP scoring service. Optional, started by hand              |
 | `browser/`      | the Playwright suite and the page it drives                                      |
 
 ## The renderer
@@ -69,6 +71,48 @@ two rules that are part of the renderer's contract, not test concessions**:
 
 Break either and axis-aligned views lose a fifth of the model without failing loudly. This is the
 same defect class that bit the old sprite-stacking renderer at 0/90/180/270°.
+
+## Local AI
+
+Carried back out of `legacy/` on 2026-08-08, into `src/gen/` and one dialog behind the main menu.
+The pipeline is:
+
+```
+prompt → llama-server emits a JSON op list under a grammar → rasterise to a Volume
+  → the CPU raycaster renders four views → CLIP ranks them → pick one, and it becomes the document
+```
+
+Four things are settled and must not be re-litigated. They are measured, and the record is
+`legacy/docs/DESIGN_PROGRESS.md`:
+
+1. **The model cannot draw pixels.** Grammar constraints fixed the formatting completely and it
+   still produced 0 of 12 sprites that depicted their subject. It emits primitives; code rasterises.
+2. **The model cannot judge its own renders.** 1–4/10 on counting. Only simple binary presence
+   questions about one image work, at 20/20.
+3. **CLIP is the scorer, for candidates of one prompt only.** A good stone tower scores below a
+   mediocre mushroom, so it is a sort order inside a batch and never a quality bar.
+4. **Organic and architectural subjects work; directional machines do not.** A tank comes back
+   front-to-back reversed and no prompt fixes it.
+
+What is different from the legacy build: **nothing rasterises a spec twice.** Legacy shipped the op
+list to Python and re-rasterised and re-rendered it there with the sprite stacker, so two
+rasterisers and two renderers had to agree byte for byte. `py/clipserve.py` now takes the PNGs the
+CPU raycaster already made and does nothing but CLIP. The evolutionary refiner is deliberately not
+carried over — it optimises reliably against an objective that makes the sprite worse.
+
+Measured 2026-08-08, end to end in Chromium against the live server: **7–20 s per candidate**,
+sequentially because llama-server has two slots and shares both GPUs; **83 ms** to render 24 ranking
+views on the CPU; **~0.2 s per candidate** to score four views with CLIP, plus 4.6 s to load it
+once. The built-in score and CLIP picked the same winner out of six, at a rank agreement of 0.17 —
+low because four of the six were solid bricks that tie at the top of any deterministic score.
+
+```bash
+bun run clip          # .venv/bin/python py/clipserve.py — optional, port 8765
+```
+
+Neither service is required to open the app. With llama-server down the menu item opens a dialog
+that says so and disables its one button; with `clipserve.py` down the batch ranks on the built-in
+scores.
 
 ## Testing — nothing waits
 

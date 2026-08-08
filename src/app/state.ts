@@ -29,6 +29,7 @@ import {
     type Draft
 } from '../doc/edits'
 import {figureCells} from '../doc/figures'
+import type {GenerationRecord} from '../gen/llama'
 import type {Reference} from '../doc/reference'
 import {DEFAULT_OUTPUT, type Document} from '../doc/save'
 import {
@@ -428,6 +429,13 @@ export interface DocumentIdentity {
 export interface AppState {
     readonly doc: DocumentIdentity
     readonly volume: Volume
+    /**
+     * What generated this model, when one did — `undefined` for everything drawn or imported.
+     *
+     * It travels in the `.gpix` at format version 3. A generated asset whose prompt, seed and
+     * sampler were not recorded cannot be reproduced or nudged, only regenerated and hoped over.
+     */
+    readonly origin: GenerationRecord | undefined
     readonly cameras: readonly NamedCamera[]
     /** Which stored camera the viewport is currently showing, if it still matches one. */
     readonly selected: string | undefined
@@ -597,6 +605,7 @@ export type AppAction =
     | {type: 'reference-lock'; plane: Axis; on: boolean}
     | {type: 'reference-drop'; plane: Axis}
     | {type: 'import-image'; volume: Volume; name: string}
+    | {type: 'generate'; volume: Volume; name: string; record: GenerationRecord}
     | {type: 'open'; document: OpenedDocument}
     | {type: 'new'; volume: Volume; objects: Objects; name: string}
     | {type: 'saved'; name: string; at: number}
@@ -694,6 +703,7 @@ export const initialState = (source: Volume, name: string, opened?: OpenedDocume
     return {
         doc: {name, savedAt: undefined, dirty: opened?.unsaved === true},
         volume,
+        origin: opened?.origin,
         cameras,
         selected: first?.id,
         previewed: first?.id,
@@ -2177,6 +2187,31 @@ const step = (state: AppState, action: AppAction): AppState => {
         }
 
         /*
+         * A generated candidate, taken into the editor as an ordinary document — see `src/gen/`.
+         *
+         * It replaces rather than merges, and it has to: the spec brings its own grid size and its
+         * own palette, and a grid cannot be resized. It arrives dirty and never saved, because it
+         * is by definition work no file holds. The prompt, seed and sampler come with it, so the
+         * artist can ask the same question again with the same answer.
+         *
+         * Everything after this point is drawing. A generated model has no special status in the
+         * document, no lock and no second history — the whole point of the pipeline is that it
+         * hands over a model, not an attachment to one.
+         */
+        case 'generate': {
+            const made = initialState(action.volume, action.name)
+            return {
+                ...made,
+                doc: {...made.doc, dirty: true},
+                origin: action.record,
+                // The artist's reference art and their saved export presets belong to the desk
+                // rather than to the model, and a new model is not a reason to lose either.
+                references: state.references,
+                presets: state.presets
+            }
+        }
+
+        /*
          * A document replacing this one — a `.gpix` off the disk, or a snapshot being restored
          * (`FEATURESET.md` §32). It empties the undo history, because the history is a list of
          * diffs against a grid that is no longer there and undoing one would apply it to the wrong
@@ -2203,7 +2238,8 @@ const step = (state: AppState, action: AppAction): AppState => {
                 cameras: [],
                 references: [],
                 symmetry: NO_SYMMETRY,
-                output: DEFAULT_OUTPUT
+                output: DEFAULT_OUTPUT,
+                origin: undefined
             })
 
         case 'saved':
@@ -2403,6 +2439,9 @@ export const asDocument = (state: AppState): Document => ({
     cameras: state.cameras,
     references: state.references,
     symmetry: state.symmetry,
+    // Not in `DOCUMENT_FIELDS`, and deliberately: `origin` only ever changes in the one action that
+    // replaces the whole document, so it can never be the field that makes a document unsaved.
+    origin: state.origin,
     output: {
         cell: state.cell,
         padding: state.padding,

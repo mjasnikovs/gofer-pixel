@@ -10,6 +10,8 @@ import {memoryFiles, type Files} from '../doc/files'
 import {initialObjects} from '../doc/objects'
 import type {Axis} from '../doc/brush'
 import {NO_SYMMETRY} from '../doc/symmetry'
+import {memoryScorer} from '../gen/clip'
+import {memoryLlama, type Llama} from '../gen/llama'
 import {handle} from './handle'
 import {fakeGl, withFakeGl} from '../../test/fake-gl'
 
@@ -23,7 +25,11 @@ const volume = readVox(
  * fails to get a context and every other panel still works, because none of them are downstream of
  * one.
  */
-const mount = async (store?: Store, files?: Files): Promise<{root: Root; host: HTMLElement}> => {
+const mount = async (
+    store?: Store,
+    files?: Files,
+    llama?: Llama
+): Promise<{root: Root; host: HTMLElement}> => {
     const host = document.createElement('div')
     document.body.appendChild(host)
     const root = createRoot(host)
@@ -34,6 +40,7 @@ const mount = async (store?: Store, files?: Files): Promise<{root: Root; host: H
                 name='car.vox'
                 {...(store ? {store} : {})}
                 {...(files ? {files} : {})}
+                {...(llama ? {llama, scorer: memoryScorer([], false)} : {})}
             />
         )
     })
@@ -47,7 +54,8 @@ const asSaved = (grid = volume) => ({
     cameras: [],
     references: [],
     symmetry: NO_SYMMETRY,
-    output: DEFAULT_OUTPUT
+    output: DEFAULT_OUTPUT,
+    origin: undefined
 })
 
 const unmount = async ({root, host}: {root: Root; host: HTMLElement}): Promise<void> => {
@@ -455,6 +463,88 @@ test('a .gpix on the disk opens over what is on screen', async () => {
     expect([handle.state?.volume.sx, handle.state?.volume.sy]).toEqual([8, 8])
     expect(handle.state?.symmetry.x).toBe(true)
     expect(handle.state?.doc.dirty).toBe(false)
+
+    await unmount(mounted)
+})
+
+/*
+ * Generation — `src/gen/`. Two things only the whole window can answer: that the menu reaches it at
+ * all, and that a picked candidate lands in the *document* rather than in the dialog's own state.
+ * Everything else about the dialog is in `GenerateDialog.test.tsx`, against the same canned ports.
+ */
+test('a generated candidate becomes the open document, provenance and all', async () => {
+    const tower = {
+        name: 'tower',
+        size: [8, 8, 12] as [number, number, number],
+        mirror_x: false,
+        ops: [
+            {
+                op: 'box' as const,
+                from: [1, 1, 0] as [number, number, number],
+                to: [6, 6, 11] as [number, number, number],
+                color: '#808080'
+            }
+        ]
+    }
+    const mounted = await mount(memoryStore(), memoryFiles(), memoryLlama([tower], 'qwen'))
+
+    await act(async () => {
+        control(mounted.host, 'Main menu').click()
+    })
+    await act(async () => {
+        menuItem('Generate a model…').click()
+    })
+    expect(openDialogTitle()).toBe('Generate a model')
+
+    await act(async () => {
+        control(global.document.body, 'Generate').click()
+    })
+    /*
+     * A second, empty act. The click starts a batch it does not own, and the tail of that batch —
+     * the failure count, the CLIP note — lands after the handler has returned. Not a wait: `act`
+     * flushes what is already queued, and leaving it queued renders into a tree this test is about
+     * to unmount. `GenerateDialog.test.tsx` awaits the batch itself through `onRunning`.
+     */
+    await act(async () => {
+        // nothing to do; the flush is the point
+    })
+    await act(async () => {
+        control(global.document.body, 'Use this one').click()
+    })
+
+    expect([handle.state?.volume.sx, handle.state?.volume.sz]).toEqual([8, 12])
+    expect(handle.state?.doc).toMatchObject({name: 'tower', dirty: true, savedAt: undefined})
+    expect(handle.state?.origin?.prompt).toBe('a stone tower')
+    expect(handle.state?.origin?.model).toBe('qwen')
+    // It is a document like any other from here — one object, cameras, an empty history.
+    expect(handle.state?.objects.list).toHaveLength(1)
+    expect(handle.state?.history.past).toHaveLength(0)
+    // And the dialog is gone rather than sitting over the model it just handed over.
+    expect(global.document.querySelector('[data-testid="generate-dialog"]')).toBeNull()
+
+    await unmount(mounted)
+})
+
+test('Generate with unsaved work asks before it opens, like New and Open', async () => {
+    const mounted = await mount(memoryStore(), memoryFiles(), memoryLlama([]))
+
+    await act(async () => {
+        handle.dispatch?.({type: 'object', op: {kind: 'add'}})
+    })
+    await act(async () => {
+        control(mounted.host, 'Main menu').click()
+    })
+    await act(async () => {
+        menuItem('Generate a model…').click()
+    })
+
+    // The guard, not the generate dialog: a candidate replaces the document, so the question is
+    // asked before the minute is spent rather than after it.
+    expect(openDialogTitle()).toContain('unsaved')
+    await act(async () => {
+        control(global.document.body, 'Discard').click()
+    })
+    expect(openDialogTitle()).toBe('Generate a model')
 
     await unmount(mounted)
 })
@@ -1115,8 +1205,16 @@ test('the two extra downloads do nothing until there is a sheet to cut them from
 
         await pick('Download every sprite separately')
         await pick('Download metadata JSON')
-        // One PNG per camera, plus the JSON that says where each of them landed.
-        expect(written.filter(name => name.endsWith('.png'))).toHaveLength(8)
+        /*
+         * One PNG per camera, plus the JSON that says where each of them landed.
+         *
+         * The sheet's own two files are excluded by name rather than by the clear above. Export
+         * writes them from an effect, through a `CompressionStream` that settles on the macrotask
+         * queue, so `sprites.png` and `sprites-normal.png` can land *after* the clear — which made
+         * this count 10 on about one run in three, depending on what else the suite had queued.
+         */
+        const sprites = written.filter(name => name.endsWith('.png') && !name.startsWith('sprites'))
+        expect(sprites).toHaveLength(8)
         expect(written).toContain('sprites.json')
 
         await unmount(mounted)

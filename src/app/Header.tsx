@@ -69,7 +69,8 @@ export const Header = ({
     onNew,
     onOpen,
     onSave,
-    onSaveAs
+    onSaveAs,
+    onGenerate
 }: {
     state: AppState
     onWorkspace: (workspace: AppState['workspace']) => void
@@ -85,6 +86,7 @@ export const Header = ({
     onOpen: () => void
     onSave: () => void
     onSaveAs: () => void
+    onGenerate: () => void
 }) => (
     <header className='app-header'>
         <div className='header-group'>
@@ -213,6 +215,14 @@ export const Header = ({
                         onClick: onSave
                     },
                     {label: 'Save As…', onClick: onSaveAs},
+                    {type: 'divider' as const},
+                    /*
+                     * Generation lives in the menu rather than on the toolbar, because it is a
+                     * thing an artist does once before they start rather than while they draw —
+                     * and because a candidate replaces the open document, which is a File-menu
+                     * kind of promise, not a tool.
+                     */
+                    {label: 'Generate a model…', onClick: onGenerate},
                     ...(restores.length > 0 ? [{type: 'divider' as const}] : []),
                     ...restoreLabels(restores).map(entry => ({
                         label: entry.label,

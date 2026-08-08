@@ -177,6 +177,85 @@ reading `window.goferPixel`. It failed only on a cold `node_modules/.vite`, whic
 nobody is looking. Listing them is the fix; making the suite wait for the handle would hide a real
 boot failure behind a timeout.
 
+## Local AI, carried back 2026-08-08
+
+Not one of the seventeen, and not in `FEATURESET.md` or either mockup. It is the one subsystem the
+rebuild dropped that was worth having back: `legacy/src/gen/` and `legacy/py/`, re-derived against
+the raycaster.
+
+**The pipeline is unchanged and its findings still stand** — the model emits primitives, code
+rasterises them, CLIP ranks candidates of one prompt. What changed is that **the second rasteriser
+is gone.** Legacy posted the op list to Python, rasterised it again there with `voxgen.rasterise`
+and rendered it again with the sprite stacker; the score was therefore of a picture the artist never
+saw, and two rasterisers had to stay byte-identical. `py/clipserve.py` takes base64 PNGs and does
+nothing but CLIP. Confirmed byte-faithful: scoring six candidates through the service returned the
+same six numbers to four decimals as scoring the files on disk directly.
+
+**Measured while building it**, all 2026-08-08 on this machine:
+
+| Thing                                                | Number                                    |
+| ---------------------------------------------------- | ----------------------------------------- |
+| One candidate, grammar-constrained, 27B on both GPUs | 7–20 s, 424 completion tokens for 12 ops  |
+| Four ranking views per candidate, CPU raycaster      | 14 ms                                     |
+| CLIP over four 64 px views                           | ~0.2 s, plus 4.6 s to load the model once |
+| Whole flow in Chromium, two candidates               | 13.2 s                                    |
+
+**Three things were changed rather than copied.**
+
+1. **`overallScore` had the wrong sign on fill.** Of six candidates for "a stone tower", three came
+   back as `bboxFill = 1.0` — a solid block filling its grid — and every other deterministic score
+   on them was also exactly 1.000. The legacy weighting rewarded fill, so it sorted the three
+   shapeless bricks to the top. The term is `1 - bboxFill` now: a model that fills its own bounding
+   box has no silhouette, and connectivity is what stops that rewarding a cloud of debris. With the
+   sign fixed it picks the same winner CLIP does.
+2. **`paletteCompliance` is dropped.** It scored a model against an allowed palette, and there is
+   nothing in this build that can supply one: a generated model brings its own palette and replaces
+   the document. A scorer nobody can call is dead weight.
+3. **One seed per candidate.** `generateMany` uses `seed + i`. Legacy passed one options object to N
+   calls, so a caller that pinned a seed got one candidate rendered N times.
+
+**The record travels in the file.** `origin` — prompt, temperature, seed, model, timestamp — is
+format **version 3**. A generated asset whose seed was not written down cannot be reproduced or
+nudged, only regenerated and hoped over. Versions 1 and 2 still open, with no origin, which is not a
+gap: it means nobody recorded one.
+
+**Where it lives.** A dialog behind the main menu, not a panel. `docs/editor.png` budgets every
+pixel of the window and generation is not something an artist does _while_ they draw. Picking a
+candidate replaces the open document, so it is behind the same unsaved-work guard as New and Open —
+asked before the minute is spent rather than after it.
+
+**Coverage.** `ops.ts`, `score.ts` and `views.ts` are at 100 % of lines and functions; `llama.ts`,
+`clip.ts` and `GenerateDialog.tsx` are at 98.8–99.6 % of lines. Two functions are uncovered by
+`bun test` and both on purpose: the 1500 ms abort behind `clip.ts`'s health probe, which cannot be
+reached without containing a duration, and the dialog's Escape handler, which is covered in the
+browser suite instead. Everything else is driven against stubbed ports — a server that answers 503,
+a reply the grammar did not constrain, a candidate that rasterises to nothing, a cancel mid-batch
+that keeps what had already landed, and a scorer that throws.
+
+`browser/generate.spec.ts` is four tests, and they are what only a browser shows: the menu is a
+portal and the dialog is a `<dialog>`; the candidate thumbnails are real canvases, which under
+happy-dom render as empty elements that pass anyway; the endpoints are `fetch` calls the page makes
+on its own; and Escape has to close a modal.
+
+**Two async leaks were found by writing these, and one of them was already there.**
+
+1. **A batch outlives the click that started it.** Encoding a candidate's ranking views goes through
+   a `CompressionStream`, which settles on the macrotask queue, so a test that only clicked Generate
+   left work running into an unmounted tree — and broke the _next_ test file about one run in two.
+   `GenerateDialog` hands its in-flight batch out through `onRunning`, the same seam `Viewport`
+   opens with `renderNow()`: the loop has to be drivable, not owned by the click.
+2. **Export's own PNGs could land after the test that made them.** `App.test.tsx`'s download test
+   cleared its capture array and then counted every `.png` in it, and the sheet's two files —
+   written from an effect, through the same `CompressionStream` — sometimes arrived after the clear
+   and made 8 sprites read as 10. It predates this work and only fired once there were more test
+   files queued behind it. The count names the sprite files now rather than counting whatever PNG
+   turns up.
+
+**Deliberately not carried over:** `evolve.ts`, which optimises reliably against an objective that
+makes the sprite worse — CLIP under optimisation pressure tore the mushroom's cap apart for +0.03,
+connectivity 1.00 → 0.72. And the code-metric scorer and spec check in `legacy/experiments/`, which
+failed to discriminate at all.
+
 Items 2, 39 and 40 are not tasks. They are the rules the other sixteen are judged by: everything on
 integer coordinates, nearest everywhere, the preview is the export, and the beginner sees six
 controls.
