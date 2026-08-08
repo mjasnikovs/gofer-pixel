@@ -1,17 +1,22 @@
+import {IconButton} from '@astryxdesign/core/IconButton'
 import {Text} from '@astryxdesign/core/Text'
-import type {NamedCamera} from '../doc/cameras'
+import {DIRECTION_COUNTS, type NamedCamera} from '../doc/cameras'
 import type {Volume} from '../render/volume'
-import {CameraIcon, PlusIcon} from './icons'
+import {CameraIcon, CopyIcon, PlusIcon, TrashIcon} from './icons'
 import {SectionHead} from './SectionHead'
 import {Thumbnail} from './Thumbnail'
 
 /**
- * The VIEWS strip that runs under the viewport in `docs/editor.png`.
+ * The VIEWS strip that runs under the viewport in `docs/editor.png`, and the only camera list there
+ * is.
  *
- * It is the same camera list as the rail, at a size you can actually judge a sprite at, laid along
- * the axis a sprite sheet is read along. The mockup shows both, and it is right to: the rail is for
- * managing cameras and this is for looking at their output, which is why the tiles here are twice
- * the size and carry the name under the picture rather than over it.
+ * The mockup drew this strip and a CAMERAS grid in the rail, and for a while the app had both. They
+ * were the same list, the same selection and the same capture button at two sizes, so the rail one
+ * is gone and its controls moved here. A camera is judged by its picture, and this is the place the
+ * picture is big enough to judge — laid along the axis a sprite sheet is read along.
+ *
+ * The head carries what the rail used to: `FEATURESET.md` §13's one-click direction rings, §14's
+ * alignment, and capture/duplicate/delete for the selected camera.
  *
  * It is also where the sheet gets reordered — `FEATURESET.md` §16's "drag to reorder". This strip
  * runs in the same order the sheet packs its cells, so dragging a tile along it is dragging a cell
@@ -28,6 +33,10 @@ export const ViewsStrip = ({
     dragging,
     onSelect,
     onCapture,
+    onDuplicate,
+    onDelete,
+    onDirections,
+    onAlign,
     onDragStart,
     onDragOver,
     onDragEnd
@@ -38,12 +47,68 @@ export const ViewsStrip = ({
     dragging: string | undefined
     onSelect: (id: string) => void
     onCapture: () => void
+    onDuplicate: () => void
+    onDelete: (id: string) => void
+    onDirections: (count: number) => void
+    onAlign: () => void
     onDragStart: (id: string) => void
     onDragOver: (to: number) => void
     onDragEnd: () => void
 }) => (
     <div className='panel views-panel'>
-        <SectionHead title='Views' />
+        <SectionHead title='Views'>
+            {DIRECTION_COUNTS.map(count => (
+                <button
+                    key={count}
+                    type='button'
+                    className='symmetry-axis'
+                    aria-label={`Create ${String(count)} directions`}
+                    title={`Replace the list with ${String(count)} cameras around one pivot`}
+                    onClick={() => {
+                        onDirections(count)
+                    }}
+                >
+                    {count}
+                </button>
+            ))}
+            <button
+                type='button'
+                className='symmetry-axis'
+                aria-label='Align the view to the nearest stop'
+                title='Turn the view to the nearest eighth and the nearest pitch'
+                onClick={onAlign}
+            >
+                ⌖
+            </button>
+            <IconButton
+                label='Capture view as a camera'
+                tooltip='Capture the current view'
+                icon={<PlusIcon />}
+                size='sm'
+                variant='ghost'
+                onClick={onCapture}
+            />
+            <IconButton
+                label='Duplicate camera'
+                tooltip='Duplicate the selected camera'
+                icon={<CopyIcon />}
+                size='sm'
+                variant='ghost'
+                isDisabled={selected === undefined}
+                onClick={onDuplicate}
+            />
+            <IconButton
+                label='Delete camera'
+                tooltip='Delete the selected camera'
+                icon={<TrashIcon />}
+                size='sm'
+                variant='ghost'
+                isDisabled={selected === undefined}
+                onClick={() => {
+                    if (selected !== undefined) onDelete(selected)
+                }}
+            />
+        </SectionHead>
         <div
             className='views-strip'
             role='radiogroup'

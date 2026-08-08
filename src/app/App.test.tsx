@@ -59,11 +59,9 @@ const within = (host: HTMLElement, selector: string, label: string): HTMLElement
 test('the window opens on eight cameras, each with a thumbnail rendered on the CPU', async () => {
     const mounted = await mount()
 
-    const thumbnails = mounted.host.querySelectorAll('.camera-grid canvas.thumbnail')
+    const thumbnails = mounted.host.querySelectorAll('.views-strip canvas.thumbnail')
     expect(thumbnails).toHaveLength(8)
-    expect(thumbnails[0]?.getAttribute('data-pixels')).toBe('72x72')
-    // The same eight again along the bottom, at the size a sprite is judged at.
-    expect(mounted.host.querySelectorAll('.views-strip canvas.thumbnail')).toHaveLength(8)
+    expect(thumbnails[0]?.getAttribute('data-pixels')).toBe('96x96')
     expect(mounted.host.textContent).toContain('Back Right')
 
     await unmount(mounted)
@@ -74,16 +72,14 @@ test('clicking a camera selects it and moves the viewport onto it', async () => 
     const before = handle.state?.selected
 
     await act(async () => {
-        within(mounted.host, '.camera-grid', 'Right').click()
+        within(mounted.host, '.views-strip', 'Right').click()
     })
 
     expect(handle.state?.selected).not.toBe(before)
     expect(handle.state?.selected).toBe('dir-2')
     expect(handle.state?.orbit.camera.yaw).toBeCloseTo(Math.PI / 2, 10)
 
-    // The views strip is the same list, so it has to agree about which one is current.
-    const tile = within(mounted.host, '.views-strip', 'Right')
-    expect(tile.getAttribute('aria-checked')).toBe('true')
+    expect(within(mounted.host, '.views-strip', 'Right').getAttribute('aria-checked')).toBe('true')
 
     await unmount(mounted)
 })
@@ -128,7 +124,7 @@ test('capturing adds a ninth camera and throws the stale sheet away', async () =
         control(mounted.host, 'Capture view as a camera').click()
     })
 
-    expect(mounted.host.querySelectorAll('.camera-grid canvas.thumbnail')).toHaveLength(9)
+    expect(mounted.host.querySelectorAll('.views-strip canvas.thumbnail')).toHaveLength(9)
     expect(handle.state?.sheet).toBeUndefined()
 
     await unmount(mounted)

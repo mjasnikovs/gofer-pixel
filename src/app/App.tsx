@@ -13,7 +13,6 @@ import type {Volume} from '../render/volume'
 import {Viewport} from '../viewport/Viewport'
 import type {OrbitEvent, ViewportPointer} from '../viewport/orbit'
 import {BrushPanel} from './BrushPanel'
-import {CamerasPanel} from './CamerasPanel'
 import {TOOL_CURSORS} from './cursors'
 import {writeMetadata, writePalette, writeSheet, writeSprite} from './download'
 import {ExportPanel} from './ExportPanel'
@@ -482,6 +481,18 @@ export const App = ({
                         dispatch({type: 'select', id})
                     }}
                     onCapture={capture}
+                    onDuplicate={() => {
+                        dispatch({type: 'duplicate'})
+                    }}
+                    onDelete={id => {
+                        dispatch({type: 'delete', id})
+                    }}
+                    onDirections={count => {
+                        dispatch({type: 'directions', count})
+                    }}
+                    onAlign={() => {
+                        dispatch({type: 'align'})
+                    }}
                     onDragStart={id => {
                         dispatch({type: 'drag-camera', id})
                     }}
@@ -513,27 +524,6 @@ export const App = ({
                         }}
                         onOp={op => {
                             dispatch({type: 'object', op})
-                        }}
-                    />
-                    <CamerasPanel
-                        volume={shown}
-                        cameras={state.cameras}
-                        selected={state.selected}
-                        onSelect={id => {
-                            dispatch({type: 'select', id})
-                        }}
-                        onCapture={capture}
-                        onDuplicate={() => {
-                            dispatch({type: 'duplicate'})
-                        }}
-                        onDelete={id => {
-                            dispatch({type: 'delete', id})
-                        }}
-                        onDirections={count => {
-                            dispatch({type: 'directions', count})
-                        }}
-                        onAlign={() => {
-                            dispatch({type: 'align'})
                         }}
                     />
                     <RendersPanel
