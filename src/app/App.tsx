@@ -378,6 +378,7 @@ export const App = ({
                         volume={drawn}
                         camera={state.orbit.camera}
                         map={state.map}
+                        edges={state.edges}
                         cursor={TOOL_CURSORS[state.tool]}
                         isMovingCamera={state.orbit.gesture !== undefined}
                         onOrbit={onOrbit}
@@ -433,6 +434,7 @@ export const App = ({
                 <div className='snap-column'>
                     <GridPanel
                         grid={state.grid}
+                        edges={state.edges}
                         snap={state.snap}
                         invert={state.invert}
                         voxelSize={Math.max(1, Math.round(state.cell / state.orbit.camera.zoom))}
@@ -441,6 +443,9 @@ export const App = ({
                         plane={state.plane}
                         onGrid={on => {
                             dispatch({type: 'grid', on})
+                        }}
+                        onEdges={on => {
+                            dispatch({type: 'edges', on})
                         }}
                         onSnap={on => {
                             dispatch({type: 'snap', on})

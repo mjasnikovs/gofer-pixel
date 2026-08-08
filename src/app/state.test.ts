@@ -1231,11 +1231,19 @@ test('a stroke in slice mode lands on the slice, not on whatever the ray hit', (
 test('the chrome settings move without touching the render or the sheet', () => {
     const baked = reduce(fresh(), {type: 'bake'})
     const after = reduce(
-        reduce(reduce(baked, {type: 'tool', tool: 'move'}), {type: 'grid', on: false}),
+        reduce(reduce(reduce(baked, {type: 'tool', tool: 'move'}), {type: 'grid', on: false}), {
+            type: 'edges',
+            on: false
+        }),
         {type: 'workspace', workspace: 'render'}
     )
     expect(after.tool).toBe('move')
     expect(after.grid).toBe(false)
+    // The lattice is a viewport setting: it must never reach the volume, the sheet or the history.
+    expect(fresh().edges).toBe(true)
+    expect(after.edges).toBe(false)
+    expect(after.volume).toBe(baked.volume)
+    expect(after.history).toBe(baked.history)
     expect(after.workspace).toBe('render')
     expect(after.sheet).toBe(baked.sheet)
     expect(after.orbit).toBe(baked.orbit)

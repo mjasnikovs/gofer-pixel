@@ -325,6 +325,20 @@ export const EyeIcon = () => (
     </Svg>
 )
 
+/** Cells with their dividing lines showing — the voxel lattice the Edges switch draws. */
+export const LatticeIcon = () => (
+    <Svg>
+        <rect
+            x='2.5'
+            y='2.5'
+            width='11'
+            height='11'
+            rx='1'
+        />
+        <path d='M8 2.5v11M2.5 8h11' />
+    </Svg>
+)
+
 export const MagnetIcon = () => (
     <Svg>
         <path d='M3.5 3v5a4.5 4.5 0 0 0 9 0V3h-3v5a1.5 1.5 0 0 1-3 0V3z' />

@@ -503,6 +503,14 @@ export interface AppState {
      */
     readonly paletteLocked: boolean
     readonly grid: boolean
+    /**
+     * Whether the viewport draws the voxel lattice on the faces it renders.
+     *
+     * Chrome, like `grid` and `invert`: it changes what the artist can see, never what is exported.
+     * A flat face is one tone however many voxels wide it is, and counting cells on it by eye is
+     * most of what placing the next voxel needs.
+     */
+    readonly edges: boolean
     readonly snap: boolean
     /**
      * Whether a drag turns the view the other way round — see `viewport/orbit.ts`.
@@ -569,6 +577,7 @@ export type AppAction =
     | {type: 'palette-load'; text: string}
     | {type: 'replace-color'; from: number; to: number}
     | {type: 'grid'; on: boolean}
+    | {type: 'edges'; on: boolean}
     | {type: 'snap'; on: boolean}
     | {type: 'invert'; on: boolean}
     | {type: 'workspace'; workspace: 'model' | 'render'}
@@ -667,6 +676,7 @@ export const initialState = (source: Volume, opened?: OpenedDocument): AppState 
         recent: [firstColor(volume)],
         paletteLocked: false,
         grid: true,
+        edges: true,
         snap: true,
         invert: false,
         workspace: 'model',
@@ -2081,6 +2091,9 @@ const step = (state: AppState, action: AppAction): AppState => {
 
         case 'grid':
             return {...state, grid: action.on}
+
+        case 'edges':
+            return {...state, edges: action.on}
 
         case 'snap':
             return {...state, snap: action.on}

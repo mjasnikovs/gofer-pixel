@@ -60,6 +60,7 @@ export const Viewport = ({
     volume,
     camera,
     map,
+    edges = false,
     cursor,
     isMovingCamera = false,
     onOrbit,
@@ -71,6 +72,8 @@ export const Viewport = ({
     volume: Volume
     camera: Camera
     map: number
+    /** Draw the voxel lattice over the colour map. Viewport only — no sprite ever carries it. */
+    edges?: boolean
     /**
      * The pointer, as a CSS `cursor` value — see `app/cursors.ts`. It comes in rather than being
      * decided here because which tool is armed is application state, and this component deliberately
@@ -166,8 +169,8 @@ export const Viewport = ({
         const raycaster = glRef.current?.raycaster
         if (!raycaster || size.width === 0) return
         raycaster.resize(size.width, size.height)
-        void raycaster.renderNow(basisFor(camera, volume, size.height), map).then(onFrame)
-    }, [camera, map, size, volume, onFrame])
+        void raycaster.renderNow(basisFor(camera, volume, size.height), map, edges).then(onFrame)
+    }, [camera, map, edges, size, volume, onFrame])
 
     // React's wheel listener is passive, so it cannot stop the page scrolling under a zoom.
     useEffect(() => {

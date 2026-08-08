@@ -71,6 +71,7 @@ uniform float uDepthRange;
 uniform float uWidth;
 uniform float uHeight;
 uniform int uMode;
+uniform int uEdges;
 
 out vec4 fragColor;
 
@@ -109,6 +110,38 @@ float occlusion(ivec3 cell, int face, float fu, float fv){
     float bottom = c00 + (c10 - c00) * fu;
     float top = c01 + (c11 - c01) * fu;
     return floor((bottom + (top - bottom) * fv) * AO_STEP + 0.5);
+}
+
+/**
+ * The voxel lattice, drawn on the face the ray struck. Viewport only, and off by default.
+ *
+ * A flat-shaded face is one tone across however many voxels it spans, so a wall reads as a single
+ * slab and the artist cannot count cells on it. The alternative — an SVG overlay, the way
+ * \`GroundGrid\` does it — cannot work here: those lines have to be occluded by the model they lie
+ * on, and only the ray knows what it hit.
+ *
+ * It is therefore the one thing in this shader that the CPU raycaster does not mirror, and the
+ * parity contract survives because \`uEdges\` is 0 everywhere except the viewport: nothing exports
+ * it, and the parity test never turns it on.
+ *
+ * Width is held at about one device pixel — \`uScale\` is world units per pixel, so \`uScale\` *is* a
+ * pixel in the units \`hitAt\` is measured in. The whole effect fades out below six pixels to the
+ * voxel, where a line per cell stops being a lattice and becomes noise.
+ */
+vec3 lattice(vec3 lit, vec3 hitAt, int face){
+    float perVoxel = 1.0 / uScale;
+    float strength = smoothstep(6.0, 12.0, perVoxel);
+    if (strength <= 0.0) return lit;
+    ivec2 uv = UV[face];
+    float u = clamp(hitAt[uv.x], 0.0, 1.0);
+    float v = clamp(hitAt[uv.y], 0.0, 1.0);
+    float edge = min(min(u, 1.0 - u), min(v, 1.0 - v));
+    float line = (1.0 - smoothstep(uScale * 0.35, uScale * 1.1, edge)) * strength;
+    // Dark voxels have no room to go darker, so on those the line is lifted instead. The pivot is
+    // luminance rather than a fixed tint, so one rule covers a black model and a white one.
+    float lum = dot(lit, vec3(0.299, 0.587, 0.114));
+    vec3 ink = lum > 0.22 ? lit * 0.80 : lit + 0.08;
+    return mix(lit, ink, line);
 }
 
 void main(){
@@ -156,7 +189,9 @@ void main(){
         if (value != 0u){
             vec3 rgb = floor(texelFetch(uPalette, ivec2(int(value), 0), 0).rgb * 255.0 + 0.5);
             if (uMode == ${String(MODE_COLOR)}) {
-                fragColor = vec4(floor(rgb * LIGHT[face] / 256.0) / 255.0, 1.0);
+                vec3 lit = floor(rgb * LIGHT[face] / 256.0) / 255.0;
+                if (uEdges != 0) lit = lattice(lit, org + f * (enter + walked) - cell, face);
+                fragColor = vec4(lit, 1.0);
             } else if (uMode == ${String(MODE_NORMAL)}) {
                 fragColor = vec4(NORMAL[face] / 255.0, 1.0);
             } else if (uMode == ${String(MODE_DEPTH)}) {

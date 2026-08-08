@@ -77,17 +77,18 @@ const CAMERAS: {name: string; camera: Camera}[] = [
     }
 ]
 
-const gpu = (page: Page, camera: Camera, mode: number): Promise<number[]> =>
+const gpu = (page: Page, camera: Camera, mode: number, edges = false): Promise<number[]> =>
     page.evaluate(
-        ([v, b, m, w, h]) =>
+        ([v, b, m, w, h, e]) =>
             window.gofer.gpuRender(
                 v as Parameters<typeof window.gofer.gpuRender>[0],
                 b as Parameters<typeof window.gofer.gpuRender>[1],
                 m as number,
                 w as number,
-                h as number
+                h as number,
+                e as boolean
             ),
-        [wire, basisFor(camera, volume, H), mode, W, H] as unknown[]
+        [wire, basisFor(camera, volume, H), mode, W, H, edges] as unknown[]
     )
 
 for (const {name, camera} of CAMERAS) {
@@ -170,6 +171,51 @@ for (const {name, camera} of CAMERAS) {
         expect(worstAo, `worst occlusion difference on ${renderer}`).toBeLessThanOrEqual(8)
     })
 }
+
+/*
+ * The one thing the shader draws that the CPU raycaster does not.
+ *
+ * The lattice is viewport decoration and exports nothing, so it lives behind `uEdges` and every
+ * call above leaves it off — that default is what the parity tests are silently relying on, and
+ * this test is what makes the reliance visible. It also checks the shape of the effect: lines on a
+ * minority of the model, with the silhouette untouched, rather than a wash over everything.
+ */
+test('the voxel lattice draws lines on the faces and leaves the silhouette alone', async ({
+    page
+}) => {
+    await page.goto('/browser/harness.html')
+    // Ten pixels to the voxel. The effect deliberately fades out below six, where a line per cell
+    // stops being a lattice, so a camera at the parity zoom of four would show nothing at all.
+    const camera: Camera = {yaw: 0.7, pitch: 0.5, zoom: 12, panX: 0, panY: 0}
+    // One after the other, not `Promise.all`. These two draws differ only by the flag, so they go
+    // to the same context and read back the same buffer — overlapped, the second frame lands
+    // before the first one's `readPixels`, both sides come back identical, and the test fails
+    // saying the lattice drew nothing. Seen once in a full-suite run and never in isolation.
+    const plain = await gpu(page, camera, MODE_COLOR)
+    const lined = await gpu(page, camera, MODE_COLOR, true)
+
+    let opaque = 0
+    let silhouetteDiffers = 0
+    let inked = 0
+    for (let i = 0; i < W * H; i += 1) {
+        const alpha = plain[i * 4 + 3] ?? 0
+        if (alpha !== (lined[i * 4 + 3] ?? 0)) silhouetteDiffers += 1
+        if (alpha === 0) continue
+        opaque += 1
+        for (let byte = 0; byte < 3; byte += 1) {
+            if (plain[i * 4 + byte] !== lined[i * 4 + byte]) {
+                inked += 1
+                break
+            }
+        }
+    }
+
+    expect(opaque).toBeGreaterThan(W * H * 0.1)
+    // Turning it on must not move a single edge of the model — it shades, it does not reshape.
+    expect(silhouetteDiffers).toBe(0)
+    expect(inked).toBeGreaterThan(opaque * 0.05)
+    expect(inked).toBeLessThan(opaque * 0.5)
+})
 
 test('the GPU is the GPU — a 512x512 frame through 32³ costs a fraction of a millisecond', async ({
     page

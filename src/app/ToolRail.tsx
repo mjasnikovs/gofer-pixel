@@ -7,6 +7,7 @@ import {
     EraseIcon,
     EyeIcon,
     FillIcon,
+    LatticeIcon,
     MagnetIcon,
     MeasureIcon,
     MouseIcon,
@@ -215,6 +216,7 @@ const PLANES: readonly {axis: Axis | undefined; label: string; title: string}[] 
 
 export const GridPanel = ({
     grid,
+    edges,
     snap,
     invert,
     voxelSize,
@@ -223,6 +225,7 @@ export const GridPanel = ({
     plane,
     references,
     onGrid,
+    onEdges,
     onSnap,
     onInvert,
     onSymmetry,
@@ -230,6 +233,7 @@ export const GridPanel = ({
     onReference
 }: {
     grid: boolean
+    edges: boolean
     snap: boolean
     invert: boolean
     voxelSize: number
@@ -238,6 +242,7 @@ export const GridPanel = ({
     plane: Axis | undefined
     references: readonly {plane: Axis; opacity: number; locked: boolean}[]
     onGrid: (on: boolean) => void
+    onEdges: (on: boolean) => void
     onSnap: (on: boolean) => void
     onInvert: (on: boolean) => void
     onSymmetry: (axis: 'x' | 'y' | 'z' | 'radial', on: boolean) => void
@@ -252,6 +257,17 @@ export const GridPanel = ({
                 icon={<EyeIcon />}
                 isOn={grid}
                 onToggle={onGrid}
+            />
+            {/*
+             * Next to the ground grid because they are the same question asked twice — where the
+             * cells are — and an artist looking for one of them looks here for the other.
+             */}
+            <Toggle
+                label='Edges'
+                hint='Outline each voxel on the model, so a flat face can be counted in cells'
+                icon={<LatticeIcon />}
+                isOn={edges}
+                onToggle={onEdges}
             />
             <Toggle
                 label='Snap'

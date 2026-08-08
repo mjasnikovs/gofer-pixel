@@ -26,7 +26,10 @@ const gpuRender = async (
     basis: Basis,
     mode: number,
     width: number,
-    height: number
+    height: number,
+    // Last and optional, so every parity call is a call with the lattice off. That default is the
+    // whole reason the shader is allowed to carry something the CPU raycaster does not.
+    edges = false
 ): Promise<number[]> => {
     const canvas = document.getElementById('gl')
     if (!(canvas instanceof HTMLCanvasElement)) throw new Error('no canvas')
@@ -48,7 +51,7 @@ const gpuRender = async (
         loaded = key
     }
     raycaster.resize(width, height)
-    await raycaster.renderNow(basis, mode)
+    await raycaster.renderNow(basis, mode, edges)
     return Array.from(raycaster.readPixels())
 }
 

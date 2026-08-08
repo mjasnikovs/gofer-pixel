@@ -15,8 +15,13 @@ export interface Raycaster {
     readonly frames: number
     setVolume: (volume: Volume) => void
     resize: (width: number, height: number) => void
-    /** Draw, block until the frame is really on the drawing buffer, resolve with the new count. */
-    renderNow: (basis: Basis, mode?: number) => Promise<number>
+    /**
+     * Draw, block until the frame is really on the drawing buffer, resolve with the new count.
+     *
+     * `edges` draws the voxel lattice over the colour map. It is viewport decoration and defaults
+     * off, which is what keeps it out of the parity the two backends are held to.
+     */
+    renderNow: (basis: Basis, mode?: number, edges?: boolean) => Promise<number>
     /** RGBA8 of the last frame, framebuffer order — row 0 is the *bottom*. */
     readPixels: () => Uint8Array
     dispose: () => void
@@ -147,7 +152,7 @@ export const createRaycaster = (canvas: HTMLCanvasElement): Raycaster => {
         gl.uniform1f(at('uHeight'), height)
     }
 
-    const renderNow = async (basis: Basis, mode = MODE_COLOR): Promise<number> => {
+    const renderNow = async (basis: Basis, mode = MODE_COLOR, edges = false): Promise<number> => {
         const [fx, fy, fz] = basis.forward
         const [rx, ry, rz] = basis.right
         const [ux, uy, uz] = basis.up
@@ -160,6 +165,7 @@ export const createRaycaster = (canvas: HTMLCanvasElement): Raycaster => {
         gl.uniform1f(at('uDist'), basis.dist)
         gl.uniform1f(at('uDepthRange'), basis.depthRange)
         gl.uniform1i(at('uMode'), mode)
+        gl.uniform1i(at('uEdges'), edges ? 1 : 0)
 
         gl.clearColor(0, 0, 0, 0)
         gl.clear(gl.COLOR_BUFFER_BIT)
