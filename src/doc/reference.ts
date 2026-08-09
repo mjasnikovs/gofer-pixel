@@ -19,6 +19,62 @@ export interface Reference {
     readonly locked: boolean
 }
 
+/**
+ * What a lock refuses, in one predicate.
+ *
+ * It used to be three different spellings in three reducer cases — `&& !entry.locked` in one,
+ * `|| entry.locked` in another, deliberately ignored in a third — and *absent from the fourth*, so
+ * dropping a new picture onto a locked plane quietly replaced the one the artist had locked. One
+ * line now, and the four operations below all ask it.
+ *
+ * Unlocking is the exception and has to be: a lock that could not be undone is a trap.
+ */
+const refuses = (entry: Reference | undefined): boolean => entry?.locked === true
+
+const onPlane = (references: readonly Reference[], plane: Axis): Reference | undefined =>
+    references.find(entry => entry.plane === plane)
+
+/**
+ * A picture on a plane — one per plane, so a second drop on the front replaces the first.
+ *
+ * Two pictures of the front stacked on each other is not something anyone asked for, and the artist
+ * plainly meant the new one. Unless they locked the old one, which is exactly the sentence
+ * `FEATURESET.md` §33 writes as "lock it".
+ */
+export const place = (
+    references: readonly Reference[],
+    plane: Axis,
+    url: string
+): readonly Reference[] =>
+    refuses(onPlane(references, plane)) ? references : (
+        [
+            ...references.filter(entry => entry.plane !== plane),
+            {plane, url, opacity: 0.5, locked: false}
+        ]
+    )
+
+/** How strongly the picture shows through. Clamped here, so no caller can put it out of range. */
+export const fade = (
+    references: readonly Reference[],
+    plane: Axis,
+    opacity: number
+): readonly Reference[] =>
+    references.map(entry =>
+        entry.plane === plane && !refuses(entry) ?
+            {...entry, opacity: Math.min(1, Math.max(0, opacity))}
+        :   entry
+    )
+
+export const lock = (
+    references: readonly Reference[],
+    plane: Axis,
+    on: boolean
+): readonly Reference[] =>
+    references.map(entry => (entry.plane === plane ? {...entry, locked: on} : entry))
+
+export const drop = (references: readonly Reference[], plane: Axis): readonly Reference[] =>
+    references.filter(entry => entry.plane !== plane || refuses(entry))
+
 const isAxis = (value: unknown): value is Axis => value === 0 || value === 1 || value === 2
 
 /**

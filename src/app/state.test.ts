@@ -12,19 +12,18 @@ import {SHEET_MAPS} from '../sheet/sheet'
 import {basisFor} from '../render/camera'
 import {render} from '../render/raycast'
 import {MODE_NORMAL} from '../render/raycast.glsl'
+import {allPresets, presetMaps} from '../sheet/presets'
 import {createVolume, voxelAt, voxelIndex, type Volume} from '../render/volume'
 import type {ViewportPointer} from '../viewport/orbit'
 import {readVox} from '../vox/vox-file'
 import {loadDocument, saveDocument} from '../doc/save'
 import {newDocument} from '../doc/templates'
 import {
-    allPresets,
     asDocument,
     currentSheet,
     GHOST_CELLS,
     initialState,
     MAX_BRUSH,
-    presetMaps,
     previewVolume,
     reduce,
     TOOLS,
@@ -1271,8 +1270,8 @@ test('a saved preset joins the list and can be taken back out of it', () => {
     const state = fresh()
     const saved = reduce(state, {type: 'save-preset', name: 'My rig', maps: ['color', 'ao']})
     expect(saved.output.preset).toBe('My rig')
-    expect(allPresets(saved).map(entry => entry.name)).toContain('My rig')
-    expect(presetMaps(saved, 'My rig')).toEqual(['color', 'ao'])
+    expect(allPresets(saved.output).map(entry => entry.name)).toContain('My rig')
+    expect(presetMaps(saved.output, 'My rig')).toEqual(['color', 'ao'])
     expect(Object.keys(currentSheet(reduce(saved, {type: 'bake'}))?.maps ?? {}).sort()).toEqual([
         'ao',
         'color'

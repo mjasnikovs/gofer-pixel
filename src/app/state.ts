@@ -1,17 +1,19 @@
 import {MAX_BRUSH, SHAPES, type Axis, type Brush, type Shape} from '../doc/brush'
+import {alignCamera, directions, eightDirections, focusOn, ISOMETRIC_PITCH} from '../doc/cameras'
 import {
-    alignCamera,
-    captureCamera,
-    directions,
-    eightDirections,
-    focusOn,
-    ISOMETRIC_PITCH,
-    lastSerial,
-    type NamedCamera
-} from '../doc/cameras'
+    captureView,
+    duplicateView,
+    removeView,
+    reorderView,
+    resetViews,
+    showView,
+    startViews,
+    viewNamed,
+    type Views
+} from '../doc/views'
 import {beginEdit, commitEdit, NO_CELLS, writeCells, writeOwned, type Draft} from '../doc/edits'
 import type {GenerationRecord} from '../gen/llama'
-import type {Reference} from '../doc/reference'
+import {drop, fade, lock, place, type Reference} from '../doc/reference'
 import {DEFAULT_OUTPUT, type Document, type SavedOutput} from '../doc/save'
 import {
     addObject,
@@ -67,7 +69,8 @@ import {createCamera, type Camera} from '../render/camera'
 import {MODE_COLOR} from '../render/raycast.glsl'
 import {voxelAt, type Volume} from '../render/volume'
 import {bakeSheet, sheetFor, type Baked, type SheetKey} from '../sheet/baked'
-import {SHEET_MAPS, type Sheet, type SheetMap} from '../sheet/sheet'
+import {dropPreset, presetMaps, presetNamed, savePreset} from '../sheet/presets'
+import type {Sheet, SheetMap} from '../sheet/sheet'
 import {
     beginSelect,
     beginStroke,
@@ -247,7 +250,7 @@ export interface Chrome {
  * still the fields this state holds. Rename one here and the gesture module stops compiling, which
  * is the failure that used to be a silently wrong outline.
  */
-export interface AppState extends Gesture, Chrome {
+export interface AppState extends Gesture, Chrome, Views {
     readonly doc: DocumentIdentity
     /**
      * What generated this model, when one did — `undefined` for everything drawn or imported.
@@ -256,19 +259,6 @@ export interface AppState extends Gesture, Chrome {
      * sampler were not recorded cannot be reproduced or nudged, only regenerated and hoped over.
      */
     readonly origin: GenerationRecord | undefined
-    readonly cameras: readonly NamedCamera[]
-    /** Which stored camera the viewport is currently showing, if it still matches one. */
-    readonly selected: string | undefined
-    /**
-     * Which camera the render panel previews. The last one that was actually picked, and orbiting
-     * does not clear it.
-     *
-     * `selected` cannot do this job. It answers "is the view still this camera", so the first
-     * mouse-drag has to unset it or the views strip highlights a lie. The panel is asking a
-     * different question — "which camera am I inspecting the maps of" — and that answer should
-     * outlive a nudge of the view.
-     */
-    readonly previewed: string | undefined
     /**
      * What comes out of an export — `doc/save.ts`'s own `SavedOutput`, whole.
      *
@@ -297,7 +287,6 @@ export interface AppState extends Gesture, Chrome {
      * has to be a fact in the state rather than something the click handler remembers.
      */
     readonly exporting: boolean
-    readonly serial: number
 
     /** What Copy took, as offsets from the corner of what was selected, plus that corner. */
     readonly clipboard: Clipboard | undefined
@@ -375,21 +364,6 @@ export type AppAction =
     | {type: 'unaim'}
 
 /**
- * The export presets of `docs/editor.png` — `FEATURESET.md` §38.
- *
- * A preset is a name for a set of export choices, and the choice that matters today is which maps
- * get written. All six come off one render and cost nothing to *have*; what they cost is six PNG
- * encodes and six files in the downloads folder, and most engines want two. Godot's 2D lighting
- * reads a normal map and adds emission on top, so that preset writes three.
- */
-export const PRESETS = [
-    {name: 'Sprite Sheet (Auto)', maps: ['color', 'normal']},
-    {name: 'Godot 8-direction', maps: ['color', 'normal', 'emission']},
-    {name: 'Indexed colour', maps: ['color', 'index']},
-    {name: 'Every map', maps: [...SHEET_MAPS]}
-] as const satisfies readonly {name: string; maps: readonly SheetMap[]}[]
-
-/**
  * What the last bake would have had to be made from, as identities — see `sheet/baked.ts`.
  *
  * One list, in one place. It is the whole of what used to be twenty-four hand-written
@@ -401,7 +375,7 @@ const sheetKey = (state: AppState): SheetKey => ({
     cameras: state.cameras,
     cell: state.output.cell,
     padding: state.output.padding,
-    maps: presetMaps(state, state.output.preset),
+    maps: presetMaps(state.output, state.output.preset),
     slice: state.slice,
     plane: state.plane
 })
@@ -415,22 +389,6 @@ const sheetKey = (state: AppState): SheetKey => ({
  */
 export const currentSheet = (state: AppState): Sheet | undefined =>
     sheetFor(state.baked, sheetKey(state))
-
-export const presetMaps = (state: AppState, name: string): readonly SheetMap[] =>
-    allPresets(state).find(entry => entry.name === name)?.maps ?? PRESETS[0].maps
-
-/** Built-in and saved, in the order the selector lists them. */
-export const allPresets = (
-    state: AppState
-): readonly {name: string; maps: readonly SheetMap[]}[] => [...PRESETS, ...state.output.presets]
-
-/**
- * The three-quarter view, not the front one. A straight-on elevation of a voxel model is a
- * rectangle: a legitimate sprite, and the one angle where nothing on screen says the thing is
- * solid — so it is the wrong view to open a 3D tool on.
- */
-const opening = (cameras: readonly NamedCamera[]): NamedCamera | undefined =>
-    cameras[1] ?? cameras[0]
 
 /**
  * A document opened from somewhere other than a `.vox` file — a `.gpix` off the disk or a recovered
@@ -462,15 +420,14 @@ export const initialState = (source: Volume, name: string, opened?: OpenedDocume
      */
     const volume = {...source, palette: freshenPalette(source)}
     const cameras = opened?.cameras.length ? [...opened.cameras] : eightDirections(volume)
-    const first = opening(cameras)
+    const views = startViews(cameras)
+    const first = viewNamed(views, views.selected)
     const saved = opened?.output
     return {
         doc: {name, savedAt: undefined, dirty: opened?.unsaved === true},
         volume,
         origin: opened?.origin,
-        cameras,
-        selected: first?.id,
-        previewed: first?.id,
+        ...views,
         orbit: {
             camera: first?.camera ?? createCamera(volume, 0, ISOMETRIC_PITCH),
             gesture: undefined
@@ -481,20 +438,13 @@ export const initialState = (source: Volume, name: string, opened?: OpenedDocume
             padding: saved?.padding ?? 0,
             bounds: saved?.bounds ?? false,
             presets: saved?.presets ?? [],
-            /*
-             * A version-1 file, and every document that was never saved, carries `DEFAULT_OUTPUT`
-             * — whose `preset` is the empty string, because the format may not know the app's
-             * preset names. That empty string becomes the first built-in preset here, which is the
-             * one place that mapping belongs.
-             */
-            preset:
-                saved?.preset === undefined || saved.preset === '' ? PRESETS[0].name : saved.preset
+            /* An empty or missing name means the default — see `presetNamed`. */
+            preset: presetNamed(saved?.preset)
         },
         references: opened?.references ?? [],
         preview: 64,
         baked: undefined,
         exporting: false,
-        serial: lastSerial(cameras),
         history: EMPTY_HISTORY,
         stroke: undefined,
         selection: EMPTY_SELECTION,
@@ -526,10 +476,9 @@ export const initialState = (source: Volume, name: string, opened?: OpenedDocume
     }
 }
 
+/** Turn the view, and say which stored camera it is now — `undefined` for none. See `showView`. */
 const withCamera = (state: AppState, camera: Camera, selected: string | undefined): AppState => ({
-    ...state,
-    selected,
-    previewed: selected ?? state.previewed,
+    ...showView(state, selected),
     orbit: {camera, gesture: undefined}
 })
 
@@ -595,7 +544,7 @@ const step = (state: AppState, action: AppAction): AppState => {
             // Once the view has moved it is no longer the stored camera, and saying so is the
             // difference between a list of cameras and a list of bookmarks that quietly lie.
             const moved = orbit.camera !== state.orbit.camera
-            return {...state, orbit, selected: moved ? undefined : state.selected}
+            return {...(moved ? showView(state, undefined) : state), orbit}
         }
 
         /*
@@ -875,14 +824,7 @@ const step = (state: AppState, action: AppAction): AppState => {
         case 'focus': {
             const box = objectBounds(state.volume, state.objects.active)
             if (!box) return state
-            return {
-                ...state,
-                selected: undefined,
-                orbit: {
-                    camera: focusOn(state.orbit.camera, state.volume, box),
-                    gesture: undefined
-                }
-            }
+            return withCamera(state, focusOn(state.orbit.camera, state.volume, box), undefined)
         }
 
         case 'symmetry': {
@@ -891,63 +833,28 @@ const step = (state: AppState, action: AppAction): AppState => {
         }
 
         case 'select': {
-            const found = state.cameras.find(({id}) => id === action.id)
+            const found = viewNamed(state, action.id)
             return found ? withCamera(state, found.camera, found.id) : state
         }
 
         case 'directions': {
-            const cameras = directions(state.volume, action.count)
-            const first = opening(cameras)
-            return withCamera({...state, cameras}, first?.camera ?? state.orbit.camera, first?.id)
+            const next = resetViews(state, directions(state.volume, action.count))
+            return withCamera(
+                next,
+                viewNamed(next, next.selected)?.camera ?? state.orbit.camera,
+                next.selected
+            )
         }
 
-        case 'capture': {
-            const serial = state.serial + 1
-            const added = captureCamera(state.orbit.camera, serial)
-            return {
-                ...state,
-                serial,
-                cameras: [...state.cameras, added],
-                selected: added.id,
-                previewed: added.id
-            }
-        }
+        case 'capture':
+            return captureView(state, state.orbit.camera)
 
-        /*
-         * The mockup's second camera-header button. It copies the transform rather than pointing at
-         * it, because two entries sharing one camera object is an instance, and instances are on the
-         * postponed list in `docs/FEATURESET.md` §11.
-         */
-        case 'duplicate': {
-            const source = state.cameras.find(({id}) => id === state.selected)
-            if (!source) return state
-            const serial = state.serial + 1
-            const added = {
-                id: `cam-${String(serial)}`,
-                name: `${source.name} copy`,
-                camera: source.camera
-            }
-            return {
-                ...state,
-                serial,
-                cameras: [...state.cameras, added],
-                selected: added.id,
-                previewed: added.id
-            }
-        }
+        case 'duplicate':
+            return duplicateView(state)
 
-        case 'delete': {
-            const cameras = state.cameras.filter(({id}) => id !== action.id)
-            if (cameras.length === state.cameras.length) return state
-            return {
-                ...state,
-                cameras,
-                selected: state.selected === action.id ? undefined : state.selected,
-                // The panel has to point at something, so a deleted preview falls to the next
-                // camera rather than to the empty message.
-                previewed: state.previewed === action.id ? cameras[0]?.id : state.previewed
-            }
-        }
+        /* Both pointers fall where `doc/views.ts` says they fall — that rule has one home now. */
+        case 'delete':
+            return removeView(state, action.id)
 
         /*
          * What an export writes — see `AppState.output`. Four cases became one, and unlike
@@ -972,79 +879,35 @@ const step = (state: AppState, action: AppAction): AppState => {
         }
 
         /*
-         * A preset the artist saved — `FEATURESET.md` §38. Saving over one that exists replaces it,
-         * because two presets with one name is a list nobody can use, and the artist who typed the
-         * same name twice meant the second one.
+         * A preset the artist saved, and one they dropped — `FEATURESET.md` §38. Both rules and
+         * both fallbacks are `sheet/presets.ts`; `undefined` back means the name was refused.
          */
         case 'save-preset': {
-            const name = action.name.trim()
-            if (name === '' || PRESETS.some(entry => entry.name === name)) return state
-            const kept = state.output.presets.filter(entry => entry.name !== name)
-            return {
-                ...state,
-                output: {
-                    ...state.output,
-                    presets: [...kept, {name, maps: action.maps}],
-                    preset: name
-                }
-            }
+            const output = savePreset(state.output, action.name, action.maps)
+            return output ? {...state, output} : state
         }
 
         case 'drop-preset': {
-            const presets = state.output.presets.filter(entry => entry.name !== action.name)
-            if (presets.length === state.output.presets.length) return state
-            return {
-                ...state,
-                output: {
-                    ...state.output,
-                    presets,
-                    preset:
-                        state.output.preset === action.name ? PRESETS[0].name : state.output.preset
-                }
-            }
+            const output = dropPreset(state.output, action.name)
+            return output ? {...state, output} : state
         }
 
         /*
-         * One reference per plane. Dropping a second front view replaces the first, because two
-         * pictures of the front stacked on each other is not something anyone asked for and the
-         * artist plainly meant the new one.
+         * The pictures the artist builds against — every rule about them is `doc/reference.ts`,
+         * including the one word that used to be spelled three ways across these four cases and
+         * left out of the first of them: what a lock refuses.
          */
-        case 'reference': {
-            const kept = state.references.filter(entry => entry.plane !== action.plane)
-            return {
-                ...state,
-                references: [
-                    ...kept,
-                    {plane: action.plane, url: action.url, opacity: 0.5, locked: false}
-                ]
-            }
-        }
+        case 'reference':
+            return {...state, references: place(state.references, action.plane, action.url)}
 
         case 'reference-opacity':
-            return {
-                ...state,
-                references: state.references.map(entry =>
-                    entry.plane === action.plane && !entry.locked ?
-                        {...entry, opacity: Math.min(1, Math.max(0, action.opacity))}
-                    :   entry
-                )
-            }
+            return {...state, references: fade(state.references, action.plane, action.opacity)}
 
         case 'reference-lock':
-            return {
-                ...state,
-                references: state.references.map(entry =>
-                    entry.plane === action.plane ? {...entry, locked: action.on} : entry
-                )
-            }
+            return {...state, references: lock(state.references, action.plane, action.on)}
 
         case 'reference-drop':
-            return {
-                ...state,
-                references: state.references.filter(
-                    entry => entry.plane !== action.plane || entry.locked
-                )
-            }
+            return {...state, references: drop(state.references, action.plane)}
 
         /*
          * A PNG imported as voxels is a *new document* — `FEATURESET.md` §34 calls it a starting
@@ -1129,15 +992,8 @@ const step = (state: AppState, action: AppAction): AppState => {
         case 'saved':
             return {...state, doc: {name: action.name, savedAt: action.at, dirty: false}}
 
-        case 'reorder-camera': {
-            const from = state.cameras.findIndex(({id}) => id === action.id)
-            if (from < 0 || from === action.to) return state
-            const cameras = [...state.cameras]
-            const [taken] = cameras.splice(from, 1)
-            if (!taken) return state
-            cameras.splice(Math.max(0, Math.min(cameras.length, action.to)), 0, taken)
-            return {...state, cameras}
-        }
+        case 'reorder-camera':
+            return reorderView(state, action.id, action.to)
 
         case 'bake':
             return {

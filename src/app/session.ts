@@ -85,6 +85,30 @@ export const asking = (dialog: Dialog): Guarded | undefined =>
 
 export const closed = (): Step => ({dialog: NO_DIALOG, opening: false})
 
+/** Discard on the unsaved dialog: throw the work away and go and do the thing that was asked. */
+export const discarded = (dialog: Dialog): Step => proceed(asking(dialog))
+
+/**
+ * Save on the unsaved dialog, which is two steps with a picker in between.
+ *
+ * `now` closes the dialog, because the browser's file picker is about to be the modal and two of
+ * them stacked is not a state anything wants. `then` is where **the one rule in this codebase that
+ * can destroy an hour of work** lives: a save that did not happen is not a Discard. A cancelled
+ * picker leaves everything exactly where it was, and in particular does not go on to replace the
+ * document the artist has just declined to save.
+ *
+ * It is two values rather than two calls because `now` throws away the dialog that `then` needs to
+ * read — so the thing being asked about has to be captured before the picker opens, and the only
+ * way to make a caller do that is to hand both halves over at once. It used to be a
+ * `take → doSave → then → take` dance inside a JSX prop, reachable only by mounting a window.
+ */
+export const savingFirst = (
+    dialog: Dialog
+): {readonly now: Step; readonly then: (saved: boolean) => Step} => {
+    const what = asking(dialog)
+    return {now: closed(), then: saved => (saved ? proceed(what) : closed())}
+}
+
 /**
  * Save, or Save As when `reuse` is false.
  *

@@ -33,6 +33,7 @@ import {
     reduce,
     slicedFor,
     TOOLS,
+    type AppAction,
     type OpenedDocument
 } from './state'
 import {GenerateDialog} from './GenerateDialog'
@@ -41,17 +42,17 @@ import {UnsavedDialog} from './UnsavedDialog'
 import {markDrawn, publish} from './handle'
 import {keyAction, pressOf} from './keys'
 import {
-    asking as askingAbout,
     closed,
+    discarded,
     dropPicture,
     guard,
     loadPalette as palettePicked,
     newProject,
     NO_DIALOG,
     openProject,
-    proceed,
     restoreSnapshot,
     saveProject,
+    savingFirst,
     type Dialog,
     type Guarded,
     type Step
@@ -208,17 +209,24 @@ export const App = ({
      */
     const [dialog, setDialog] = useState<Dialog>(NO_DIALOG)
 
+    /**
+     * Dispatch whatever a trip to the disk came back with, and nothing when it came back with
+     * `undefined` — which `session.ts` guarantees means the picker was cancelled. One wrapper
+     * rather than the same three lines written out beside every command.
+     */
+    const apply = useCallback((work: Promise<AppAction | undefined>) => {
+        void work.then(action => {
+            if (action) dispatch(action)
+        })
+    }, [])
+
     /** Run whichever half of a transition is not just "draw this dialog". */
     const take = useCallback(
         (step: Step) => {
             setDialog(step.dialog)
-            if (step.opening) {
-                void openProject(files).then(action => {
-                    if (action) dispatch(action)
-                })
-            }
+            if (step.opening) apply(openProject(files))
         },
-        [files]
+        [apply, files]
     )
 
     /*
@@ -251,10 +259,8 @@ export const App = ({
     )
 
     const loadPalette = useCallback(() => {
-        void palettePicked(files).then(action => {
-            if (action) dispatch(action)
-        })
-    }, [files])
+        apply(palettePicked(files))
+    }, [apply, files])
 
     /*
      * Export is one action from two places — the header button and the panel button — and both mean
@@ -420,13 +426,13 @@ export const App = ({
                         event.preventDefault()
                         // Onto the locked drawing plane if there is one, and Front otherwise —
                         // the artist who locked a plane is working on it.
-                        void dropPicture(
-                            event.dataTransfer.files[0],
-                            event.shiftKey,
-                            state.plane ?? 1
-                        ).then(action => {
-                            if (action) dispatch(action)
-                        })
+                        apply(
+                            dropPicture(
+                                event.dataTransfer.files[0],
+                                event.shiftKey,
+                                state.plane ?? 1
+                            )
+                        )
                     }}
                 >
                     <ReferenceLayer
@@ -581,15 +587,15 @@ export const App = ({
                     take(closed())
                 }}
                 onDiscard={() => {
-                    take(proceed(askingAbout(dialog)))
+                    take(discarded(dialog))
                 }}
                 onSave={() => {
-                    const what = askingAbout(dialog)
-                    take(closed())
-                    // Only on a save that actually happened. A cancelled picker must not be a
-                    // silent Discard — that is the exact click that loses the work.
+                    // Two steps with a picker between them, and the rule about what a cancelled
+                    // picker means is `savingFirst` rather than anything written here.
+                    const {now, then} = savingFirst(dialog)
+                    take(now)
                     void doSave(true).then(saved => {
-                        if (saved) take(proceed(what))
+                        take(then(saved))
                     })
                 }}
             />

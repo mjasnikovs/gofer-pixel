@@ -11,6 +11,7 @@ import {initialState} from './state'
 import {
     asking,
     closed,
+    discarded,
     dropPicture,
     guard,
     loadPalette,
@@ -19,7 +20,8 @@ import {
     openProject,
     proceed,
     restoreSnapshot,
-    saveProject
+    saveProject,
+    savingFirst
 } from './session'
 
 /**
@@ -276,4 +278,41 @@ test('nothing is being asked about when no dialog is up', () => {
     expect(asking({kind: 'new'})).toBeUndefined()
     expect(closed()).toEqual({dialog: NO_DIALOG, opening: false})
     expect(proceed(undefined)).toEqual({dialog: NO_DIALOG, opening: false})
+})
+
+/**
+ * The transitions the unsaved dialog is made of. They used to run inside its JSX props, so the one
+ * rule in this codebase that can destroy an hour of work could only be asked a question by mounting
+ * a whole window and clicking through it.
+ */
+test('Discard goes on and does the thing the artist was asking for', () => {
+    for (const what of ['new', 'open', 'generate'] as const) {
+        expect(discarded(guard(what, true).dialog)).toEqual(guard(what, false))
+    }
+})
+
+test('Discard on nothing does nothing', () => {
+    expect(discarded(NO_DIALOG)).toEqual(closed())
+})
+
+test('Save closes the question first, because the picker is about to be the modal', () => {
+    expect(savingFirst(guard('new', true).dialog).now).toEqual(closed())
+})
+
+test('a save that happened goes on to do what was asked', () => {
+    for (const what of ['new', 'open', 'generate'] as const) {
+        expect(savingFirst(guard(what, true).dialog).then(true)).toEqual(guard(what, false))
+    }
+})
+
+/**
+ * The click that loses the work. Save, then Cancel on the file picker: nothing was written, so
+ * nothing may replace the document — a cancelled picker is not a silent Discard.
+ */
+test('a save that did not happen replaces nothing', () => {
+    for (const what of ['new', 'open', 'generate'] as const) {
+        const {then} = savingFirst(guard(what, true).dialog)
+        expect(then(false)).toEqual(closed())
+        expect(then(false).opening).toBe(false)
+    }
 })

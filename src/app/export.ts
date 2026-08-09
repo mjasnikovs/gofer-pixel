@@ -1,7 +1,8 @@
 import {shownVolume} from '../doc/objects'
 import {sheetMetadata} from '../sheet/metadata'
 import {writeMetadata, writeSheet, writeSprite} from './download'
-import {currentSheet, presetMaps, type AppState} from './state'
+import {presetMaps} from '../sheet/presets'
+import {currentSheet, type AppState} from './state'
 
 /**
  * The three things an export writes, each as one call over the whole app state.
@@ -19,7 +20,7 @@ import {currentSheet, presetMaps, type AppState} from './state'
 export const writeExport = async (state: AppState): Promise<void> => {
     const sheet = currentSheet(state)
     if (!sheet) return
-    await writeSheet(sheet, presetMaps(state, state.output.preset))
+    await writeSheet(sheet, presetMaps(state.output, state.output.preset))
 }
 
 /** One PNG per camera, cut out of the sheet — `FEATURESET.md` §17. */

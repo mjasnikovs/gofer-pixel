@@ -172,11 +172,12 @@ Neither service is required to open the app. With llama-server down the menu ite
 that says so and disables its one button; with `clipserve.py` down the batch ranks on the built-in
 scores.
 
-## Nine seams worth knowing about
+## Thirteen seams worth knowing about
 
-The app layer is deliberately thin, and nine modules under it hold what would otherwise be spread
-through React callbacks and reducer cases. Each one was pulled out because its rules could only be
-tested by mounting something.
+The app layer is deliberately thin, and thirteen modules under it hold what would otherwise be
+spread through React callbacks and reducer cases. Each one was pulled out because its rules could
+only be tested by mounting something, or by building a whole `AppState` to ask a question about four
+fields.
 
 - **`src/doc/gesture.ts`** — every pointer gesture, over a `Gesture` interface that `AppState`
   extends. Eighteen fields, not fifty. It replaces two hand-written lists of the same field names
@@ -189,6 +190,27 @@ tested by mounting something.
 - **`src/gen/batch.ts`** — one generation batch as a value. Stage order, cancellation and the three
   status lines. The measured rules live here: naming sorts nothing, CLIP goes last and the grid
   never waits on it, a dropped model is taught last. `GenerateDialog` holds one `BatchState`.
+- **`src/doc/views.ts`** — the camera list as one value: `cameras`, `selected`, `previewed` and
+  `serial`, extended by `AppState` the way `Gesture` is. It was eight reducer cases maintaining four
+  fields by hand — `capture` and `duplicate` the same five lines twice, `delete` and `directions`
+  each re-deriving the fallbacks. The invariant it exists to keep is `pointing`: **neither pointer
+  may name a camera that is not on the list.** A dead `selected` becomes nothing, because the
+  strip's highlight is a claim about the view; a dead `previewed` falls to the first camera, because
+  the render panel has to point at something.
+- **`src/doc/reference.ts`** — the pictures the artist builds against, not just their type. `place`,
+  `fade`, `lock` and `drop` over `readonly Reference[]`, with one `refuses` predicate. The lock used
+  to be spelled three different ways across four reducer cases and left out of the fourth, so
+  **dropping a new picture onto a locked plane silently replaced it.** It does not now.
+- **`src/sheet/presets.ts`** — export presets and their four rules: a built-in name cannot be taken,
+  saving over your own replaces it, dropping the selected one falls back to the default, an empty
+  name is refused. `savePreset` and `dropPreset` return `undefined` for "refused", so the reducer
+  case cannot invent a different fallback. `presetNamed` is the one place a version-1 file's empty
+  string becomes a name.
+- **`src/gen/connect.ts`** — how far the generate dialog has got in reaching the local model, as one
+  `Connection` union. It was four `useState`s set in sequence inside one effect: sixteen
+  combinations, three reachable, and the offline path could only be seen by mounting the dialog. The
+  order is the rule that lives here — the picking call's prompt _is_ the manifest, so the bank has
+  to load before a client can be built.
 - **`src/sheet/baked.ts`** — a baked sheet carries the identity of what it came from, so staleness
   is computed. There used to be twenty-four hand-written `sheet: undefined` lines in the reducer and
   no test could cover the twenty-fifth case nobody had written yet.
@@ -205,7 +227,9 @@ tested by mounting something.
   and **`undefined` always means the picker was cancelled** — the rule it exists to keep is that a
   cancelled picker is not a save and a save that did not happen is not a Discard. It replaced seven
   `useCallback`s and three `useState`s, of which `pending`/`asking`/`generating` were never
-  independent and are now one `Dialog`.
+  independent and are now one `Dialog`. The transitions are here too, not in JSX: `discarded` and
+  `savingFirst`, whose `then(saved)` is where the rule actually lives. It used to be a
+  `take → doSave → then → take` dance inside `UnsavedDialog`'s `onSave` prop.
 - **`src/app/keys.ts`** — every shortcut as one table, over a `KeyPress` with the DOM taken off it.
   `swallow` is a field rather than a `preventDefault()` scattered through branches, so a new binding
   has to say what it does about the browser. `pressOf` is the only line in it that knows about a
@@ -300,10 +324,10 @@ were not under test. **`App.test.tsx` is for composition** — effects, the keyb
 file dialogs, the guard in front of them, and the one live viewport.
 
 Before reaching for a mount, check whether the thing under test has a seam already: `state.ts`,
-`gesture.ts`, `session.ts`, `keys.ts`, `batch.ts`, `reference.ts`, `teaching.ts`, `overlay.ts`,
-`store.ts`, `export.ts` and `baked.ts` all answer their own questions in single-digit milliseconds,
-and they exist because the answers used to cost a window. If it is one panel and a real reducer,
-that is `test/panel.tsx`.
+`gesture.ts`, `session.ts`, `keys.ts`, `batch.ts`, `connect.ts`, `doc/reference.ts`,
+`gen/reference.ts`, `teaching.ts`, `overlay.ts`, `views.ts`, `presets.ts`, `store.ts`, `export.ts`
+and `baked.ts` all answer their own questions in single-digit milliseconds, and they exist because
+the answers used to cost a window. If it is one panel and a real reducer, that is `test/panel.tsx`.
 
 ## Conventions
 

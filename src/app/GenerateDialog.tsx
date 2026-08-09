@@ -25,7 +25,8 @@ import {
     type Ranked
 } from '../gen/batch'
 import type {Scorer} from '../gen/clip'
-import {browserLlama, randomSeed, type GenerationRecord, type Llama} from '../gen/llama'
+import {randomSeed, type GenerationRecord, type Llama} from '../gen/llama'
+import {clientOf, connect, CONNECTING, type Connection} from '../gen/connect'
 import type {Library} from '../gen/library'
 import type {Veto} from '../gen/veto'
 import {createCamera} from '../render/camera'
@@ -165,17 +166,20 @@ export const GenerateDialog = ({
      * only exists so that a click on the segmented control outlives the next thing the batch says.
      */
     const [rankBy, setRankBy] = useState<'built-in' | 'clip' | undefined>(undefined)
-    const [status, setStatus] = useState('')
-    const [server, setServer] = useState<string | undefined>(undefined)
+    /**
+     * How far this dialog has got in reaching the local model — see `gen/connect.ts`.
+     *
+     * One value, not four. The bank, the client built from it, whether the server answered and what
+     * to say about it were four `useState`s set in sequence inside the effect below, with thirteen
+     * combinations that could never happen and no way to test the offline path without a mount.
+     */
+    const [connection, setConnection] = useState<Connection>(CONNECTING)
     /**
      * Off by default. It costs one extra call to the vision model per candidate and the word it
      * comes back with sorts nothing — it is worth switching on when a batch keeps coming back
      * wrong and you want to know what the model thinks it drew instead. See `gen/veto.ts`.
      */
     const [naming, setNaming] = useState(false)
-    /** The bank and the client built from it. Both `undefined` until the load lands. */
-    const [lib, setLib] = useState<Library | undefined>(undefined)
-    const [client, setClient] = useState<Llama | undefined>(llama)
     /**
      * A model the artist dropped, as the example it teaches with.
      *
@@ -206,32 +210,17 @@ export const GenerateDialog = ({
     const running = useRef<AbortController | undefined>(undefined)
 
     /*
-     * Load the bank, then build the client from it, then ask whether the server is there.
-     *
-     * In that order because the picking call's prompt *is* the manifest — `browserLlama` cannot be
-     * constructed before the bank has loaded. A supplied `llama` skips the middle step, which is
-     * how the tests drive this without a bank.
+     * Reach the local model. The order the three steps go in is a rule and it lives behind the
+     * seam — see `gen/connect.ts`. What is left here is dropping the answer if the dialog has gone.
      */
     useEffect(() => {
         let live = true
         // Read through a call, never as a field: it flips during an `await`, and a plain read
         // narrows to `true` for the rest of the function under the type-aware lint rules.
         const gone = (): boolean => !live
-        void (async () => {
-            const loaded = await library()
-            if (gone()) return
-            setLib(loaded)
-            const built = llama ?? browserLlama(loaded.manifest)
-            setClient(built)
-            const found = await built.probe()
-            if (gone()) return
-            setServer(found)
-            setStatus(
-                found === undefined ?
-                    'No local model. Start llama-server on :8080 and reopen this.'
-                :   `Ready — ${found}`
-            )
-        })()
+        void connect(library, llama).then(reached => {
+            if (!gone()) setConnection(reached)
+        })
         return () => {
             live = false
             // Leaving mid-batch must stop the batch. Without this the loop keeps asking a 27B
@@ -268,6 +257,7 @@ export const GenerateDialog = ({
      * status lines — is `gen/batch.ts`. What is left is React.
      */
     const run = useCallback(async (): Promise<void> => {
+        const client = clientOf(connection)
         if (!client) return
         const controller = new AbortController()
         running.current = controller
@@ -279,13 +269,13 @@ export const GenerateDialog = ({
                 count,
                 naming,
                 seed: randomSeed(),
-                teach: ids => lib?.teach(ids) ?? [],
+                teach: ids => (connection.kind === 'loading' ? [] : connection.library.teach(ids)),
                 ...(reference ? {reference} : {})
             },
             setBatch,
             controller.signal
         )
-    }, [client, lib, reference, scorer, veto, naming, prompt, count])
+    }, [connection, reference, scorer, veto, naming, prompt, count])
 
     const busy = batch.stage === 'generating'
     const pending = pendingSlots(batch)
@@ -331,7 +321,7 @@ export const GenerateDialog = ({
                         // Enter is what a prompt field is for. Guarded rather than unconditional:
                         // held down mid-batch it would start a second batch over the first.
                         onEnter={() => {
-                            if (!busy && server !== undefined) start()
+                            if (!busy && connection.kind === 'ready') start()
                         }}
                     />
                     <NumberInput
@@ -350,9 +340,9 @@ export const GenerateDialog = ({
                         label={busy ? 'Cancel' : 'Generate'}
                         size='sm'
                         variant={busy ? 'secondary' : 'primary'}
-                        isDisabled={!busy && server === undefined}
+                        isDisabled={!busy && connection.kind !== 'ready'}
                         tooltip={
-                            server === undefined ?
+                            connection.kind !== 'ready' ?
                                 'llama-server is not answering on :8080'
                             :   'Ask the local model for candidates — about 10 s each'
                         }
@@ -435,7 +425,7 @@ export const GenerateDialog = ({
                     <Text type='supporting'>
                         {/* The server message until there is a batch to report on, then the batch. */}
                         <span data-testid='generate-status'>
-                            {batch.stage === 'idle' ? status : generateNote(batch)}
+                            {batch.stage === 'idle' ? connection.note : generateNote(batch)}
                         </span>
                     </Text>
                     <Text

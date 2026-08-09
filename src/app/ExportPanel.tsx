@@ -13,7 +13,8 @@ import {writeSheetMetadata, writeSprites} from './export'
 import {GearIcon} from './icons'
 import {SectionHead} from './SectionHead'
 import {Thumbnail} from './Thumbnail'
-import {allPresets, presetMaps, type AppAction, type AppState} from './state'
+import {allPresets, presetMaps} from '../sheet/presets'
+import type {AppAction, AppState} from './state'
 /** A texel each side is what stops a sampler bleeding one sprite into the next; four is generous. */
 const PADDINGS = [0, 1, 2, 4] as const
 
@@ -100,7 +101,7 @@ export const ExportPanel = ({
                             size='sm'
                             width='100%'
                             value={preset}
-                            options={allPresets(state).map(entry => ({
+                            options={allPresets(state.output).map(entry => ({
                                 value: entry.name,
                                 label: entry.name
                             }))}
@@ -121,7 +122,7 @@ export const ExportPanel = ({
                             dispatch({
                                 type: 'save-preset',
                                 name: chosen,
-                                maps: presetMaps(state, preset)
+                                maps: presetMaps(state.output, preset)
                             })
                         }}
                     />
