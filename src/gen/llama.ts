@@ -1,4 +1,5 @@
 import {rasterise, type VoxSpec} from './ops'
+import {pickPrompt, readPicks, type Manifest, type WorkedExample} from './bank'
 import {specFromCode} from './code'
 import {finish} from './finish'
 import type {Volume} from '../render/volume'
@@ -37,147 +38,6 @@ Plan the proportions in a short comment first, then the code.
 Answer with only JavaScript, no markdown fence.`
 
 /**
- * One worked answer per body plan, handed over as a prior turn rather than quoted in the system
- * prompt.
- *
- * The example is worth more than every rule in `SYSTEM` put together, measured 2026-08-08. Rules
- * alone gave upright blobs; one example took "a cat" from 0 of 12 recognisable to 4 of 4. Measured
- * again the same day in the code format: the example is the ceiling as well as the floor — a
- * deliberately worse hand example dragged every output down to its own flaws.
- *
- * There is one per body plan because one is not neutral. With only the dog in the prompt, **"a
- * chicken" came back with four legs** and "a fish" came back a slab — the example teaches the
- * answer's shape, and a subject whose shape is different gets dragged. `humanoid` earned its slot
- * the same way: with the building example a knight was a grey blob or emitted nothing at all, and
- * with the farmer, 3 of 3 seeds gave an armored figure with sword and shield.
- *
- * Each demonstrates the language once — a proportions comment first, loops for repeated limbs,
- * feet at `y = 0`, parts that touch, a palette with real value contrast — and `building` is the
- * one that carves with `erase`, which is why it is a battlemented tower and not a box.
- *
- * **If you change one, render it.** `llama.test.ts` holds them to being one connected piece that is
- * not a solid brick, but only your eyes can say whether the dog looks like a dog, and an example
- * that does not look like what it claims teaches exactly that.
- */
-export type BodyPlan = 'quadruped' | 'bird' | 'humanoid' | 'plant' | 'building'
-
-export const BODY_PLANS: readonly BodyPlan[] = [
-    'quadruped',
-    'bird',
-    'humanoid',
-    'plant',
-    'building'
-]
-
-export const EXAMPLES: Readonly<
-    Record<BodyPlan, {readonly prompt: string; readonly reply: string}>
-> = {
-    quadruped: {
-        prompt: 'a dog',
-        reply: `// dog: body 3 wide, 5 tall, 12 long; head at the front-top; legs at the corners
-const fur = '#8b5a2b', light = '#a0693a', dark = '#6f4520'
-box(1,5,3, 6,9,14, fur)          // body
-box(1,8,14, 6,11,17, light)      // head
-for (const z of [4, 12]) {       // legs, front and back pairs
-    box(1,1,z, 2,5,z+1, fur)
-    box(5,1,z, 6,5,z+1, fur)
-}
-box(1,11,14, 1,12,15, dark)      // left ear
-box(6,11,14, 6,12,15, dark)      // right ear
-box(3,9,17, 4,10,17, '#2b1a0d')  // nose
-box(3,8,2, 4,11,3, light)        // tail`
-    },
-    bird: {
-        prompt: 'a chicken',
-        reply: `// chicken: round body on two legs, small head high at the front, comb and beak
-const body = '#f2e3c8', wing = '#d8c4a0', leg = '#e08a2c'
-box(2,5,3, 6,10,8, body)         // body
-box(1,6,4, 1,9,7, wing)          // left wing
-box(7,6,4, 7,9,7, wing)          // right wing
-box(2,10,2, 6,13,2, wing)        // tail, angled up
-box(3,11,6, 5,13,8, body)        // head
-box(4,14,6, 4,14,7, '#cc2b2b')   // comb
-box(4,11,9, 4,12,9, leg)         // beak
-box(3,12,8, 3,12,8, '#2b2b28')   // eye
-box(5,12,8, 5,12,8, '#2b2b28')   // eye
-for (const x of [3, 5]) box(x,0,5, x,4,6, leg)  // two legs`
-    },
-    humanoid: {
-        prompt: 'a farmer',
-        reply: `// farmer: 24 tall; legs 0-9, torso 10-17, head 18-23; arms hang at the sides
-const skin = '#e0b088', shirt = '#4a7a3a', pants = '#5a4632', hat = '#d8b84a'
-box(5,0,5, 7,9,7, pants)          // left leg
-box(9,0,5, 11,9,7, pants)         // right leg
-box(4,10,4, 12,17,8, shirt)       // torso
-box(2,10,5, 3,16,7, shirt)        // left arm
-box(13,10,5, 14,16,7, shirt)      // right arm
-box(2,8,5, 3,9,7, skin)           // left hand
-box(13,8,5, 14,9,7, skin)         // right hand
-box(6,18,4, 10,22,8, skin)        // head
-box(5,22,3, 11,23,9, hat)         // hat brim
-box(6,23,4, 10,23,8, hat)         // hat top
-box(7,20,4, 7,20,4, '#2b2b28')    // left eye
-box(9,20,4, 9,20,4, '#2b2b28')    // right eye`
-    },
-    plant: {
-        prompt: 'a red mushroom',
-        reply: `// mushroom: pale stalk, wide red cap in shrinking tiers, white spots
-box(4,0,4, 7,8,7, '#efe6d2')     // stalk
-box(1,9,2, 10,10,9, '#c0392b')   // cap, widest tier
-box(2,11,3, 9,12,8, '#c0392b')
-box(3,13,4, 8,13,7, '#a5301f')   // cap top
-box(2,10,4, 2,10,5, '#ffffff')   // spots
-box(8,12,6, 8,12,7, '#ffffff')
-box(4,9,8, 6,9,8, '#d8cbb0')     // gill hint`
-    },
-    building: {
-        prompt: 'a stone tower',
-        reply: `// tower: tall shaft, battlemented top ring, door and windows
-box(1,0,1, 8,19,8, '#8a8a86')    // shaft
-box(1,0,1, 8,2,8, '#6f6f6b')     // base course
-box(0,20,0, 9,22,9, '#77776f')   // top slab
-erase(1,21,1, 8,22,8)            // hollow the ring
-for (const c of [2, 6]) {        // battlement gaps on all four sides
-    erase(c,22,0, c+1,22,9)
-    erase(0,22,c, 9,22,c+1)
-}
-erase(4,0,0, 5,4,0)              // door
-box(4,8,0, 5,10,0, '#2b2b28')    // windows
-box(0,13,4, 0,15,5, '#2b2b28')
-box(4,14,8, 5,16,8, '#2b2b28')`
-    }
-}
-
-/**
- * The one call that picks the example, and it is unconstrained on purpose.
- *
- * A one-word answer is inside what the model does reliably. It is asked once per *batch* rather than
- * once per candidate — the body plan is a property of the subject, not of the seed — so it costs
- * about two seconds against ten to twenty for a candidate.
- *
- * Anything unrecognised falls back to `building`, because that example is the only one with no limbs
- * and no implied posture. A wrong `building` is a subject built as a rigid object; a wrong
- * `quadruped` is a fish with legs.
- */
-export const PLAN_SYSTEM = `Which body plan does the subject have? Reply with one word only, from this list:
-
-quadruped  - stands on four legs: cat, horse, bear, cow
-bird       - a bird on two legs: chicken, penguin, owl
-humanoid   - a person on two legs with arms: knight, farmer, wizard, robot
-plant      - a stalk or trunk under a wider mass: mushroom, tree, flower, coral
-building   - architecture, or any rigid made object: tower, house, chest, cart, ship
-
-Answer with the single word and nothing else.`
-
-export const readPlan = (value: string): BodyPlan => {
-    const word = value
-        .trim()
-        .toLowerCase()
-        .replace(/[^a-z]/g, '')
-    return BODY_PLANS.find(plan => plan === word) ?? 'building'
-}
-
-/**
  * Exactly what produced a candidate, stored with the asset it becomes.
  *
  * A generated asset whose seed and sampler were not recorded cannot be reproduced or nudged, only
@@ -196,12 +56,15 @@ export interface GenerationRecord {
     /** ISO 8601. */
     readonly at: string
     /**
-     * Which example the batch was shown. Optional, because a file written before the bank existed
-     * has no answer and inventing one would be a lie about what made the model. It is recorded at
-     * all because the pick is its own model call: prompt and seed alone no longer reproduce a
-     * candidate.
+     * Which examples the batch was shown, closest first. Optional, because a file written before
+     * the bank existed has no answer and inventing one would be a lie about what made the model.
+     * It is recorded at all because the pick is its own model call: prompt and seed alone no
+     * longer reproduce a candidate.
+     *
+     * A file written when the bank was five fixed body plans holds one id, which is exactly what it
+     * was shown, so an old record reads as a one-element list rather than as a gap.
      */
-    readonly plan?: BodyPlan
+    readonly examples?: readonly string[]
 }
 
 export interface Candidate {
@@ -218,12 +81,15 @@ export type Attempt =
 export interface Llama {
     /** Is the server there? The dialog asks before it offers to spend a minute. */
     readonly probe: () => Promise<string | undefined>
-    /** Which worked example this subject should be shown. Once per batch — see `PLAN_SYSTEM`. */
-    readonly bodyPlan: (prompt: string, signal?: AbortSignal) => Promise<BodyPlan>
+    /**
+     * Which worked examples this subject should be shown, closest first. Once per batch — the
+     * answer is a property of the subject, not of the seed. See `bank.ts`'s `pickPrompt`.
+     */
+    readonly pick: (prompt: string, signal?: AbortSignal) => Promise<readonly string[]>
     readonly generate: (
         prompt: string,
         sampler: Sampler,
-        plan: BodyPlan,
+        examples: readonly WorkedExample[],
         signal?: AbortSignal
     ) => Promise<{spec: VoxSpec; model: string}>
 }
@@ -246,7 +112,11 @@ interface ModelList {
  */
 const MAX_TOKENS = 4096
 
-export const browserLlama = (endpoint: string = DEFAULT_ENDPOINT): Llama => ({
+/**
+ * The real one. It needs the manifest because the picking call's prompt *is* the manifest — the
+ * list of ids and what each is for, rendered by `pickPrompt`.
+ */
+export const browserLlama = (manifest: Manifest, endpoint: string = DEFAULT_ENDPOINT): Llama => ({
     probe: async () => {
         try {
             const response = await fetch(`${endpoint}/v1/models`)
@@ -258,7 +128,7 @@ export const browserLlama = (endpoint: string = DEFAULT_ENDPOINT): Llama => ({
             return undefined
         }
     },
-    bodyPlan: async (prompt, signal) => {
+    pick: async (prompt, signal) => {
         try {
             const response = await fetch(`${endpoint}/v1/chat/completions`, {
                 method: 'POST',
@@ -266,24 +136,23 @@ export const browserLlama = (endpoint: string = DEFAULT_ENDPOINT): Llama => ({
                 ...(signal ? {signal} : {}),
                 body: JSON.stringify({
                     messages: [
-                        {role: 'system', content: PLAN_SYSTEM},
+                        {role: 'system', content: pickPrompt(manifest)},
                         {role: 'user', content: prompt}
                     ],
-                    // One word. The headroom above is for a grammar-constrained model, not this.
-                    max_tokens: 16,
+                    // A short list of ids. The headroom below is for a model that draws.
+                    max_tokens: 32,
                     temperature: 0
                 })
             })
-            if (!response.ok) return 'building'
+            if (!response.ok) return [manifest.fallback]
             const body = (await response.json()) as ChatReply
-            return readPlan(body.choices?.[0]?.message?.content ?? '')
+            return readPicks(body.choices?.[0]?.message?.content ?? '', manifest)
         } catch {
             // A failed pick must not sink the batch: the fallback still generates, just generically.
-            return 'building'
+            return [manifest.fallback]
         }
     },
-    generate: async (prompt, sampler, plan, signal) => {
-        const example = EXAMPLES[plan]
+    generate: async (prompt, sampler, examples, signal) => {
         const response = await fetch(`${endpoint}/v1/chat/completions`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
@@ -291,8 +160,12 @@ export const browserLlama = (endpoint: string = DEFAULT_ENDPOINT): Llama => ({
             body: JSON.stringify({
                 messages: [
                     {role: 'system', content: SYSTEM},
-                    {role: 'user', content: example.prompt},
-                    {role: 'assistant', content: example.reply},
+                    // Each example is a completed exchange. The last one sits against the prompt,
+                    // which is the position the model imitates hardest — see `Library.teach`.
+                    ...examples.flatMap(example => [
+                        {role: 'user', content: example.prompt},
+                        {role: 'assistant', content: example.reply}
+                    ]),
                     {role: 'user', content: prompt}
                 ],
                 max_tokens: MAX_TOKENS,
@@ -312,20 +185,27 @@ export const browserLlama = (endpoint: string = DEFAULT_ENDPOINT): Llama => ({
     }
 })
 
+/** What `memoryLlama` recorded about one call, so a test can assert on what was sent. */
+export interface SeenCall {
+    readonly prompt: string
+    readonly sampler: Sampler
+    readonly examples: readonly WorkedExample[]
+}
+
 /** A canned server, for tests and for nothing else. Replies are handed back in order. */
 export const memoryLlama = (
     replies: readonly (VoxSpec | Error)[],
     model = 'memory',
-    plan: BodyPlan = 'quadruped'
-): Llama & {readonly seen: {prompt: string; sampler: Sampler; plan: BodyPlan}[]} => {
-    const seen: {prompt: string; sampler: Sampler; plan: BodyPlan}[] = []
+    picks: readonly string[] = ['dog']
+): Llama & {readonly seen: SeenCall[]} => {
+    const seen: SeenCall[] = []
     let next = 0
     return {
         seen,
         probe: () => Promise.resolve(model),
-        bodyPlan: () => Promise.resolve(plan),
-        generate: (prompt, sampler, shown, signal) => {
-            seen.push({prompt, sampler, plan: shown})
+        pick: () => Promise.resolve(picks),
+        generate: (prompt, sampler, examples, signal) => {
+            seen.push({prompt, sampler, examples})
             if (signal?.aborted === true) return Promise.reject(new Error('cancelled'))
             const reply = replies[next % Math.max(1, replies.length)]
             next += 1
@@ -343,8 +223,16 @@ export interface GenerateOptions {
     readonly signal?: AbortSignal
     /** Called as each attempt lands, so the grid fills in rather than appearing all at once. */
     readonly onAttempt?: (attempt: Attempt, done: number, total: number) => void
-    /** Called once, with the example the whole batch will be shown. */
-    readonly onPlan?: (plan: BodyPlan) => void
+    /** Called once, with the ids of the examples the whole batch will be shown. */
+    readonly onPick?: (ids: readonly string[]) => void
+    /**
+     * Ids into the examples they teach with, in the order they should be sent.
+     *
+     * A function rather than the bank itself, because the app composes two sources: the bank on
+     * disk and whatever model the artist dropped on the dialog. Defaults to teaching nothing, which
+     * is a worse model and never a broken one.
+     */
+    readonly teach?: (ids: readonly string[]) => readonly WorkedExample[]
     readonly now?: () => Date
 }
 
@@ -372,19 +260,21 @@ export const generateMany = async (
         seed = randomSeed(),
         signal,
         onAttempt,
-        onPlan,
+        onPick,
+        teach = () => [],
         now = () => new Date()
     } = options
     const attempts: Attempt[] = []
-    // Once, before the loop: the body plan belongs to the subject, not to the seed.
-    const plan = await llama.bodyPlan(prompt, signal)
-    onPlan?.(plan)
+    // Once, before the loop: which example fits belongs to the subject, not to the seed.
+    const picked = await llama.pick(prompt, signal)
+    onPick?.(picked)
+    const examples = teach(picked)
     for (let i = 0; i < count; i += 1) {
         if (signal?.aborted === true) break
         const sampler: Sampler = {temperature, seed: seed + i}
         let attempt: Attempt
         try {
-            const {spec, model} = await llama.generate(prompt, sampler, plan, signal)
+            const {spec, model} = await llama.generate(prompt, sampler, examples, signal)
             const volume = rasterise(spec)
             attempt =
                 volume.data.some(value => value !== 0) ?
@@ -395,7 +285,13 @@ export const generateMany = async (
                             // Shaded here, not stored: the spec stays flat-coloured, and
                             // rasterise-then-finish reproduces the asset from the record exactly.
                             volume: finish(volume),
-                            record: {prompt, sampler, model, plan, at: now().toISOString()}
+                            record: {
+                                prompt,
+                                sampler,
+                                model,
+                                examples: picked,
+                                at: now().toISOString()
+                            }
                         }
                     }
                 :   {ok: false, error: 'the model produced no voxels'}

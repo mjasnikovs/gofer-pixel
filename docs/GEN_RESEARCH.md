@@ -81,7 +81,72 @@ own. Do not promote it back to a gate without a signal that is not the word.
   considered and **dropped** (2026-08-08): the ceiling is the Objaverse-lowpoly data, not the
   training run, and both GPUs are owned by llama-server anyway.
 
+## The example bank moved to disk (2026-08-09)
+
+The examples used to be string literals in `src/gen/llama.ts`, one per body plan, picked by a
+hardcoded five-word list. **No asset has been swapped in yet** — there are none on this machine — so
+every entry still teaches with its built-in reply, and the live before/after numbers are still owed.
+
+- `src/gen/decompose.ts` — a `Volume` into the ops that rebuild it. Greedy largest-box extraction,
+  six axis-growth orders per box, best of the six. **Lossless**, and that is the test:
+  `rasterise(decompose(v))` is `v` again, cell for cell and colour for colour. `opsToCode` renders
+  ops as the code the reply format is written in, colours hoisted into `c1 … cN`.
+- `src/assets/examples/` — one directory of models and one `examples.json` describing them: `id`,
+  `subject`, `use`, `notes`, and an optional `file`. An entry with no `file` teaches with the
+  hand-written reply in `src/gen/builtin.ts`, which is how all five ship today.
+- `src/gen/library.ts` — loads the bank at run time, not at build time. `import.meta.glob` in the
+  app; the same directory read off disk in `bun test`. No build step and no generated source. **The
+  Vite guard must be a `try`, not a feature check.** Vite _replaces the call expression_, so
+  `typeof import.meta.glob === 'function'` is false in the browser too — written that way the bank
+  silently loaded nothing and every entry fell back to its built-in reply, with `bun test` green
+  because `bun test` reaches that same fallback by design. Caught by the live smoke on 2026-08-09
+  and now guarded in `browser/generate.spec.ts`, which is the only place it can be.
+- The picking call's prompt **is the manifest** now (`pickPrompt`). Adding an entry needs no code.
+
+### Three examples per prompt: measured, and it is worse (2026-08-09)
+
+Live against Qwen3.6-27B, three fixed seeds (4200–4202) per cell, renders judged by eye. Strips are
+in `docs/renders/`.
+
+The picking call is honest about easy subjects and **pads when it is unsure**: `a cat → dog`,
+`a chicken → chicken`, `a stone tower → tower`, but `a knight → farmer, chicken, dog` and
+`a fish → dog, chicken, farmer`. So the subjects that get three examples are exactly the ones that
+were already hard, which is the worst place to run an untested change.
+
+| Prompt     | One example                                          | Three examples                                                                           |
+| ---------- | ---------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `a knight` | 3/3 read as armoured figures, one with a plumed helm | 0/3. Two grew the chicken's **red comb** on the helmet; one was a dark blob with a stick |
+| `a fish`   | 2/3 read as fish                                     | 1/3 (the single best fish of the six), 1 brick, 1 in fragments at 0.59 connectivity      |
+
+**The examples average into a shape that is none of them**, which was the open risk, and the comb on
+the knight's head is it happening in a way you can point at. The knight result is one-sided; the
+fish is a wash. Recommendation: `MAX_PICKS = 1` in `src/gen/bank.ts`. It is left at 3 pending a call
+— the constant is the whole change, and the multi-example plumbing costs nothing when only one is
+picked.
+
+Order is still untested: the closest pick is sent last, nearest the prompt, on recency reasoning
+alone. At one example it does not matter.
+
+Timings: pick 0.4–1.5 s once per batch; ~10 s per candidate.
+
+**A model dropped on the generate dialog teaches the next batch**, ahead of everything the bank
+picked, and is remembered in `localStorage` as the decomposed example rather than as bytes.
+Decomposed at the moment of the drop, so a file that will not read or will not fit fails where
+somebody is looking, not thirty seconds into a batch.
+
+Measured on `car.vox` (478 voxels, 14 × 6 × 10): **6 boxes, 8 lines, 3 colours** — wheels, body,
+cabin, which is what the model actually is. Budgets enforced: 32 on any axis, 80 lines, and the same
+one-connected-piece-not-a-brick-taller-than-8 test every hand-written example already had to pass.
+Dropped in as an example, the car failed that test at 6 tall, which is the guard doing its job.
+
+`GenerationRecord.plan` became `examples`, a list. A version-3 file's single word reads back as a
+one-element list, so an old provenance line survives the change instead of becoming a gap.
+
 ## Leads worth wiring next
 
-- **Real assets as worked examples.** The examples cap the quality and mine are programmer art. A
-  greedy box decomposition of artist-made `.vox` files would turn good assets into better teachers.
+- **Assets for the bank.** The decomposer is waiting on models. One good CC0 `.vox` per entry — dog,
+  chicken, farmer, mushroom, tower — each inside 32³ and simple enough to land under 80 lines. Then
+  generate cat, knight, chicken, mushroom and tower at fixed seeds before and after each swap, plus
+  a second subject per entry to catch the known failure mode: an example that makes cats better and
+  drags foxes into cat shapes.
+- **Drop `MAX_PICKS` to 1**, on the knight measurement above. One line.

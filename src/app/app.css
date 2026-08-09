@@ -1306,6 +1306,30 @@ body,
     align-items: end;
 }
 
+/*
+ * The drop target for a model to teach from.
+ *
+ * Dashed rather than solid, and inside the flow rather than an overlay: it is a place to put
+ * something, and it has to read as one before anything has been dropped on it. The whole row is the
+ * target, not just the button — a file dragged at a 40 px button lands on the dialog behind it.
+ */
+.generate-reference {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 10px 12px;
+    border: 1px dashed var(--color-border);
+    border-radius: 6px;
+    background: var(--color-background-surface);
+}
+
+.generate-reference-actions {
+    display: flex;
+    gap: 8px;
+    margin-left: auto;
+}
+
 .generate-status {
     display: flex;
     align-items: center;

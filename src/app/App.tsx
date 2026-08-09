@@ -9,7 +9,8 @@ import {newDocument} from '../doc/templates'
 import {readVox} from '../vox/vox-file'
 import {browserStore, clearSnapshots, putSnapshot, snapshots, type Store} from '../doc/store'
 import {browserScorer, type Scorer} from '../gen/clip'
-import {browserLlama, type Llama} from '../gen/llama'
+import type {Llama} from '../gen/llama'
+import {defaultLibrary, type Library} from '../gen/library'
 import {browserVeto, type Veto} from '../gen/veto'
 import {sheetMetadata} from '../sheet/metadata'
 import {selectionBounds} from '../doc/selection'
@@ -98,7 +99,8 @@ export const App = ({
     opened,
     store = browserStore(),
     files = browserFiles(),
-    llama = browserLlama(),
+    library = defaultLibrary,
+    llama,
     scorer = browserScorer(),
     veto = browserVeto()
 }: {
@@ -109,6 +111,12 @@ export const App = ({
     files?: Files
     /** The local model — see `src/gen/llama.ts`. A port, so a test needs no GPU. */
     llama?: Llama
+    /**
+     * The worked-example bank — see `src/gen/library.ts`. A thunk, not a value, because loading it
+     * decomposes every model in `src/assets/examples/` and nothing should pay for that until the
+     * generate dialog is actually opened.
+     */
+    library?: () => Promise<Library>
     /** The local CLIP service — see `src/gen/clip.ts`. Optional at runtime as well as in a test. */
     scorer?: Scorer
     /** The naming judge — see `src/gen/veto.ts`. The same server as `llama`. */
@@ -812,7 +820,8 @@ export const App = ({
 
             {generating && (
                 <GenerateDialog
-                    llama={llama}
+                    library={library}
+                    {...(llama ? {llama} : {})}
                     scorer={scorer}
                     veto={veto}
                     onClose={() => {

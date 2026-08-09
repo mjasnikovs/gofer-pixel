@@ -45,13 +45,13 @@ const stub = async (page: Page, {clip = true}: {clip?: boolean} = {}): Promise<s
             return
         }
         /*
-         * The body-plan pick is a chat call too — once per batch, before any candidate — and it
-         * must not eat a canned reply, or every candidate comes back as the one after it. It is
-         * told apart by its token budget: one word against 4096.
+         * The example pick is a chat call too — once per batch, before any candidate — and it must
+         * not eat a canned reply, or every candidate comes back as the one after it. It is told
+         * apart by its token budget: a short list of ids against 4096.
          */
         const sent = route.request().postDataJSON() as {max_tokens?: number}
-        if (sent.max_tokens === 16) {
-            await route.fulfill({json: {choices: [{message: {content: 'building'}}]}})
+        if (sent.max_tokens === 32) {
+            await route.fulfill({json: {choices: [{message: {content: 'tower'}}]}})
             return
         }
         const reply = next % 2 === 0 ? TOWER : BRICK
@@ -206,8 +206,8 @@ test('Enter starts a batch, and empty slots stand in for the candidates still co
             return
         }
         const sent = route.request().postDataJSON() as {max_tokens?: number}
-        if (sent.max_tokens === 16) {
-            await route.fulfill({json: {choices: [{message: {content: 'building'}}]}})
+        if (sent.max_tokens === 32) {
+            await route.fulfill({json: {choices: [{message: {content: 'tower'}}]}})
             return
         }
         asked += 1
@@ -249,4 +249,77 @@ test('Escape closes the dialog, because a modal that only shuts one way is a tra
     await page.keyboard.press('Escape')
 
     await expect(dialog).toBeHidden()
+})
+
+/**
+ * The bank directory is really bundled, and a `.vox` in it really becomes an example.
+ *
+ * This cannot be proved outside a browser, and it is not a hypothetical: on 2026-08-09 the loader
+ * guarded its `import.meta.glob` with `typeof import.meta.glob === 'function'`, which is `false` in
+ * the browser too — Vite *replaces the call expression* rather than defining a function — so the
+ * bank silently loaded nothing and every entry fell back to its built-in reply. `bun test` saw
+ * green, because `bun test` reaches the same fallback by design.
+ *
+ * `car.vox` is in `src/assets/examples/` as this test's fixture and is deliberately not in
+ * `examples.json`: a car is 6 tall and would fail the height check every shipped example passes.
+ */
+test('a model in the bank directory is bundled, and decomposes into an example', async ({page}) => {
+    await ready(page)
+
+    const built = await page.evaluate(async () => {
+        // The specifier is a variable so that `tsc` does not try to resolve a dev-server URL
+        // against the filesystem. Vite serves these paths as modules; nothing else can.
+        const bring = async (path: string): Promise<Record<string, unknown>> =>
+            (await import(path)) as Record<string, unknown>
+        const module = (await bring('/src/gen/library.ts')) as unknown as {
+            bundledSource: (
+                decode: (name: string, bytes: Uint8Array) => unknown
+            ) => (file: string) => Promise<unknown>
+        }
+        const decompose = (await bring('/src/gen/decompose.ts')) as unknown as {
+            decompose: (volume: unknown, name: string) => {ops: unknown[]}
+            opsToCode: (spec: unknown, headline: string) => string
+        }
+        const models = (await bring('/src/doc/models.ts')) as unknown as {
+            volumeFromFile: (name: string, bytes: Uint8Array) => unknown
+        }
+        const volume = await module.bundledSource(models.volumeFromFile)('car.vox')
+        if (!volume) return {found: false, ops: 0, code: ''}
+        const spec = decompose.decompose(volume, 'a car')
+        return {found: true, ops: spec.ops.length, code: decompose.opsToCode(spec, 'car')}
+    })
+
+    // Found through the glob, decoded, and taken apart into boxes rather than one per voxel.
+    expect(built.found).toBe(true)
+    expect(built.ops).toBeGreaterThan(0)
+    expect(built.ops).toBeLessThan(50)
+    expect(built.code).toContain('box(')
+    expect(built.code).toContain("c1 = '#")
+})
+
+/** Every shipped entry resolves to a reply in the running app, not just under `bun test`. */
+test('the shipped bank loads in the browser, and every entry teaches something', async ({page}) => {
+    await ready(page)
+
+    const bank = await page.evaluate(async () => {
+        const bring = async (path: string): Promise<Record<string, unknown>> =>
+            (await import(path)) as Record<string, unknown>
+        const module = (await bring('/src/gen/library.ts')) as unknown as {
+            defaultLibrary: () => Promise<{
+                manifest: {entries: {id: string}[]}
+                example: (id: string) => {reply: string} | undefined
+            }>
+        }
+        const library = await module.defaultLibrary()
+        return library.manifest.entries.map(entry => ({
+            id: entry.id,
+            lines: library.example(entry.id)?.reply.split('\n').length ?? 0
+        }))
+    })
+
+    expect(bank.length).toBeGreaterThan(0)
+    for (const entry of bank) {
+        expect(entry.lines).toBeGreaterThan(1)
+        expect(entry.lines).toBeLessThanOrEqual(80)
+    }
 })

@@ -106,12 +106,13 @@ brick. All three are in `src/gen/ops.ts` and `src/gen/llama.ts`, with the number
 7. **One worked example, as a prior turn, is worth more than every rule in the system prompt.** A
    schema-constrained reply starts emitting JSON on the first token, so it has nowhere to think, and
    rules in prose do not survive that. One example took "a cat" from 0 recognisable of 12 to 4 of 4.
-8. **There are four examples because one is not neutral.** With only the dog in the prompt, "a
+8. **There are several examples because one is not neutral.** With only the dog in the prompt, "a
    chicken" came back with four legs and "a fish" came back a slab; cats were fine only because a
-   cat is a quadruped. `EXAMPLES` holds one per body plan and one cheap unconstrained call picks
-   which — `PLAN_SYSTEM`, one word, about two seconds, once per batch rather than per candidate.
-   Anything unrecognised falls back to `building`, the example with no limbs and no posture. Plant
-   and building are the strongest; bird is the weakest and still sometimes leaves a mirror seam.
+   cat is a quadruped. The bank holds one per body plan and one cheap unconstrained call picks which
+   — `pickPrompt`, a few ids, about two seconds, once per batch rather than per candidate. Anything
+   unrecognised falls back to the manifest's `fallback`, the example with no limbs and no posture.
+   Plant and building are the strongest; bird is the weakest and still sometimes leaves a mirror
+   seam.
 
 Four things were tried against the same problem and **all four failed**. Do not spend a session
 re-running them:
@@ -136,6 +137,18 @@ sequentially because llama-server has two slots and shares both GPUs; **83 ms** 
 views on the CPU; **~0.2 s per candidate** to score four views with CLIP, plus 4.6 s to load it
 once. The built-in score and CLIP picked the same winner out of six, at a rank agreement of 0.17 —
 low because four of the six were solid bricks that tie at the top of any deterministic score.
+
+The worked examples are the ceiling, so they live on disk. `src/assets/examples/` is one directory
+of models plus `examples.json` describing them; `src/gen/library.ts` decomposes each one losslessly
+into `box(...)` code when the generate dialog opens. No build step. An entry with no `file` teaches
+with the hand-written reply in `src/gen/builtin.ts`, which is how all five ship today. The picking
+call's prompt is generated from the manifest, so adding an entry needs no code. Read
+`src/assets/examples/README.md` before adding one.
+
+A `.vox` or `.gpix` dropped on the generate dialog teaches the next batch ahead of the bank, and is
+remembered in `localStorage`. **`MAX_PICKS` is 3 and the measurement says it should be 1** — the
+picking call pads when unsure, so a knight gets `farmer, chicken, dog` and grows the chicken's comb
+on its helmet. See `docs/GEN_RESEARCH.md`, 2026-08-09.
 
 ```bash
 bun run clip          # .venv/bin/python py/clipserve.py — optional, port 8765

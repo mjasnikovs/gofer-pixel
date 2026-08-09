@@ -1,19 +1,13 @@
 import {expect, test} from 'bun:test'
 import {countFilled, type VoxSpec} from './ops'
-import {
-    BODY_PLANS,
-    browserLlama,
-    candidatesOf,
-    EXAMPLES,
-    generateMany,
-    memoryLlama,
-    readPlan,
-    SYSTEM,
-    type Attempt
-} from './llama'
-import {specFromCode} from './code'
-import {rasterise} from './ops'
-import {scoreModel} from './score'
+import {browserLlama, candidatesOf, generateMany, memoryLlama, SYSTEM, type Attempt} from './llama'
+import {readManifest, type Manifest, type WorkedExample} from './bank'
+import MANIFEST from '../assets/examples/examples.json'
+
+const manifest: Manifest = readManifest(MANIFEST) ?? {fallback: 'tower', entries: []}
+
+const dog: WorkedExample = {prompt: 'a dog', reply: "box(0,0,0, 1,1,1, '#8b5a2b')"}
+const tall: WorkedExample = {prompt: 'a stone tower', reply: "box(0,0,0, 1,7,1, '#8a8a86')"}
 
 const tower: VoxSpec = {
     name: 'tower',
@@ -56,9 +50,9 @@ test('a candidate carries the voxels, the spec and what produced it', async () =
         prompt: 'a stone tower',
         sampler: {temperature: 0.5, seed: 7},
         model: 'memory',
-        // Which example the batch was shown, because the pick is its own model call and prompt
+        // Which examples the batch was shown, because the pick is its own model call and prompt
         // plus seed no longer reproduce a candidate without it.
-        plan: 'quadruped',
+        examples: ['dog'],
         at: new Date(0).toISOString()
     })
 })
@@ -135,10 +129,10 @@ test('the browser port sends the sampler, the system prompt and the worked examp
     }) as unknown as typeof fetch
 
     try {
-        const {spec, model} = await browserLlama('http://x:8080').generate(
+        const {spec, model} = await browserLlama(manifest, 'http://x:8080').generate(
             'a tower',
             {temperature: 0.8, seed: 12},
-            'building'
+            [dog, tall]
         )
         // The code format carries no name of its own, so the prompt is the name.
         expect(spec.name).toBe('a tower')
@@ -155,38 +149,38 @@ test('the browser port sends the sampler, the system prompt and the worked examp
     // comment the code format opens with is where the thinking happens.
     expect(call?.body['response_format']).toBeUndefined()
     expect(JSON.stringify(call?.body['messages'])).toContain(SYSTEM.slice(0, 40))
-    // The worked example for the chosen plan goes as a prior turn, not as a quote in the system
-    // prompt, and the plan the batch picked is what decides which one.
+    /*
+     * The worked examples go as prior turns, not as quotes in the system prompt, and every one the
+     * pick named is sent — in the order it was handed over, so the last sits against the prompt.
+     */
     expect(call?.body['messages']).toMatchObject([
         {role: 'system'},
-        {role: 'user', content: EXAMPLES.building.prompt},
-        {role: 'assistant', content: EXAMPLES.building.reply},
+        {role: 'user', content: dog.prompt},
+        {role: 'assistant', content: dog.reply},
+        {role: 'user', content: tall.prompt},
+        {role: 'assistant', content: tall.reply},
         {role: 'user', content: 'a tower'}
     ])
 })
 
-test('every worked example is a model, not a story about one', () => {
-    // A broken example teaches breakage, and it is the highest-leverage thing in the prompt.
-    for (const plan of BODY_PLANS) {
-        const spec = specFromCode(EXAMPLES[plan].reply, plan)
-        expect(spec).toBeDefined()
-        if (!spec) continue
-
-        const volume = rasterise(spec)
-        const scores = scoreModel(volume)
-        // One connected piece, standing up, and nowhere near a solid brick.
-        expect(scores.connectivity).toBe(1)
-        expect(scores.bboxFill).toBeLessThan(0.75)
-        expect(volume.sz).toBeGreaterThan(8)
+test('no examples still generates, rather than refusing to ask', async () => {
+    const original = globalThis.fetch
+    let body: Record<string, unknown> = {}
+    globalThis.fetch = ((_url: string, init: {body: string}) => {
+        body = JSON.parse(init.body) as Record<string, unknown>
+        return Promise.resolve(
+            new Response(
+                JSON.stringify({choices: [{message: {content: "box(0,0,0, 1,1,1, '#fff000')"}}]})
+            )
+        )
+    }) as unknown as typeof fetch
+    try {
+        await browserLlama(manifest).generate('a tower', {temperature: 0.8, seed: 1}, [])
+    } finally {
+        globalThis.fetch = original
     }
-})
-
-test('an unrecognised body plan falls back to the one with no limbs', () => {
-    expect(readPlan('  Quadruped.\n')).toBe('quadruped')
-    expect(readPlan('bird')).toBe('bird')
-    // Not "the closest animal": a wrong quadruped is a fish with legs.
-    expect(readPlan('I think it is probably a sort of vehicle')).toBe('building')
-    expect(readPlan('')).toBe('building')
+    // System turn and prompt, nothing between them. A worse model, never a broken call.
+    expect(body['messages']).toMatchObject([{role: 'system'}, {role: 'user', content: 'a tower'}])
 })
 
 test('a reply that is not runnable code is an error, not a half-built model', async () => {
@@ -201,10 +195,10 @@ test('a reply that is not runnable code is an error, not a half-built model', as
 
     const errors: string[] = []
     try {
-        const port = browserLlama()
+        const port = browserLlama(manifest)
         for (const _ of bodies) {
             await port
-                .generate('a tower', {temperature: 0.8, seed: 1}, 'building')
+                .generate('a tower', {temperature: 0.8, seed: 1}, [dog])
                 .catch((error: unknown) => errors.push(String(error)))
         }
     } finally {
@@ -219,7 +213,7 @@ test('probing a server that is not there is a no, not a throw', async () => {
     const original = globalThis.fetch
     globalThis.fetch = (() => Promise.reject(new Error('ECONNREFUSED'))) as unknown as typeof fetch
     try {
-        expect(await browserLlama().probe()).toBeUndefined()
+        expect(await browserLlama(manifest).probe()).toBeUndefined()
     } finally {
         globalThis.fetch = original
     }
@@ -233,7 +227,7 @@ test('a probe that lands names the model the server is actually running', async 
         return Promise.resolve(new Response(JSON.stringify({data: [{id: 'Qwen3.6-27B'}]})))
     }) as unknown as typeof fetch
     try {
-        expect(await browserLlama('http://x:8080').probe()).toBe('Qwen3.6-27B')
+        expect(await browserLlama(manifest, 'http://x:8080').probe()).toBe('Qwen3.6-27B')
     } finally {
         globalThis.fetch = original
     }
@@ -244,7 +238,7 @@ test('a server with no model listed is still a server', async () => {
     const original = globalThis.fetch
     globalThis.fetch = (() => Promise.resolve(new Response('{}'))) as unknown as typeof fetch
     try {
-        expect(await browserLlama().probe()).toBe('unknown')
+        expect(await browserLlama(manifest).probe()).toBe('unknown')
     } finally {
         globalThis.fetch = original
     }
@@ -256,7 +250,7 @@ test('a server that answers with an error is no server at all', async () => {
         Promise.resolve(new Response('model loading', {status: 503}))) as unknown as typeof fetch
     try {
         // 503 while a model loads is the ordinary case here, and it must not read as "ready".
-        expect(await browserLlama().probe()).toBeUndefined()
+        expect(await browserLlama(manifest).probe()).toBeUndefined()
     } finally {
         globalThis.fetch = original
     }

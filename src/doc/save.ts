@@ -1,4 +1,4 @@
-import {BODY_PLANS, type GenerationRecord} from '../gen/llama'
+import type {GenerationRecord} from '../gen/llama'
 import type {NamedCamera} from './cameras'
 import type {Objects} from './objects'
 import {readReference, type Reference} from './reference'
@@ -215,16 +215,32 @@ const readOutput = (value: unknown): SavedOutput | undefined => {
  */
 const readOrigin = (value: unknown): GenerationRecord | undefined => {
     if (typeof value !== 'object' || value === null) return undefined
-    const {prompt, sampler, model, at, plan} = value as Record<string, unknown>
+    const {prompt, sampler, model, at, plan, examples} = value as Record<string, unknown>
     if (typeof prompt !== 'string' || typeof model !== 'string' || typeof at !== 'string') {
         return undefined
     }
     if (typeof sampler !== 'object' || sampler === null) return undefined
     const {temperature, seed} = sampler as Record<string, unknown>
     if (typeof temperature !== 'number' || typeof seed !== 'number') return undefined
-    // `plan` is not part of "whole": a file written before the example bank existed has none.
-    const known = BODY_PLANS.find(entry => entry === plan)
-    return {prompt, sampler: {temperature, seed}, model, at, ...(known ? {plan: known} : {})}
+    /*
+     * The examples are not part of "whole": a file written before the bank existed has none.
+     *
+     * A version-3 file carries `plan`, one word, from when the bank was five fixed body plans. It
+     * is read as a one-element list because that is exactly what it recorded — one example, shown
+     * once — so an old provenance line survives the format change instead of becoming a gap.
+     */
+    const shown =
+        Array.isArray(examples) ?
+            examples.filter((entry): entry is string => typeof entry === 'string')
+        : typeof plan === 'string' ? [plan]
+        : []
+    return {
+        prompt,
+        sampler: {temperature, seed},
+        model,
+        at,
+        ...(shown.length === 0 ? {} : {examples: shown})
+    }
 }
 
 const readSymmetry = (value: unknown): Symmetry => {

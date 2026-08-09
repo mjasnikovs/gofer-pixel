@@ -1,7 +1,10 @@
 import {expect, test} from 'bun:test'
 import {act} from 'react'
 import {createRoot, type Root} from 'react-dom/client'
+import {memoryStore, type Store} from '../doc/store'
+import type {BankEntry} from '../gen/bank'
 import {memoryScorer, type Scorer} from '../gen/clip'
+import {buildLibrary, type Library} from '../gen/library'
 import {memoryLlama, type GenerationRecord, type Llama} from '../gen/llama'
 import type {VoxSpec} from '../gen/ops'
 import {memoryVeto, type Veto} from '../gen/veto'
@@ -12,6 +15,11 @@ import {GenerateDialog, MAX_CANDIDATES} from './GenerateDialog'
  * The dialog against canned ports. Nothing waits: `memoryLlama` resolves on the microtask queue and
  * `act` flushes it, so a whole batch lands inside one `await act`.
  */
+const BANK_ENTRIES: readonly BankEntry[] = [
+    {id: 'dog', subject: 'a dog', use: 'stands on four legs', notes: ''},
+    {id: 'tower', subject: 'a stone tower', use: 'architecture', notes: ''}
+]
+
 const carved = (name: string, colour: string): VoxSpec => ({
     name,
     size: [8, 8, 12],
@@ -45,11 +53,21 @@ interface Mounted {
     batch: () => Promise<void>
 }
 
+/**
+ * A one-entry bank, so the dialog has a manifest to load without reaching for the real one.
+ *
+ * The tests drive `llama` directly, so what the bank teaches never reaches a server here. What is
+ * under test is that the dialog waits for the load before it offers to generate.
+ */
+const testLibrary = (): Promise<Library> =>
+    buildLibrary({fallback: 'tower', entries: BANK_ENTRIES}, () => Promise.resolve(undefined))
+
 const open = async (
     llama: Llama,
     scorer: Scorer = memoryScorer([], false),
     // Canned silence: the judge answers nothing, which passes every candidate — see `gen/veto.ts`.
-    veto: Veto = memoryVeto([''])
+    veto: Veto = memoryVeto(['']),
+    store: Store = memoryStore()
 ): Promise<Mounted> => {
     const host = document.createElement('div')
     document.body.appendChild(host)
@@ -60,7 +78,9 @@ const open = async (
     await act(async () => {
         root.render(
             <GenerateDialog
+                library={testLibrary}
                 llama={llama}
+                store={store}
                 scorer={scorer}
                 veto={veto}
                 onClose={() => closed.push(1)}
@@ -149,7 +169,7 @@ const toggleNaming = async (): Promise<void> => {
 test('with no server there is nothing to press, and the dialog says why', async () => {
     const down: Llama = {
         probe: () => Promise.resolve(undefined),
-        bodyPlan: () => Promise.resolve('quadruped'),
+        pick: () => Promise.resolve(['dog']),
         generate: () => Promise.reject(new Error('not running'))
     }
     const {root, host} = await open(down)
@@ -171,9 +191,9 @@ test('a batch fills the grid, and every candidate carries what made it', async (
     await generate(mounted)
 
     // Four is the default batch, and the three canned replies cycle to fill it.
-    // The example the whole batch was shown is named, because it is the strongest single
+    // The examples the whole batch was shown are named, because they are the strongest single
     // influence on what came back.
-    expect(said('generate-status')).toBe('4 candidates, 0 failed · built as quadruped')
+    expect(said('generate-status')).toBe('4 candidates, 0 failed · taught by dog')
     expect(cards()).toHaveLength(4)
     expect(said('clip-status')).toContain('clipserve.py is not running')
 
@@ -200,7 +220,7 @@ test('a candidate that failed is counted and named, not silently dropped', async
 
     // Four asked for, the canned replies alternate: two good, two failed.
     expect(said('generate-status')).toBe(
-        '2 candidates, 2 failed · built as quadruped — llama-server 503: busy'
+        '2 candidates, 2 failed · taught by dog — llama-server 503: busy'
     )
     expect(cards()).toHaveLength(2)
 
@@ -255,7 +275,7 @@ test('the slots a batch will fill are on screen before the model answers', async
     let asked = 0
     const held: Llama = {
         probe: () => Promise.resolve('qwen'),
-        bodyPlan: () => Promise.resolve('quadruped'),
+        pick: () => Promise.resolve(['dog']),
         generate: (_prompt, _sampler, _plan, signal) => {
             asked += 1
             if (signal?.aborted === true) return Promise.reject(new Error('cancelled'))
@@ -381,7 +401,7 @@ test('closing the dialog mid-batch stops asking the model for models', async () 
     let asked = 0
     const slow: Llama = {
         probe: () => Promise.resolve('qwen'),
-        bodyPlan: () => Promise.resolve('quadruped'),
+        pick: () => Promise.resolve(['dog']),
         generate: (_prompt, _sampler, _plan, signal) => {
             asked += 1
             if (signal?.aborted === true) return Promise.reject(new Error('cancelled'))
@@ -460,7 +480,7 @@ test('Cancel stops a batch that is already running, and keeps what landed', asyn
     let asked = 0
     const held: Llama = {
         probe: () => Promise.resolve('qwen'),
-        bodyPlan: () => Promise.resolve('quadruped'),
+        pick: () => Promise.resolve(['dog']),
         generate: (_prompt, _sampler, _plan, signal) => {
             asked += 1
             if (signal?.aborted === true) return Promise.reject(new Error('cancelled'))
@@ -495,4 +515,63 @@ test('Cancel stops a batch that is already running, and keeps what landed', asyn
     expect(said('clip-status')).toBe('')
 
     await close(mounted.root, mounted.host)
+})
+
+/** A `drop` with files on it. happy-dom has no `DataTransfer`, so the event carries one of its own. */
+const dropFile = async (node: HTMLElement, file: File): Promise<void> => {
+    const event = new Event('drop', {bubbles: true})
+    Object.defineProperty(event, 'dataTransfer', {value: {files: [file]}})
+    await act(async () => {
+        node.dispatchEvent(event)
+    })
+}
+
+/** The drop target, scoped to the open dialog like every other query here. */
+const referenceZone = (): HTMLElement => {
+    const found = dialog().querySelector<HTMLElement>('[data-testid="generate-reference"]')
+    if (!found) throw new Error('the reference drop target is not there')
+    return found
+}
+
+const carBytes = new Uint8Array(
+    await Bun.file(new URL('../assets/car.vox', import.meta.url)).arrayBuffer()
+)
+
+test('a dropped model becomes the example the next batch is taught from', async () => {
+    const llama = memoryLlama([carved('tower', '#808080')])
+    const store = memoryStore()
+    const mounted = await open(llama, memoryScorer([], false), memoryVeto(['']), store)
+    const {root, host} = mounted
+
+    await dropFile(referenceZone(), new File([carBytes], 'car.vox'))
+    expect(said('generate-reference')).toContain('car.vox')
+
+    await generate(mounted)
+
+    /*
+     * Last, against the prompt. The bank's pick is a guess and a dropped model is not — an artist
+     * who went and found a file has said which teacher they want more clearly than any call can.
+     */
+    const sent = llama.seen[0]?.examples ?? []
+    expect(sent).toHaveLength(2)
+    expect(sent[1]?.reply).toContain('box(')
+    // It survives a reload, because it cost the artist a file picker to set.
+    expect(store.get('gofer-pixel/gen-reference') ?? '').toContain('box(')
+
+    await close(root, host)
+})
+
+test('a file that is not a model says so, and does not become the reference', async () => {
+    const llama = memoryLlama([carved('tower', '#808080')])
+    const mounted = await open(llama)
+    const {root, host} = mounted
+
+    await dropFile(referenceZone(), new File([new Uint8Array([1, 2, 3])], 'notes.txt'))
+
+    expect(said('generate-reference')).toContain('not a .vox or .gpix')
+    await generate(mounted)
+    // The batch still runs, taught by the bank alone.
+    expect(llama.seen[0]?.examples ?? []).toHaveLength(1)
+
+    await close(root, host)
 })

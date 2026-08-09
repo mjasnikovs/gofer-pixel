@@ -8,14 +8,19 @@ import {Switch} from '@astryxdesign/core/Switch'
 import {Text} from '@astryxdesign/core/Text'
 import {TextInput} from '@astryxdesign/core/TextInput'
 import {ISOMETRIC_PITCH} from '../doc/cameras'
+import {MODEL_ACCEPT, volumeFromFile} from '../doc/models'
+import {browserStore, type Store} from '../doc/store'
+import {exampleFrom, overBudget, type WorkedExample} from '../gen/bank'
 import {rankAgreement, type Scorer} from '../gen/clip'
 import {
+    browserLlama,
     generateMany,
     randomSeed,
     type Candidate,
     type GenerationRecord,
     type Llama
 } from '../gen/llama'
+import type {Library} from '../gen/library'
 import {overallScore, scoreModel, type ModelScores} from '../gen/score'
 import {judge, type Veto, type Verdict} from '../gen/veto'
 import {rankingViews} from '../gen/views'
@@ -114,15 +119,45 @@ const CandidateCard = ({
     )
 }
 
+/**
+ * Where a dropped model is remembered.
+ *
+ * The decomposed example, not the file: it is a few hundred bytes of text against a `.vox` that
+ * could be anything, and `localStorage` is about five megabytes shared with the autosave.
+ */
+export const REFERENCE_KEY = 'gofer-pixel/gen-reference'
+
+const readReferenceExample = (store: Store): WorkedExample | undefined => {
+    const held = store.get(REFERENCE_KEY)
+    if (held === undefined) return undefined
+    try {
+        const parsed: unknown = JSON.parse(held)
+        if (typeof parsed !== 'object' || parsed === null) return undefined
+        const {prompt, reply} = parsed as Record<string, unknown>
+        if (typeof prompt !== 'string' || typeof reply !== 'string' || reply === '')
+            return undefined
+        return {prompt, reply}
+    } catch {
+        return undefined
+    }
+}
+
 export const GenerateDialog = ({
+    library,
     llama,
+    store = browserStore(),
     scorer,
     veto,
     onClose,
     onPick,
     onRunning
 }: {
-    llama: Llama
+    /** The worked-example bank, loaded on open — see `src/gen/library.ts`. */
+    library: () => Promise<Library>
+    /** Overridden by tests. Left out, it is built from the bank's manifest once that has loaded. */
+    llama?: Llama
+    /** Where the dropped reference is remembered across reloads. */
+    store?: Store
     scorer: Scorer
     /** The naming judge — see `gen/veto.ts`. Same server as `llama`, different question. */
     veto: Veto
@@ -153,6 +188,20 @@ export const GenerateDialog = ({
      * wrong and you want to know what the model thinks it drew instead. See `gen/veto.ts`.
      */
     const [naming, setNaming] = useState(false)
+    /** The bank and the client built from it. Both `undefined` until the load lands. */
+    const [lib, setLib] = useState<Library | undefined>(undefined)
+    const [client, setClient] = useState<Llama | undefined>(llama)
+    /**
+     * A model the artist dropped, as the example it teaches with.
+     *
+     * One at a time, and it goes *last* — nearest the prompt, the position the model imitates
+     * hardest. An artist who drops a model has said which teacher they want more clearly than any
+     * picking call can.
+     */
+    const [reference, setReference] = useState<WorkedExample | undefined>(() =>
+        readReferenceExample(store)
+    )
+    const [referenceNote, setReferenceNote] = useState('')
 
     /*
      * The one AbortController, held across renders: Cancel has to reach a fetch that a *previous*
@@ -160,26 +209,96 @@ export const GenerateDialog = ({
      */
     const running = useRef<AbortController | undefined>(undefined)
 
+    /*
+     * Load the bank, then build the client from it, then ask whether the server is there.
+     *
+     * In that order because the picking call's prompt *is* the manifest — `browserLlama` cannot be
+     * constructed before the bank has loaded. A supplied `llama` skips the middle step, which is
+     * how the tests drive this without a bank.
+     */
     useEffect(() => {
         let live = true
-        void llama.probe().then(found => {
-            if (!live) return
+        // Read through a call, never as a field: it flips during an `await`, and a plain read
+        // narrows to `true` for the rest of the function under the type-aware lint rules.
+        const gone = (): boolean => !live
+        void (async () => {
+            const loaded = await library()
+            if (gone()) return
+            setLib(loaded)
+            const built = llama ?? browserLlama(loaded.manifest)
+            setClient(built)
+            const found = await built.probe()
+            if (gone()) return
             setServer(found)
             setStatus(
                 found === undefined ?
                     'No local model. Start llama-server on :8080 and reopen this.'
                 :   `Ready — ${found}`
             )
-        })
+        })()
         return () => {
             live = false
             // Leaving mid-batch must stop the batch. Without this the loop keeps asking a 27B
             // model for models nothing will ever show.
             running.current?.abort()
         }
-    }, [llama])
+    }, [library, llama])
+
+    /**
+     * A dropped or chosen model becomes the reference, replacing whatever was there.
+     *
+     * Decomposed immediately rather than stored as bytes: the failure — a file that will not read,
+     * a model too detailed to fit the line budget — belongs at the moment of the drop, where there
+     * is somebody to tell, and not thirty seconds into a batch.
+     */
+    const takeReference = useCallback(
+        async (file: File | undefined) => {
+            if (!file) return
+            const volume = volumeFromFile(file.name, new Uint8Array(await file.arrayBuffer()))
+            if (!volume) {
+                setReferenceNote(`${file.name} is not a .vox or .gpix this build can read`)
+                return
+            }
+            const example = exampleFrom(
+                {id: 'reference', subject: prompt, use: '', notes: ''},
+                volume
+            )
+            if (overBudget(example)) {
+                setReferenceNote(
+                    `${file.name} decomposes into ${String(example.reply.split('\n').length)} lines — too detailed to teach from`
+                )
+                return
+            }
+            setReference(example)
+            setReferenceNote(`Teaching from ${file.name}`)
+            store.set(REFERENCE_KEY, JSON.stringify(example))
+        },
+        [prompt, store]
+    )
+
+    /**
+     * A file input, created, clicked and dropped — the same pattern `doc/files.ts` uses, and for
+     * the same reason: a hidden input that lives in the layout is one more node for a bounding-box
+     * test to trip over.
+     */
+    const pickFile = useCallback(() => {
+        const input = document.createElement('input')
+        input.type = 'file'
+        input.accept = MODEL_ACCEPT
+        input.addEventListener('change', () => {
+            void takeReference(input.files?.[0])
+        })
+        input.click()
+    }, [takeReference])
+
+    const clearReference = useCallback(() => {
+        setReference(undefined)
+        setReferenceNote('')
+        store.remove(REFERENCE_KEY)
+    }, [store])
 
     const run = useCallback(async (): Promise<void> => {
+        if (!client) return
         const controller = new AbortController()
         running.current = controller
         // Read through a call, never as a field: the flag flips during an `await`, and a plain read
@@ -195,18 +314,24 @@ export const GenerateDialog = ({
 
         const landed: Ranked[] = []
         let shown = ''
-        const attempts = await generateMany(llama, prompt, count, {
+        const attempts = await generateMany(client, prompt, count, {
             seed: randomSeed(),
             signal: controller.signal,
             /*
-             * Named in the status line rather than left implicit. The batch is shown one worked
-             * example and it is the strongest single influence on what comes back — a chicken built
-             * against the quadruped example comes back with four legs — so an artist looking at
-             * twelve wrong candidates should be able to see *why* without reading the source.
+             * Named in the status line rather than left implicit. The worked examples are the
+             * strongest single influence on what comes back — a chicken built against the dog
+             * example comes back with four legs — so an artist looking at twelve wrong candidates
+             * should be able to see *why* without reading the source.
              */
-            onPlan: plan => {
-                shown = plan
+            onPick: ids => {
+                shown = [...ids, ...(reference ? ['your model'] : [])].join(', ')
             },
+            /*
+             * The bank first, then the dropped model. `teach` reverses the bank's picks so the
+             * closest sits nearest the prompt; the artist's own model is appended after that, which
+             * puts it nearer still. An explicit drop outranks a guess.
+             */
+            teach: ids => [...(lib?.teach(ids) ?? []), ...(reference ? [reference] : [])],
             onAttempt: (attempt, at, total) => {
                 setDone(at)
                 if (attempt.ok) {
@@ -228,7 +353,7 @@ export const GenerateDialog = ({
         const failures = attempts.filter(attempt => !attempt.ok)
         setStatus(
             `${String(landed.length)} candidates, ${String(failures.length)} failed`
-                + (shown === '' ? '' : ` · built as ${shown}`)
+                + (shown === '' ? '' : ` · taught by ${shown}`)
                 + (failures[0]?.ok === false ? ` — ${failures[0].error.slice(0, 90)}` : '')
         )
         setBusy(false)
@@ -295,7 +420,7 @@ export const GenerateDialog = ({
         } catch (error) {
             setClipNote(`CLIP: ${error instanceof Error ? error.message : String(error)}`)
         }
-    }, [llama, scorer, veto, naming, prompt, count])
+    }, [client, lib, reference, scorer, veto, naming, prompt, count])
 
     /*
      * The slots still to fill. `done` counts attempts, not candidates, so a failed attempt closes
@@ -388,6 +513,53 @@ export const GenerateDialog = ({
                             start()
                         }}
                     />
+                </div>
+
+                <div
+                    className='generate-reference'
+                    data-testid='generate-reference'
+                    onDragOver={event => {
+                        event.preventDefault()
+                    }}
+                    onDrop={event => {
+                        event.preventDefault()
+                        void takeReference(event.dataTransfer.files[0])
+                    }}
+                >
+                    <Text type='supporting'>
+                        {reference === undefined ?
+                            'Drop a .vox or .gpix here to teach from your own model'
+                        :   `Teaching from your model — ${String(reference.reply.split('\n').length)} lines`
+                        }
+                    </Text>
+                    <div className='generate-reference-actions'>
+                        <Button
+                            label='Choose a model'
+                            size='sm'
+                            variant='secondary'
+                            isDisabled={busy}
+                            onClick={() => {
+                                pickFile()
+                            }}
+                        />
+                        {reference !== undefined && (
+                            <Button
+                                label='Clear'
+                                size='sm'
+                                variant='ghost'
+                                isDisabled={busy}
+                                onClick={clearReference}
+                            />
+                        )}
+                    </div>
+                    {referenceNote !== '' && (
+                        <Text
+                            type='supporting'
+                            color='secondary'
+                        >
+                            {referenceNote}
+                        </Text>
+                    )}
                 </div>
 
                 <Switch
