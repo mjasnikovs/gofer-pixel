@@ -36,20 +36,25 @@ new.
 
 What is there now, and roughly in dependency order:
 
-| Path            | Holds                                                                            |
-| --------------- | -------------------------------------------------------------------------------- |
-| `src/render/`   | the CPU raycaster, the shader it is mirrored by, the camera, the WebGL2 renderer |
-| `src/vox/`      | `.vox` → `Volume`                                                                |
-| `src/doc/`      | cameras, the brush, edits, undo, selection, transforms, symmetry, figures        |
-| `src/doc/files` | the `.gpix` save format, the disk behind a port, and the new-project templates   |
-| `src/sheet/`    | packing cameras into the six output sheets                                       |
-| `src/image/`    | PNG encoding                                                                     |
-| `src/viewport/` | orbit/pan/zoom as a pure function, and the React canvas                          |
-| `src/app/`      | the whole app as one value and one `reduce`, plus the panels that show it        |
-| `src/gen/`      | the local-AI pipeline: prompt → primitives → voxels, and the two scorers         |
-| `src/theme/`    | `theme.ts` and the CSS it generates; never edit the CSS                          |
-| `py/`           | `clipserve.py`, the CLIP scoring service. Optional, started by hand              |
-| `browser/`      | the Playwright suite and the page it drives                                      |
+| Path                | Holds                                                                            |
+| ------------------- | -------------------------------------------------------------------------------- |
+| `src/render/`       | the CPU raycaster, the shader it is mirrored by, the camera, the WebGL2 renderer |
+| `src/vox/`          | `.vox` → `Volume`                                                                |
+| `src/doc/`          | cameras, the brush, edits, undo, selection, transforms, symmetry, figures        |
+| `src/doc/gesture`   | what the pointer does to voxels: aiming, strokes, drags, and the outline         |
+| `src/doc/files`     | the `.gpix` save format, the disk behind a port, and the new-project templates   |
+| `src/sheet/`        | packing cameras into the six output sheets, and whether the last bake is stale   |
+| `src/image/`        | PNG encoding                                                                     |
+| `src/viewport/`     | orbit/pan/zoom as a pure function, and the React canvas                          |
+| `src/app/`          | the whole app as one value and one `reduce`, plus the panels that show it        |
+| `src/app/session`   | New, Open, Save, the palette, the picture drop — every path to the artist's disk |
+| `src/app/keys`      | every keyboard shortcut, as one table                                            |
+| `src/gen/`          | the local-AI pipeline: prompt → primitives → voxels, and the two scorers         |
+| `src/gen/batch`     | one batch end to end: generate, score, name, rank — the dialog just draws it     |
+| `src/gen/reference` | the artist's own model as the example the next batch is taught from              |
+| `src/theme/`        | `theme.ts` and the CSS it generates; never edit the CSS                          |
+| `py/`               | `clipserve.py`, the CLIP scoring service. Optional, started by hand              |
+| `browser/`          | the Playwright suite and the page it drives                                      |
 
 ## The renderer
 
@@ -158,6 +163,56 @@ Neither service is required to open the app. With llama-server down the menu ite
 that says so and disables its one button; with `clipserve.py` down the batch ranks on the built-in
 scores.
 
+## Seven seams worth knowing about
+
+The app layer is deliberately thin, and seven modules under it hold what would otherwise be spread
+through React callbacks and reducer cases. Each one was pulled out because its rules could only be
+tested by mounting something.
+
+- **`src/doc/gesture.ts`** — every pointer gesture, over a `Gesture` interface that `AppState`
+  extends. Eighteen fields, not fifty. It replaces two hand-written lists of the same field names
+  (`AimKey` and `AIMED_AT`) that sat a thousand lines apart; `changedAim` is now the one comparison,
+  and `forgetAim()` gives the hover cache an owner. The rule it exists to keep: **the outline cannot
+  disagree with the edit** — every branch of `hoverAt` is a branch of `beginStroke` or
+  `beginSelect`.
+- **`src/gen/batch.ts`** — one generation batch as a value. Stage order, cancellation and the three
+  status lines. The measured rules live here: naming sorts nothing, CLIP goes last and the grid
+  never waits on it, a dropped model is taught last. `GenerateDialog` holds one `BatchState`.
+- **`src/sheet/baked.ts`** — a baked sheet carries the identity of what it came from, so staleness
+  is computed. There used to be twenty-four hand-written `sheet: undefined` lines in the reducer and
+  no test could cover the twenty-fifth case nobody had written yet.
+- **`src/doc/files.ts`** — every file read off the artist's disk: the project picker, the palette
+  loader and the generate dialog's reference model. `memoryFiles` holds bytes as well as text, so a
+  `.vox` can be driven through it.
+- **`src/app/session.ts`** — the open document's lifecycle over that port: New, Open, Save, Save As,
+  the palette loader, the picture drop, the snapshot restore, and the guard in front of the three
+  that replace the document. Every command is ports and state in, an `AppAction` or `undefined` out,
+  and **`undefined` always means the picker was cancelled** — the rule it exists to keep is that a
+  cancelled picker is not a save and a save that did not happen is not a Discard. It replaced seven
+  `useCallback`s and three `useState`s, of which `pending`/`asking`/`generating` were never
+  independent and are now one `Dialog`.
+- **`src/app/keys.ts`** — every shortcut as one table, over a `KeyPress` with the DOM taken off it.
+  `swallow` is a field rather than a `preventDefault()` scattered through branches, so a new binding
+  has to say what it does about the browser. `pressOf` is the only line in it that knows about a
+  `KeyboardEvent`.
+- **`src/gen/reference.ts`** — the artist's own dropped model as the example it teaches with. Read,
+  decompose, budget-check, remember, forget. The rules: it is decomposed **at the moment of the
+  drop** so the failure has somebody to tell; it is remembered as the example and never as the file;
+  and **anything that fails leaves the previous teacher standing.**
+
+Two more things about the app layer that are not modules:
+
+- **A panel takes `state` and `dispatch`, not one prop per control.** `ExportPanel` used to take
+  fifteen props, and about three hundred lines of `App.tsx` were the one-line arrows filling them in
+  — a hand-maintained restatement of `AppState` and `AppAction` in four places. The two kinds of
+  prop that stay are the ones that are not state: memoised derivations (`shown`, `drawn`, `sheet`),
+  and anything that goes through a port, because a panel must not get to decide which disk a read
+  goes through.
+- **`Chrome` in `state.ts`** is what the artist sees and does not ship — nine fields behind one
+  `{type: 'chrome'}` action. `CHROME_IS_NOT_SAVED` makes "never in the save file, never in the undo
+  history" something the compiler checks. The near-misses are worth knowing: `cell`, `padding`,
+  `bounds`, `preset` and `presets` all travel in the `.gpix`, so they are document, not chrome.
+
 ## Testing — nothing waits
 
 **A test that contains a duration is a broken test.** No `sleep`, no `waitForTimeout`, no `waitFor`,
@@ -185,19 +240,29 @@ available.
 ## Commands
 
 ```bash
-bun run check        # format:check + lint + typecheck + test — the gate, 5.8 s, no browser
+bun run check        # format:check + lint + typecheck + test — the gate, 18 s, no browser
 bun run test         # bun test — scoped to src/ by bunfig.toml
 bun run build        # deployable app bundle to dist/ (not a package — no .d.ts, no lib entry)
-bun run test:browser # the Playwright suite — separate, does not gate `check`, 15 s
+bun run test:browser # the Playwright suite — separate, does not gate `check`, 1.4 min
 bun run dev          # the app on :1430
 bun run theme        # rebuild src/theme/gofer-pixel-theme.css from src/theme/theme.ts
 bun run format       # prettier --write
 ```
 
-`lint` and `format` are cached (`.eslintcache`, prettier's own). A cold `check` is about 9 s; the
-number above is the one that matters, because it is the one the inner loop pays. Two and a half of
-those seconds are `App.test.tsx` mounting the whole window seven times — the mount is what costs
-under happy-dom, not the assertions, so a new test that needs a fresh window costs ~300 ms.
+`lint` and `format` are cached (`.eslintcache`, prettier's own).
+
+**Measured 2026-08-09, and the number worth acting on:** `bun test` is 13.1 s for 536 tests, and
+`App.test.tsx` alone is 12.4 s of it. Every other test file in the project — the raycaster, the
+reducer, the gesture module, the 479 other tests — costs 0.7 s put together. The cause is 55
+whole-window mounts at roughly 220 ms each, and **the mount is what costs under happy-dom, not the
+assertions.** So a test that needs a fresh window costs ~220 ms and a test that does not costs about
+one.
+
+Before reaching for a mount, check whether the thing under test has a seam already: `state.ts`,
+`gesture.ts`, `session.ts`, `keys.ts`, `batch.ts`, `reference.ts` and `baked.ts` all answer their
+own questions in single-digit milliseconds, and they exist because the answers used to cost a
+window. `App.test.tsx` should be about _composition_ — does this panel reach the document — and
+nothing else.
 
 ## Conventions
 

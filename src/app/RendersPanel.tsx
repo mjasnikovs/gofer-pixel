@@ -1,3 +1,4 @@
+import type {Dispatch} from 'react'
 import {SegmentedControl, SegmentedControlItem} from '@astryxdesign/core/SegmentedControl'
 import {Text} from '@astryxdesign/core/Text'
 import type {NamedCamera} from '../doc/cameras'
@@ -12,6 +13,7 @@ import type {Volume} from '../render/volume'
 import {NormalCheck} from './NormalCheck'
 import {SectionHead} from './SectionHead'
 import {Thumbnail} from './Thumbnail'
+import type {AppAction, AppState} from './state'
 
 /**
  * `docs/editor.png`'s RENDERS row and the preview under it — one camera, five maps.
@@ -42,101 +44,102 @@ const MAPS = [
 const PREVIEW_SIZES = [16, 32, 64, 128] as const
 
 export const RendersPanel = ({
+    state,
+    dispatch,
     volume,
-    camera,
-    map,
-    size,
-    onMap,
-    onSize
+    camera
 }: {
+    state: AppState
+    dispatch: Dispatch<AppAction>
+    /** The grid with hidden objects taken out — memoised in `App.tsx`. See `ExportPanel`. */
     volume: Volume
+    /** Which camera is being inspected. Derived from `state.previewed`, and memoised with it. */
     camera: NamedCamera | undefined
-    map: number
-    size: number
-    onMap: (map: number) => void
-    onSize: (size: number) => void
-}) => (
-    <section className='section section-holds'>
-        <SectionHead title='Renders' />
-        <div className='render-body'>
-            <span title='All five come off the same ray, so they are aligned by construction'>
-                <SegmentedControl
-                    label='Which map to preview'
-                    size='sm'
-                    layout='fill'
-                    value={String(map)}
-                    onChange={value => {
-                        onMap(Number(value))
-                    }}
-                >
-                    {MAPS.map(({value, label}) => (
-                        <SegmentedControlItem
-                            key={value}
-                            value={String(value)}
-                            label={label}
-                        />
-                    ))}
-                </SegmentedControl>
-            </span>
-
-            <div className='field-row'>
-                <Text
-                    type='supporting'
-                    color='disabled'
-                >
-                    {camera ? `${camera.name} at` : 'Sprite size'}
-                </Text>
-                <span className='spacer' />
-                <span
-                    className='symmetry-row'
-                    role='radiogroup'
-                    aria-label='Preview size'
-                >
-                    {PREVIEW_SIZES.map(entry => (
-                        <button
-                            key={entry}
-                            type='button'
-                            role='radio'
-                            aria-checked={entry === size}
-                            aria-label={`Preview at ${String(entry)} pixels`}
-                            title={`Redraw the preview at ${String(entry)} px, to see what survives`}
-                            className='symmetry-axis'
-                            data-on={entry === size || undefined}
-                            onClick={() => {
-                                onSize(entry)
-                            }}
-                        >
-                            {entry}
-                        </button>
-                    ))}
+}) => {
+    const {map, preview: size} = state
+    return (
+        <section className='section section-holds'>
+            <SectionHead title='Renders' />
+            <div className='render-body'>
+                <span title='All five come off the same ray, so they are aligned by construction'>
+                    <SegmentedControl
+                        label='Which map to preview'
+                        size='sm'
+                        layout='fill'
+                        value={String(map)}
+                        onChange={value => {
+                            dispatch({type: 'chrome', chrome: {map: Number(value)}})
+                        }}
+                    >
+                        {MAPS.map(({value, label}) => (
+                            <SegmentedControlItem
+                                key={value}
+                                value={String(value)}
+                                label={label}
+                            />
+                        ))}
+                    </SegmentedControl>
                 </span>
-            </div>
 
-            <div className='checker render-preview'>
-                {camera ?
-                    <Thumbnail
-                        volume={volume}
-                        camera={camera.camera}
-                        size={size}
-                        map={map}
-                        className='render-canvas'
-                    />
-                :   <Text
+                <div className='field-row'>
+                    <Text
                         type='supporting'
                         color='disabled'
                     >
-                        No cameras — capture one to preview its maps.
+                        {camera ? `${camera.name} at` : 'Sprite size'}
                     </Text>
-                }
-            </div>
+                    <span className='spacer' />
+                    <span
+                        className='symmetry-row'
+                        role='radiogroup'
+                        aria-label='Preview size'
+                    >
+                        {PREVIEW_SIZES.map(entry => (
+                            <button
+                                key={entry}
+                                type='button'
+                                role='radio'
+                                aria-checked={entry === size}
+                                aria-label={`Preview at ${String(entry)} pixels`}
+                                title={`Redraw the preview at ${String(entry)} px, to see what survives`}
+                                className='symmetry-axis'
+                                data-on={entry === size || undefined}
+                                onClick={() => {
+                                    dispatch({type: 'chrome', chrome: {preview: entry}})
+                                }}
+                            >
+                                {entry}
+                            </button>
+                        ))}
+                    </span>
+                </div>
 
-            {map === MODE_NORMAL && camera ?
-                <NormalCheck
-                    volume={volume}
-                    camera={camera}
-                    size={size}
-                />
-            :   undefined}
-        </div>
-    </section>
-)
+                <div className='checker render-preview'>
+                    {camera ?
+                        <Thumbnail
+                            volume={volume}
+                            camera={camera.camera}
+                            size={size}
+                            map={map}
+                            className='render-canvas'
+                        />
+                    :   <Text
+                            type='supporting'
+                            color='disabled'
+                        >
+                            No cameras — capture one to preview its maps.
+                        </Text>
+                    }
+                </div>
+
+                {map === MODE_NORMAL && camera ?
+                    <NormalCheck
+                        volume={volume}
+                        camera={camera}
+                        size={size}
+                    />
+                :   undefined}
+            </div>
+        </section>
+    )
+}

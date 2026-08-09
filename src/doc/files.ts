@@ -42,8 +42,15 @@ export interface Files {
     /**
      * `accept` is a comma-separated extension list, as an `<input accept>` takes.
      * `undefined` when the artist cancels, which is not an error and must not read like one.
+     *
+     * Three things read a file off the artist's disk — the project picker, the palette loader and
+     * the generate dialog's reference model — and all three come through here. `description` is
+     * what the native picker calls the file kind in its own filter row; it changes nothing else.
+     *
+     * Opening a project remembers it as the file Save writes back to. Opening anything else does
+     * not touch that, so loading a palette cannot make the next Save ask.
      */
-    open: (accept: string) => Promise<PickedFile | undefined>
+    open: (accept: string, description?: string) => Promise<PickedFile | undefined>
     /**
      * Write `text` as `name`. `reuse` asks to write back over the file this port last opened or
      * saved, without a dialog; it is honoured only when `overwrites` is true and there is such a
@@ -62,6 +69,8 @@ export interface Files {
 /** What the picker is told a `.gpix` is. */
 export const PROJECT_EXTENSION = '.gpix'
 export const PROJECT_ACCEPT = '.gpix,.vox'
+/** What a `.hex` palette can arrive as — `FEATURESET.md` §7. Lospec writes `.txt` as often as `.hex`. */
+export const PALETTE_ACCEPT = '.hex,.txt'
 const PROJECT_TYPE = 'application/json'
 
 /**
@@ -104,12 +113,28 @@ interface Picker {
     }) => Promise<FileHandle>
 }
 
-const pickerTypes = (accept: string) => [
-    {
-        description: 'gofer-pixel project',
-        accept: {[PROJECT_TYPE]: accept.split(',').map(part => part.trim())}
+/**
+ * What the File System Access API wants: extensions grouped under a MIME type.
+ *
+ * The MIME matters — Chrome rejects a filter whose type it does not recognise, and the picker then
+ * throws where a caller expects a cancel. An extension nobody has listed falls back to plain text,
+ * which is what every text-ish thing this app reads actually is.
+ */
+const MIME: Readonly<Record<string, string>> = {
+    '.gpix': PROJECT_TYPE,
+    '.vox': 'application/octet-stream'
+}
+
+const pickerTypes = (accept: string, description: string) => {
+    const grouped: Record<string, string[]> = {}
+    for (const part of accept.split(',')) {
+        const extension = part.trim()
+        if (extension === '' || !extension.startsWith('.')) continue
+        const type = MIME[extension] ?? 'text/plain'
+        grouped[type] = [...(grouped[type] ?? []), extension]
     }
-]
+    return [{description, accept: grouped}]
+}
 
 /**
  * A file input, created, clicked and dropped.
@@ -161,17 +186,20 @@ export const browserFiles = (): Files => {
             held = undefined
         },
 
-        open: async accept => {
+        open: async (accept, description = 'gofer-pixel project') => {
             const showOpen = picker.showOpenFilePicker
             if (!showOpen) return inputOpen(accept)
             try {
-                const [handle] = await showOpen({types: pickerTypes(accept), multiple: false})
+                const [handle] = await showOpen({
+                    types: pickerTypes(accept, description),
+                    multiple: false
+                })
                 if (!handle) return undefined
                 const file = await handle.getFile()
-                // Only a project is worth writing back to. A `.vox` opened through here becomes an
-                // untitled document, and Save must ask rather than overwrite somebody's model with
-                // JSON that MagicaVoxel cannot read.
-                held = file.name.endsWith(PROJECT_EXTENSION) ? handle : undefined
+                // Only a project is worth writing back to. A `.vox` opened as a document becomes an
+                // untitled one — `forget` is the caller's to call — and a palette or a reference
+                // model is not a document at all, so neither may touch what Save writes back to.
+                if (file.name.endsWith(PROJECT_EXTENSION)) held = handle
                 return picked(file.name, new Uint8Array(await file.arrayBuffer()))
             } catch {
                 // A cancelled picker throws `AbortError`, and so does a page that has lost user
@@ -188,7 +216,7 @@ export const browserFiles = (): Files => {
                     reuse && held ? held : (
                         await showSave({
                             suggestedName: name,
-                            types: pickerTypes(PROJECT_EXTENSION)
+                            types: pickerTypes(PROJECT_EXTENSION, 'gofer-pixel project')
                         })
                     )
                 const writable = await handle.createWritable()
@@ -210,7 +238,11 @@ export const browserFiles = (): Files => {
  * it, and therefore the one that can go wrong.
  */
 export const memoryFiles = (
-    backing = new Map<string, string>(),
+    /**
+     * The files on this disk. Bytes as well as text, because a `.vox` is binary and a `Map` of
+     * strings cannot hold one — every byte above `0x7f` would come back as `U+FFFD`.
+     */
+    backing = new Map<string, string | Uint8Array>(),
     /** What the picker "chooses". `undefined` stands for a cancelled dialog. */
     choose: (suggested: string) => string | undefined = suggested => suggested
 ): Files => {
@@ -228,10 +260,12 @@ export const memoryFiles = (
             const name = [...backing.keys()].find(key =>
                 wanted.some(extension => key.endsWith(extension))
             )
-            const text = name === undefined ? undefined : backing.get(name)
-            if (name === undefined || text === undefined) return undefined
-            held = name.endsWith(PROJECT_EXTENSION) ? name : undefined
-            return Promise.resolve(picked(name, new TextEncoder().encode(text)))
+            const stored = name === undefined ? undefined : backing.get(name)
+            if (name === undefined || stored === undefined) return undefined
+            if (name.endsWith(PROJECT_EXTENSION)) held = name
+            return Promise.resolve(
+                picked(name, typeof stored === 'string' ? new TextEncoder().encode(stored) : stored)
+            )
         },
 
         save: async (name, text, reuse) => {

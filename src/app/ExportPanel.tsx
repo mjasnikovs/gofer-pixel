@@ -5,13 +5,15 @@ import {SegmentedControl, SegmentedControlItem} from '@astryxdesign/core/Segment
 import {Selector} from '@astryxdesign/core/Selector'
 import {Switch} from '@astryxdesign/core/Switch'
 import {Text} from '@astryxdesign/core/Text'
-import type {NamedCamera} from '../doc/cameras'
+import type {Dispatch} from 'react'
 import {SHEET_MAPS, type Sheet, type SheetMap} from '../sheet/sheet'
 import type {Volume} from '../render/volume'
 import {writeSheetMap} from './download'
+import {writeSheetMetadata, writeSprites} from './export'
 import {GearIcon} from './icons'
 import {SectionHead} from './SectionHead'
 import {Thumbnail} from './Thumbnail'
+import {allPresets, presetMaps, type AppAction, type AppState} from './state'
 /** A texel each side is what stops a sampler bleeding one sprite into the next; four is generous. */
 const PADDINGS = [0, 1, 2, 4] as const
 
@@ -42,193 +44,205 @@ const MAP_LABELS: Record<SheetMap, string> = {
 const CELL_SIZES = [32, 64, 128]
 
 export const ExportPanel = ({
+    state,
+    dispatch,
     volume,
-    cameras,
-    cell,
-    sheet,
-    preset,
-    presets,
-    padding,
-    bounds,
-    onPreset,
-    onCell,
-    onExport,
-    onPadding,
-    onBounds,
-    onSprites,
-    onMetadata,
-    onSavePreset
+    sheet
 }: {
+    state: AppState
+    dispatch: Dispatch<AppAction>
+    /**
+     * The grid with hidden objects taken out of it, memoised in `App.tsx`.
+     *
+     * A prop rather than `state.volume`, and it is the reason panels do not simply take the state
+     * and read everything off it: this is a *derivation*, and recomputing it here would rebuild a
+     * whole grid on every render of a panel that is mostly switches.
+     */
     volume: Volume
-    cameras: readonly NamedCamera[]
-    cell: number
+    /** The last bake if it is still this document's — derived in `App.tsx`; see `sheet/baked.ts`. */
     sheet: Sheet | undefined
-    preset: string
-    presets: readonly {name: string; maps: readonly SheetMap[]}[]
-    padding: number
-    bounds: boolean
-    onPreset: (preset: string) => void
-    onCell: (cell: number) => void
-    onExport: () => void
-    onPadding: (padding: number) => void
-    onBounds: (on: boolean) => void
-    onSprites: () => void
-    onMetadata: () => void
-    onSavePreset: () => void
-}) => (
-    <section className='section section-grows'>
-        <SectionHead title='Export preset'>
-            {/* Astryx's controls take no `title`, so the hover text hangs off a wrapper. */}
-            <span title='Edge of one sprite in the sheet, in pixels'>
-                <SegmentedControl
-                    label='Sprite size'
-                    size='sm'
-                    value={String(cell)}
-                    onChange={value => {
-                        onCell(Number(value))
-                    }}
-                >
-                    {CELL_SIZES.map(size => (
-                        <SegmentedControlItem
-                            key={size}
-                            value={String(size)}
-                            label={`${String(size)} px`}
+}) => {
+    const {cameras, cell, preset, padding, bounds} = state
+    return (
+        <section className='section section-grows'>
+            <SectionHead title='Export preset'>
+                {/* Astryx's controls take no `title`, so the hover text hangs off a wrapper. */}
+                <span title='Edge of one sprite in the sheet, in pixels'>
+                    <SegmentedControl
+                        label='Sprite size'
+                        size='sm'
+                        value={String(cell)}
+                        onChange={value => {
+                            dispatch({type: 'cell', cell: Number(value)})
+                        }}
+                    >
+                        {CELL_SIZES.map(size => (
+                            <SegmentedControlItem
+                                key={size}
+                                value={String(size)}
+                                label={`${String(size)} px`}
+                            />
+                        ))}
+                    </SegmentedControl>
+                </span>
+            </SectionHead>
+
+            <div className='export-body'>
+                <div className='field-row'>
+                    <span
+                        className='grows'
+                        title='Which set of maps an export writes'
+                    >
+                        <Selector
+                            label='Export preset'
+                            isLabelHidden
+                            size='sm'
+                            width='100%'
+                            value={preset}
+                            options={allPresets(state).map(entry => ({
+                                value: entry.name,
+                                label: entry.name
+                            }))}
+                            onChange={chosen => {
+                                dispatch({type: 'preset', preset: chosen})
+                            }}
+                        />
+                    </span>
+                    <IconButton
+                        label='Save these maps as a preset'
+                        tooltip='Save the maps this preset writes under a new name'
+                        icon={<GearIcon />}
+                        size='sm'
+                        variant='ghost'
+                        onClick={() => {
+                            const chosen = globalThis.prompt('Name this preset')
+                            if (chosen === null) return
+                            dispatch({
+                                type: 'save-preset',
+                                name: chosen,
+                                maps: presetMaps(state, preset)
+                            })
+                        }}
+                    />
+                </div>
+
+                {/*
+                 * Padding and collision bounds — `FEATURESET.md` §16 and §37. Padding is in the same
+                 * row as the switch that decides whether the JSON carries a box, because the two are
+                 * the whole of "what shape does the engine get" and neither needs a section.
+                 */}
+                <div className='field-row'>
+                    <Text
+                        type='supporting'
+                        color='disabled'
+                    >
+                        Padding
+                    </Text>
+                    <span className='spacer' />
+                    <span
+                        className='symmetry-row'
+                        role='radiogroup'
+                        aria-label='Padding between sprites'
+                    >
+                        {PADDINGS.map(size => (
+                            <button
+                                key={size}
+                                type='button'
+                                role='radio'
+                                aria-checked={size === padding}
+                                aria-label={`${String(size)} pixels of padding`}
+                                title={
+                                    size === 0 ?
+                                        'Pack the sprites edge to edge'
+                                    :   `Leave ${String(size)} transparent pixels around each sprite`
+                                }
+                                className='symmetry-axis'
+                                data-on={size === padding || undefined}
+                                onClick={() => {
+                                    dispatch({type: 'padding', padding: size})
+                                }}
+                            >
+                                {size}
+                            </button>
+                        ))}
+                    </span>
+                    <span title='Write each sprite’s collision box into the metadata JSON'>
+                        <Switch
+                            label='Box'
+                            size='sm'
+                            labelPosition='start'
+                            value={bounds}
+                            onChange={on => {
+                                dispatch({type: 'bounds', on})
+                            }}
+                        />
+                    </span>
+                </div>
+
+                <div className='checker export-grid'>
+                    {cameras.map(entry => (
+                        <Thumbnail
+                            key={entry.id}
+                            volume={volume}
+                            camera={entry.camera}
+                            size={cell}
+                            className='export-sprite'
                         />
                     ))}
-                </SegmentedControl>
-            </span>
-        </SectionHead>
+                </div>
 
-        <div className='export-body'>
-            <div className='field-row'>
-                <span
-                    className='grows'
-                    title='Which set of maps an export writes'
-                >
-                    <Selector
-                        label='Export preset'
-                        isLabelHidden
-                        size='sm'
-                        width='100%'
-                        value={preset}
-                        options={presets.map(entry => ({value: entry.name, label: entry.name}))}
-                        onChange={onPreset}
-                    />
-                </span>
-                <IconButton
-                    label='Save these maps as a preset'
-                    tooltip='Save the maps this preset writes under a new name'
-                    icon={<GearIcon />}
-                    size='sm'
-                    variant='ghost'
-                    onClick={onSavePreset}
-                />
-            </div>
-
-            {/*
-             * Padding and collision bounds — `FEATURESET.md` §16 and §37. Padding is in the same
-             * row as the switch that decides whether the JSON carries a box, because the two are
-             * the whole of "what shape does the engine get" and neither needs a section.
-             */}
-            <div className='field-row'>
                 <Text
                     type='supporting'
                     color='disabled'
                 >
-                    Padding
+                    {sheet ?
+                        `Written: ${String(sheet.width)} × ${String(sheet.height)}, `
+                        + `${String(sheet.columns)} across`
+                    :   `${String(cameras.length)} sprites at ${String(cell)} px`}
                 </Text>
-                <span className='spacer' />
-                <span
-                    className='symmetry-row'
-                    role='radiogroup'
-                    aria-label='Padding between sprites'
-                >
-                    {PADDINGS.map(size => (
-                        <button
-                            key={size}
-                            type='button'
-                            role='radio'
-                            aria-checked={size === padding}
-                            aria-label={`${String(size)} pixels of padding`}
-                            title={
-                                size === 0 ?
-                                    'Pack the sprites edge to edge'
-                                :   `Leave ${String(size)} transparent pixels around each sprite`
+            </div>
+
+            <div className='export-foot'>
+                <Button
+                    label='Export sprite sheet'
+                    tooltip='Render every camera and write the PNGs this preset asks for'
+                    variant='primary'
+                    width='100%'
+                    onClick={() => {
+                        dispatch({type: 'bake'})
+                    }}
+                />
+                <MoreMenu
+                    label='More export options'
+                    size='md'
+                    items={[
+                        ...SHEET_MAPS.map((map: SheetMap) => ({
+                            label: `Download ${MAP_LABELS[map]} sheet only`,
+                            // A map the preset did not ask for was never baked, so there is no file to
+                            // write; the menu says so rather than quietly doing nothing.
+                            isDisabled: !sheet?.maps[map],
+                            onClick: () => {
+                                if (sheet) void writeSheetMap(sheet, map)
                             }
-                            className='symmetry-axis'
-                            data-on={size === padding || undefined}
-                            onClick={() => {
-                                onPadding(size)
-                            }}
-                        >
-                            {size}
-                        </button>
-                    ))}
-                </span>
-                <span title='Write each sprite’s collision box into the metadata JSON'>
-                    <Switch
-                        label='Box'
-                        size='sm'
-                        labelPosition='start'
-                        value={bounds}
-                        onChange={onBounds}
-                    />
-                </span>
-            </div>
-
-            <div className='checker export-grid'>
-                {cameras.map(entry => (
-                    <Thumbnail
-                        key={entry.id}
-                        volume={volume}
-                        camera={entry.camera}
-                        size={cell}
-                        className='export-sprite'
-                    />
-                ))}
-            </div>
-
-            <Text
-                type='supporting'
-                color='disabled'
-            >
-                {sheet ?
-                    `Written: ${String(sheet.width)} × ${String(sheet.height)}, `
-                    + `${String(sheet.columns)} across`
-                :   `${String(cameras.length)} sprites at ${String(cell)} px`}
-            </Text>
-        </div>
-
-        <div className='export-foot'>
-            <Button
-                label='Export sprite sheet'
-                tooltip='Render every camera and write the PNGs this preset asks for'
-                variant='primary'
-                width='100%'
-                onClick={onExport}
-            />
-            <MoreMenu
-                label='More export options'
-                size='md'
-                items={[
-                    ...SHEET_MAPS.map((map: SheetMap) => ({
-                        label: `Download ${MAP_LABELS[map]} sheet only`,
-                        // A map the preset did not ask for was never baked, so there is no file to
-                        // write; the menu says so rather than quietly doing nothing.
-                        isDisabled: !sheet?.maps[map],
-                        onClick: () => {
-                            if (sheet) void writeSheetMap(sheet, map)
+                        })),
+                        {type: 'divider'},
+                        {
+                            label: 'Download every sprite separately',
+                            isDisabled: !sheet,
+                            onClick: () => {
+                                void writeSprites(state)
+                            }
+                        },
+                        {
+                            label: 'Download metadata JSON',
+                            isDisabled: !sheet,
+                            onClick: () => {
+                                writeSheetMetadata(state)
+                            }
                         }
-                    })),
-                    {type: 'divider'},
-                    {
-                        label: 'Download every sprite separately',
-                        isDisabled: !sheet,
-                        onClick: onSprites
-                    },
-                    {label: 'Download metadata JSON', isDisabled: !sheet, onClick: onMetadata}
-                ]}
-            />
-        </div>
-    </section>
-)
+                    ]}
+                />
+            </div>
+        </section>
+    )
+}

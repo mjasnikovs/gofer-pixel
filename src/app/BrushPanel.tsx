@@ -1,9 +1,8 @@
 import {IconButton} from '@astryxdesign/core/IconButton'
 import {Switch} from '@astryxdesign/core/Switch'
 import {Text} from '@astryxdesign/core/Text'
-import type {ReactNode} from 'react'
-import {colorCss, projectPalette, SWATCH_COLUMNS, type Swatch} from '../doc/palette'
-import type {Volume} from '../render/volume'
+import type {Dispatch, ReactNode} from 'react'
+import {colorCss, projectPalette, SWATCH_COLUMNS, toHexPalette, type Swatch} from '../doc/palette'
 import {
     CircleIcon,
     CubeIcon,
@@ -21,8 +20,18 @@ import {
     UploadIcon
 } from './icons'
 import {SectionHead} from './SectionHead'
+import {writePalette} from './download'
 import {FIGURES, type Figure} from '../doc/figures'
-import {MAX_BRUSH, SHAPES, USES_BRUSH, type Brush, type Shape, type Tool} from './state'
+import {
+    MAX_BRUSH,
+    SHAPES,
+    USES_BRUSH,
+    type AppAction,
+    type AppState,
+    type Brush,
+    type Shape,
+    type Tool
+} from './state'
 
 /**
  * The second column of `docs/editor.png`: what the brush is, and what colour is loaded into it.
@@ -136,42 +145,33 @@ const idleReason = (tool: Tool): string =>
     `${tool[0]?.toUpperCase() ?? ''}${tool.slice(1)} does not use the brush — only Draw and Erase do`
 
 export const BrushPanel = ({
-    volume,
-    brush,
-    color,
-    tool,
-    onBrush,
-    onColor,
-    onEmissive,
-    recent,
-    isLocked,
-    onLock,
-    onAdd,
-    onEyedropper,
-    onPaletteColor,
-    onReplace,
-    onSelectColor,
-    onLoad,
-    onSave
+    state,
+    dispatch,
+    onLoad
 }: {
-    volume: Volume
-    brush: Brush
-    color: number
-    tool: Tool
-    onBrush: (brush: Partial<Brush>) => void
-    onColor: (index: number) => void
-    onEmissive: (value: number) => void
-    recent: readonly number[]
-    isLocked: boolean
-    onLock: (on: boolean) => void
-    onAdd: () => void
-    onEyedropper: () => void
-    onPaletteColor: (css: string) => void
-    onReplace: (from: number, to: number) => void
-    onSelectColor: (index: number) => void
+    state: AppState
+    dispatch: Dispatch<AppAction>
+    /**
+     * Loading a palette off the disk — the one control in this panel that is not a dispatch.
+     *
+     * A prop because it needs the `Files` port, which the app owns: this panel must not be able to
+     * decide *which* port a read goes through. See `app/session.ts`.
+     */
     onLoad: () => void
-    onSave: () => void
 }) => {
+    const {volume, brush, color, recent, paletteLocked: isLocked, tool} = state
+    const onBrush = (next: Partial<Brush>): void => {
+        dispatch({type: 'brush', brush: next})
+    }
+    const onColor = (index: number): void => {
+        dispatch({type: 'color', color: index})
+    }
+    const onReplace = (from: number, to: number): void => {
+        dispatch({type: 'replace-color', from, to})
+    }
+    const onSelectColor = (index: number): void => {
+        dispatch({type: 'select-color', color: index})
+    }
     /*
      * Size, shape and figure belong to a stroke, and only Draw and Erase make one. Greyed rather
      * than hidden: a control that vanishes when a tool is armed reads as a bug, and the artist who
@@ -331,7 +331,9 @@ export const BrushPanel = ({
                         icon={<DownloadIcon />}
                         size='sm'
                         variant='ghost'
-                        onClick={onSave}
+                        onClick={() => {
+                            writePalette(toHexPalette(volume.palette))
+                        }}
                     />
                 </SectionHead>
                 <div className='section-body'>
@@ -362,7 +364,7 @@ export const BrushPanel = ({
                             labelSpacing='spread'
                             value={(volume.emissive[color] ?? 0) > 0}
                             onChange={on => {
-                                onEmissive(on ? 255 : 0)
+                                dispatch({type: 'emissive', color, value: on ? 255 : 0})
                             }}
                         />
                     </div>
@@ -412,7 +414,9 @@ export const BrushPanel = ({
                             size='sm'
                             variant='ghost'
                             isDisabled={isLocked}
-                            onClick={onAdd}
+                            onClick={() => {
+                                dispatch({type: 'palette-add'})
+                            }}
                         />
                         <IconButton
                             label='Pick a colour from the model'
@@ -420,7 +424,9 @@ export const BrushPanel = ({
                             icon={<PickIcon />}
                             size='sm'
                             variant='ghost'
-                            onClick={onEyedropper}
+                            onClick={() => {
+                                dispatch({type: 'tool', tool: 'pick'})
+                            }}
                         />
                         <span className='spacer' />
                         <span title='A locked palette still draws and fills; its entries stop changing'>
@@ -429,7 +435,9 @@ export const BrushPanel = ({
                                 size='sm'
                                 labelPosition='start'
                                 value={isLocked}
-                                onChange={onLock}
+                                onChange={on => {
+                                    dispatch({type: 'palette-lock', on})
+                                }}
                             />
                         </span>
                     </div>
@@ -470,7 +478,11 @@ export const BrushPanel = ({
                             disabled={isLocked}
                             value={colorCss(volume, color)}
                             onChange={event => {
-                                onPaletteColor(event.target.value)
+                                dispatch({
+                                    type: 'palette-color',
+                                    color,
+                                    css: event.target.value
+                                })
                             }}
                         />
                     </div>

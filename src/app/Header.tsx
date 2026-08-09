@@ -2,11 +2,12 @@ import {Button} from '@astryxdesign/core/Button'
 import {IconButton} from '@astryxdesign/core/IconButton'
 import {SegmentedControl, SegmentedControlItem} from '@astryxdesign/core/SegmentedControl'
 import {Text} from '@astryxdesign/core/Text'
+import type {Dispatch} from 'react'
 import {canRedo, canUndo} from '../doc/history'
 import {countVoxels} from '../vox/vox-file'
 import {MoreMenu} from '@astryxdesign/core/MoreMenu'
 import {ChevronIcon, CubeIcon, RedoIcon, SlidersIcon, SunIcon, UndoIcon} from './icons'
-import type {AppState} from './state'
+import type {AppAction, AppState} from './state'
 
 /**
  * The title bar of `docs/editor.png`: what is open on the left, which workspace on the centre line,
@@ -58,10 +59,7 @@ const savedLabel = ({dirty, savedAt}: AppState['doc']): string => {
 
 export const Header = ({
     state,
-    onWorkspace,
-    onExport,
-    onUndo,
-    onRedo,
+    dispatch,
     restores,
     onRestore,
     onForget,
@@ -73,11 +71,13 @@ export const Header = ({
     onGenerate
 }: {
     state: AppState
-    onWorkspace: (workspace: AppState['workspace']) => void
-    onExport: () => void
-    onUndo: () => void
-    onRedo: () => void
+    dispatch: Dispatch<AppAction>
     restores: readonly {key: string; at: number; name: string}[]
+    /*
+     * The seven callbacks below are what is left after the dispatches moved in here, and they are
+     * exactly the ones that are not dispatches: every one goes through a port the app owns — the
+     * disk or the autosave store — and may be cancelled. See `app/session.ts`.
+     */
     onRestore: (key: string) => void
     onForget: () => void
     /** Whether Save can write back over the open file — see `doc/files.ts`. */
@@ -116,7 +116,10 @@ export const Header = ({
             isDisabled
             disabledMessage='One workspace for now — the render controls are in the right-hand rail'
             onChange={value => {
-                onWorkspace(value === 'render' ? 'render' : 'model')
+                dispatch({
+                    type: 'chrome',
+                    chrome: {workspace: value === 'render' ? 'render' : 'model'}
+                })
             }}
         >
             <SegmentedControlItem
@@ -147,7 +150,9 @@ export const Header = ({
                 size='sm'
                 variant='ghost'
                 isDisabled={!canUndo(state.history)}
-                onClick={onUndo}
+                onClick={() => {
+                    dispatch({type: 'undo'})
+                }}
             />
             <IconButton
                 label='Redo'
@@ -160,7 +165,9 @@ export const Header = ({
                 size='sm'
                 variant='ghost'
                 isDisabled={!canRedo(state.history)}
-                onClick={onRedo}
+                onClick={() => {
+                    dispatch({type: 'redo'})
+                }}
             />
             <span className='app-divider' />
             <IconButton
@@ -192,7 +199,9 @@ export const Header = ({
                 tooltip='Render every camera and write the sprite sheet'
                 variant='primary'
                 size='sm'
-                onClick={onExport}
+                onClick={() => {
+                    dispatch({type: 'bake'})
+                }}
             />
             {/*
              * The file menu, and below it the snapshots — `FEATURESET.md` §32. Restoring is not

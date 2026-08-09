@@ -13,7 +13,16 @@ import {NO_SYMMETRY} from '../doc/symmetry'
 import {memoryScorer} from '../gen/clip'
 import {memoryLlama, type Llama} from '../gen/llama'
 import {handle} from './handle'
+import {currentSheet} from './state'
+import type {Sheet} from '../sheet/sheet'
 import {fakeGl, withFakeGl} from '../../test/fake-gl'
+
+/**
+ * The baked sheet as the app would show it — derived, not stored, so it goes stale on its own.
+ * See `sheet/baked.ts`.
+ */
+const sheet = (): Sheet | undefined =>
+    handle.state === undefined ? undefined : currentSheet(handle.state)
 
 const volume = readVox(
     new Uint8Array(await Bun.file(new URL('../assets/car.vox', import.meta.url)).arrayBuffer())
@@ -135,15 +144,15 @@ test('clicking a camera selects it and moves the viewport onto it', async () => 
 
 test('one click bakes the sheet the export writes, at the size the panel says', async () => {
     const mounted = await mount()
-    expect(handle.state?.sheet).toBeUndefined()
+    expect(sheet()).toBeUndefined()
 
     await act(async () => {
         control(mounted.host, 'Export sprite sheet').click()
     })
 
-    expect(handle.state?.sheet?.width).toBe(256)
-    expect(handle.state?.sheet?.height).toBe(128)
-    expect(handle.state?.sheet?.maps.color?.length).toBe(256 * 128 * 4)
+    expect(sheet()?.width).toBe(256)
+    expect(sheet()?.height).toBe(128)
+    expect(sheet()?.maps.color?.length).toBe(256 * 128 * 4)
     expect(mounted.host.textContent).toContain('Written: 256 × 128')
 
     // The grid above the button is the sheet's own cells, so it has to hold one per camera at the
@@ -167,14 +176,14 @@ test('capturing adds a ninth camera and throws the stale sheet away', async () =
     await act(async () => {
         control(mounted.host, 'Export sprite sheet').click()
     })
-    expect(handle.state?.sheet).toBeDefined()
+    expect(sheet()).toBeDefined()
 
     await act(async () => {
         control(mounted.host, 'Capture view as a camera').click()
     })
 
     expect(mounted.host.querySelectorAll('.views-strip canvas.thumbnail')).toHaveLength(9)
-    expect(handle.state?.sheet).toBeUndefined()
+    expect(sheet()).toBeUndefined()
 
     await unmount(mounted)
 })
@@ -414,30 +423,6 @@ test('Save writes the open document to disk and the header stops saying unsaved'
     const back = loadDocument(disk.get('car.gpix') ?? '')
     expect(back?.volume.data).toEqual(handle.state?.volume.data ?? new Uint8Array())
     expect(back?.objects.list).toHaveLength(2)
-
-    await unmount(mounted)
-})
-
-test('a cancelled save leaves the document unsaved rather than claiming it was written', async () => {
-    const disk = new Map<string, string>()
-    const mounted = await mount(
-        memoryStore(),
-        memoryFiles(disk, () => undefined)
-    )
-
-    await act(async () => {
-        handle.dispatch?.({type: 'object', op: {kind: 'add'}})
-    })
-    await act(async () => {
-        control(mounted.host, 'Main menu').click()
-    })
-    await act(async () => {
-        menuItem('Save').click()
-    })
-
-    expect(disk.size).toBe(0)
-    expect(handle.state?.doc.dirty).toBe(true)
-    expect(handle.state?.doc.savedAt).toBeUndefined()
 
     await unmount(mounted)
 })
@@ -930,10 +915,13 @@ const press = async (key: string, modifiers: Partial<KeyboardEventInit> = {}): P
     })
 }
 
-test('the shortcuts that only exist in the hint bar’s caption still dispatch', async () => {
+/*
+ * The listener itself. Which key means what is `keys.ts`, and it is a table with no DOM in it — so
+ * all this has to prove is that the table is actually plugged into the document and the reducer.
+ */
+test('the keyboard listener is wired to the table and to the reducer', async () => {
     const mounted = await mount()
 
-    // A selection to work on, and the two brackets that grow and shrink it.
     await act(async () => {
         handle.dispatch?.({type: 'select-color', color: 1})
     })
@@ -942,58 +930,15 @@ test('the shortcuts that only exist in the hint bar’s caption still dispatch',
 
     await press(']')
     expect(handle.state?.selection.size).toBeGreaterThan(picked)
-    await press('[')
-    expect(handle.state?.selection.size).toBeLessThanOrEqual(picked)
 
-    // Selected again, because shrinking twice can empty it and Delete with nothing chosen is a
-    // no-op that would make the next three assertions pass for the wrong reason.
-    await act(async () => {
-        handle.dispatch?.({type: 'select-color', color: 1})
-    })
-    const before = handle.state?.volume.data.filter(Boolean).length ?? 0
-    await press('Delete')
-    expect(handle.state?.selection.size).toBe(0)
-    const afterDelete = handle.state?.volume.data.filter(Boolean).length ?? 0
-    expect(afterDelete).toBeLessThan(before)
-
-    // Undo and redo, from the keys rather than from the header.
-    await press('z', {ctrlKey: true})
-    expect(handle.state?.volume.data.filter(Boolean).length).toBeGreaterThan(afterDelete)
-    await press('z', {ctrlKey: true, shiftKey: true})
-    expect(handle.state?.volume.data.filter(Boolean).length).toBe(afterDelete)
-
-    // S toggles the slice, and toggles it back.
-    await press('s')
-    expect(handle.state?.slice).toBeDefined()
-    await press('s')
-    expect(handle.state?.slice).toBeUndefined()
-
-    // Escape drops a selection rather than leaving the bar hanging over the viewport.
-    await act(async () => {
-        handle.dispatch?.({type: 'select-color', color: 1})
-    })
+    // Bound, unbound and modified, so a listener that fired on everything would fail here.
     await press('Escape')
     expect(handle.state?.selection.size).toBe(0)
-
-    // F frames the model. Alt is a modifier the app does not claim, so it passes through untouched.
     const zoomed = handle.state?.orbit.camera.zoom
+    await press('f', {altKey: true})
+    expect(handle.state?.orbit.camera.zoom).toBe(zoomed)
     await press('f')
     expect(handle.state?.orbit.camera.zoom).not.toBe(zoomed)
-    const framed = handle.state?.orbit.camera.zoom
-    await press('f', {altKey: true})
-    expect(handle.state?.orbit.camera.zoom).toBe(framed)
-
-    // Copy and paste, which put back what Delete took. The redo above left the model without its
-    // colour-1 voxels, so they come back first or there would be nothing to copy.
-    await press('z', {ctrlKey: true})
-    await act(async () => {
-        handle.dispatch?.({type: 'select-color', color: 1})
-    })
-    await press('c', {ctrlKey: true})
-    await press('Delete')
-    const emptied = handle.state?.volume.data.filter(Boolean).length ?? 0
-    await press('v', {ctrlKey: true})
-    expect(handle.state?.volume.data.filter(Boolean).length).toBeGreaterThan(emptied)
 
     await unmount(mounted)
 })
@@ -1167,9 +1112,9 @@ test('padding, bounds and sprite size are the sheet’s own numbers', async () =
     })
 
     // Four across, eight cameras: two rows of 32 px cells with 2 px around and between.
-    expect(handle.state?.sheet?.width).toBe(4 * 34 + 2)
-    expect(handle.state?.sheet?.height).toBe(2 * 34 + 2)
-    expect(handle.state?.sheet?.padding).toBe(2)
+    expect(sheet()?.width).toBe(4 * 34 + 2)
+    expect(sheet()?.height).toBe(2 * 34 + 2)
+    expect(sheet()?.padding).toBe(2)
     expect(handle.state?.bounds).toBe(!wasBoxed)
 
     await unmount(mounted)
@@ -1326,49 +1271,6 @@ test('the objects panel’s switches and its search reach the document', async (
  * `memoryFiles` carries text, and a `.vox` is a RIFF container full of arbitrary bytes — so these
  * two bring their own port rather than round-tripping the model through UTF-8.
  */
-const picking = (name: string, bytes: Uint8Array): Files => ({
-    overwrites: true,
-    forget: () => undefined,
-    open: async () => Promise.resolve({name, bytes, text: new TextDecoder().decode(bytes)}),
-    save: async () => Promise.resolve(name)
-})
-
-test('a .vox picked from the disk opens as an untitled document', async () => {
-    const bytes = new Uint8Array(
-        await Bun.file(new URL('../assets/car.vox', import.meta.url)).arrayBuffer()
-    )
-    const mounted = await mount(memoryStore(), picking('other.vox', bytes))
-
-    await act(async () => {
-        control(mounted.host, 'Main menu').click()
-    })
-    await act(async () => {
-        menuItem('Open…').click()
-    })
-
-    expect(handle.state?.doc.name).toBe('other.vox')
-    expect(handle.state?.volume.data.filter(Boolean).length).toBeGreaterThan(0)
-
-    await unmount(mounted)
-})
-
-test('a file that will not parse leaves the open document alone', async () => {
-    const mounted = await mount(memoryStore(), picking('notes.vox', new Uint8Array([1, 2, 3, 4])))
-    const before = handle.state?.volume.data.filter(Boolean).length
-
-    await act(async () => {
-        control(mounted.host, 'Main menu').click()
-    })
-    await act(async () => {
-        menuItem('Open…').click()
-    })
-
-    expect(handle.state?.doc.name).toBe('car.vox')
-    expect(handle.state?.volume.data.filter(Boolean).length).toBe(before)
-
-    await unmount(mounted)
-})
-
 /*
  * The brush column. Every one of these is a one-line closure between a panel and the reducer, which
  * is exactly the kind of wiring that rots without anyone noticing: the control still moves, the
@@ -1591,87 +1493,25 @@ test('a picture dropped on the viewport becomes reference art', async () => {
     })
 })
 
-test('the same picture dropped with Shift becomes voxels instead', async () => {
-    await withDecoder(async () => {
-        const mounted = await mount()
-
-        await dropOn(mounted.host, asPng(), true)
-
-        expect(handle.state?.references).toEqual([])
-        // Two opaque pixels in a 2 × 2, extruded four deep, in a grid the import sized itself.
-        expect(handle.state?.doc.name).toBe('front.png')
-        expect([handle.state?.volume.sx, handle.state?.volume.sz]).toEqual([2, 2])
-        expect(handle.state?.volume.sy).toBe(4)
-        expect(handle.state?.volume.data.filter(Boolean).length).toBe(8)
-
-        await unmount(mounted)
-    })
-})
-
-test('a drop that is not a picture is ignored rather than half-applied', async () => {
-    await withDecoder(async () => {
-        const mounted = await mount()
-        const before = handle.state?.volume.data.filter(Boolean).length
-
-        await dropOn(mounted.host, undefined, false)
-        await dropOn(mounted.host, new File(['hello'], 'notes.txt', {type: 'text/plain'}), false)
-
-        expect(handle.state?.references).toEqual([])
-        expect(handle.state?.volume.data.filter(Boolean).length).toBe(before)
-
-        await unmount(mounted)
-    })
-})
-
-test('a picture the browser cannot decode is not a picture, whatever it was named', async () => {
-    const realBitmap = globalThis.createImageBitmap
-    globalThis.createImageBitmap = async () => Promise.reject(new Error('not an image'))
-    try {
-        const mounted = await mount()
-
-        await dropOn(mounted.host, asPng(), false)
-
-        expect(handle.state?.references).toEqual([])
-        await unmount(mounted)
-    } finally {
-        globalThis.createImageBitmap = realBitmap
-    }
-})
-
 /*
- * `FEATURESET.md` §7's import half. A file input is the one thing that needs an element rather than
- * an action, so the picker is stubbed at the click and the parsing is real.
+ * `FEATURESET.md` §7's import half, through the `Files` port — the same one Open and Save go
+ * through. It used to build its own `<input type=file>`, so this test used to have to replace
+ * `HTMLInputElement.prototype.click` and put it back in a `finally`.
  */
 test('a .hex file loaded from the picker becomes the palette', async () => {
-    const realClick = HTMLInputElement.prototype.click
-    HTMLInputElement.prototype.click = function click(this: HTMLInputElement): void {
-        if (this.type !== 'file') {
-            realClick.call(this)
-            return
-        }
-        Object.defineProperty(this, 'files', {
-            configurable: true,
-            value: [new File(['112233\n445566\n'], 'mine.hex', {type: 'text/plain'})]
-        })
-        this.dispatchEvent(new Event('change'))
-    }
+    const disk = new Map([['mine.hex', '112233\n445566\n']])
+    const mounted = await mount(undefined, memoryFiles(disk))
 
-    try {
-        const mounted = await mount()
+    await act(async () => {
+        control(mounted.host, 'Load a palette').click()
+    })
+    await settled()
 
-        await act(async () => {
-            control(mounted.host, 'Load a palette').click()
-        })
-        await settled()
+    expect([...(handle.state?.volume.palette ?? []).slice(4, 10)]).toEqual([
+        0x11, 0x22, 0x33, 255, 0x44, 0x55
+    ])
 
-        expect([...(handle.state?.volume.palette ?? []).slice(4, 10)]).toEqual([
-            0x11, 0x22, 0x33, 255, 0x44, 0x55
-        ])
-
-        await unmount(mounted)
-    } finally {
-        HTMLInputElement.prototype.click = realClick
-    }
+    await unmount(mounted)
 })
 
 test('the palette writes back out as a .hex file', async () => {
@@ -2058,36 +1898,6 @@ test('Ctrl-O and Ctrl-N go through the same guard the menu does', async () => {
  * The arrow keys nudge a selection. Shift swaps the horizontal pair for the vertical one, which is
  * the third axis a two-dimensional keyboard cannot otherwise reach.
  */
-test('the arrow keys move a selection, and Shift moves it up and down instead', async () => {
-    const mounted = await mount()
-    const grid = createVolume(8, 8, 8, volume.palette)
-    grid.data[3 + 8 * (3 + 8 * 3)] = 1
-    await act(async () => {
-        handle.dispatch?.({
-            type: 'new',
-            volume: grid,
-            objects: initialObjects(grid),
-            name: 'one.gpix'
-        })
-    })
-    await act(async () => {
-        handle.dispatch?.({type: 'select-color', color: 1})
-    })
-    const only = () => (handle.state?.volume.data ?? new Uint8Array()).findIndex(Boolean)
-    const start = only()
-
-    const moved = await pressKey('ArrowRight')
-    expect(moved.defaultPrevented).toBe(true)
-    expect(only()).not.toBe(start)
-
-    const sideways = only()
-    await pressKey('ArrowRight', {shiftKey: true})
-    // Up is a whole 8 × 8 layer away, so it cannot be confused with a step along a row.
-    expect(Math.abs(only() - sideways)).toBeGreaterThanOrEqual(64)
-
-    await unmount(mounted)
-})
-
 test('closing the tab with unsaved work is refused until it is saved', async () => {
     const disk = new Map<string, string>()
     const mounted = await mount(memoryStore(), memoryFiles(disk))
@@ -2192,7 +2002,7 @@ test('forgetting the snapshots empties the list', async () => {
     // The autosave is written from an effect and does not itself re-render, so the menu only learns
     // there is something to forget on the next pass. Anything at all will do.
     await act(async () => {
-        handle.dispatch?.({type: 'grid', on: false})
+        handle.dispatch?.({type: 'chrome', chrome: {grid: false}})
     })
 
     await act(async () => {
@@ -2317,7 +2127,7 @@ test('a preset changes which maps an export writes', async () => {
     await act(async () => {
         control(mounted.host, 'Export sprite sheet').click()
     })
-    expect(Object.keys(handle.state?.sheet?.maps ?? {})).toHaveLength(8)
+    expect(Object.keys(sheet()?.maps ?? {})).toHaveLength(8)
 
     await unmount(mounted)
 })

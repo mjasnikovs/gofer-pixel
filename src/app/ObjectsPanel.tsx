@@ -2,20 +2,20 @@ import {AlertDialog} from '@astryxdesign/core/AlertDialog'
 import {IconButton} from '@astryxdesign/core/IconButton'
 import {Text} from '@astryxdesign/core/Text'
 import {TextInput} from '@astryxdesign/core/TextInput'
-import {useMemo, useState} from 'react'
+import {useMemo, useState, type Dispatch} from 'react'
 import {
+    canRemove as objectCanRemove,
     duplicateOffset,
     isShown,
     matching,
     objectExtents,
     type Extent,
-    type Objects,
     type VoxObject
 } from '../doc/objects'
 import type {Volume} from '../render/volume'
 import {CopyIcon, EyeIcon, MagnetIcon, PlusIcon, TrashIcon} from './icons'
 import {SectionHead} from './SectionHead'
-import type {ObjectOp} from './state'
+import type {AppAction, AppState, ObjectOp} from './state'
 
 /**
  * The object list — `FEATURESET.md` §8 and §28, and panel 4 of `docs/featureset.png`.
@@ -231,23 +231,25 @@ const Row = ({
 }
 
 export const ObjectsPanel = ({
-    objects,
-    volume,
-    query,
-    canRemove,
-    blocking,
-    onQuery,
-    onOp
+    state,
+    dispatch
 }: {
-    objects: Objects
-    volume: Volume
-    query: string
-    canRemove: boolean
-    /** The locked object refusing the press under the cursor, if one is. */
-    blocking: number | undefined
-    onQuery: (query: string) => void
-    onOp: (op: ObjectOp) => void
+    state: AppState
+    dispatch: Dispatch<AppAction>
 }) => {
+    /*
+     * The whole grid, not the one the viewport draws: a hidden object still has a voxel count, and
+     * a row that read "empty" because it was hidden would be a lie. This panel is about the
+     * document, not about the picture.
+     */
+    const {objects, volume, search: query} = state
+    const canRemove = objectCanRemove(objects)
+    /** The locked object refusing the press under the cursor, if one is. */
+    const blocking =
+        state.hover?.blocked?.reason === 'locked' ? state.hover.blocked.object : undefined
+    const onOp = (op: ObjectOp): void => {
+        dispatch({type: 'object', op})
+    }
     const [renaming, setRenaming] = useState<number | undefined>(undefined)
     const [dragging, setDragging] = useState<number | undefined>(undefined)
     const [pending, setPending] = useState<VoxObject | undefined>(undefined)
@@ -284,7 +286,9 @@ export const ObjectsPanel = ({
                         size='sm'
                         placeholder='Search'
                         value={query}
-                        onChange={onQuery}
+                        onChange={typed => {
+                            dispatch({type: 'chrome', chrome: {search: typed}})
+                        }}
                     />
                 :   undefined}
 

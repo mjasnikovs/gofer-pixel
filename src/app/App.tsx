@@ -1,27 +1,20 @@
 import {useCallback, useEffect, useMemo, useReducer, useState} from 'react'
-import {canRemove, initialObjects, objectAt, shownVolume} from '../doc/objects'
-import type {Axis} from '../doc/brush'
-import {voxelsFromImage} from '../doc/import'
-import {toHexPalette} from '../doc/palette'
-import {loadDocument, saveDocument} from '../doc/save'
-import {browserFiles, projectName, PROJECT_ACCEPT, type Files} from '../doc/files'
-import {newDocument} from '../doc/templates'
-import {readVox} from '../vox/vox-file'
+import {objectAt, shownVolume} from '../doc/objects'
+import {saveDocument} from '../doc/save'
+import {browserFiles, type Files} from '../doc/files'
 import {browserStore, clearSnapshots, putSnapshot, snapshots, type Store} from '../doc/store'
 import {browserScorer, type Scorer} from '../gen/clip'
 import type {Llama} from '../gen/llama'
 import {defaultLibrary, type Library} from '../gen/library'
 import {browserVeto, type Veto} from '../gen/veto'
-import {sheetMetadata} from '../sheet/metadata'
 import {selectionBounds} from '../doc/selection'
-import {canRadial} from '../doc/symmetry'
 import type {Raycaster} from '../render/gl'
 import type {Volume} from '../render/volume'
 import {Viewport} from '../viewport/Viewport'
 import type {OrbitEvent, ViewportPointer} from '../viewport/orbit'
 import {BrushPanel} from './BrushPanel'
 import {TOOL_CURSORS} from './cursors'
-import {writeMetadata, writePalette, writeSheet, writeSprite} from './download'
+import {writeExport} from './export'
 import {ExportPanel} from './ExportPanel'
 import {Header} from './Header'
 import {ObjectsPanel} from './ObjectsPanel'
@@ -33,10 +26,9 @@ import {GridPanel, ToolRail} from './ToolRail'
 import {AxisGizmo, BrushGhost, GroundGrid, HintBar, SelectionBox, ViewCube} from './ViewportOverlay'
 import {ViewsStrip} from './ViewsStrip'
 import {
-    allPresets,
     asDocument,
+    currentSheet,
     initialState,
-    presetMaps,
     previewVolume,
     reduce,
     TOOLS,
@@ -46,6 +38,23 @@ import {GenerateDialog} from './GenerateDialog'
 import {NewProjectDialog} from './NewProjectDialog'
 import {UnsavedDialog} from './UnsavedDialog'
 import {handle} from './handle'
+import {keyAction, pressOf} from './keys'
+import {
+    asking as askingAbout,
+    closed,
+    dropPicture,
+    guard,
+    loadPalette as palettePicked,
+    newProject,
+    NO_DIALOG,
+    openProject,
+    proceed,
+    restoreSnapshot,
+    saveProject,
+    type Dialog,
+    type Guarded,
+    type Step
+} from './session'
 
 /**
  * Frame first, as `astryx docs layout` asks. The regions and their budgets are `docs/editor.png`'s
@@ -57,42 +66,22 @@ import {handle} from './handle'
  * There is no state here. Everything is `reduce` in `state.ts`, which is why the interesting tests
  * are 1 ms functions rather than a browser driving a UI.
  *
- * Arrow keys move the selection by one voxel along a grid axis; see the key handler for Shift.
- */
-/**
- * How thick a PNG comes in — `FEATURESET.md` §34's "choose extrusion depth".
+ * **A panel takes `state` and `dispatch`, not one prop per control.** It used to take one prop per
+ * value and one callback per control — `ExportPanel` alone took fifteen — and three hundred of this
+ * file's lines were the one-line arrows that filled them in. That is a hand-maintained restatement
+ * of `AppState` and `AppAction` in four places, and adding one control meant editing four files.
  *
- * Four, because one voxel deep is a sheet of paper that looks wrong from every angle but the one
- * it was drawn at, and the point of importing is to have something to sculpt.
- */
-const DEFAULT_EXTRUSION = 4
-
-/**
- * A blob as a `data:` URL.
+ * The exceptions are the two kinds of prop that genuinely are not state:
  *
- * `FileReader` rather than `btoa` over the bytes, because the base64 of a megabyte of PNG through
- * `String.fromCharCode` is the argument-stack blowout `doc/save.ts` already comments on, and the
- * platform has a reader that does not have the problem.
+ * - **Memoised derivations.** `shown`, `drawn` and `sheet` are computed once here and passed down,
+ *   because recomputing `shownVolume` inside a panel of switches would rebuild a whole grid on every
+ *   render of it.
+ * - **Anything that goes through a port.** Open, Save, the palette loader and the snapshots can be
+ *   cancelled and belong to the app, so they stay callbacks — a panel must not get to decide which
+ *   disk a read goes through. All of them are `session.ts`.
+ *
+ * The keyboard is `keys.ts`; what a key means is a table, and what is here is the listener.
  */
-const dataUrl = async (blob: Blob): Promise<string> =>
-    new Promise<string>(resolve => {
-        const reader = new FileReader()
-        reader.addEventListener('load', () => {
-            resolve(typeof reader.result === 'string' ? reader.result : '')
-        })
-        reader.readAsDataURL(blob)
-    })
-
-/** The three things that replace the open document, and therefore have to ask about it first. */
-type Guarded = 'new' | 'open' | 'generate'
-
-const NUDGES: Record<string, readonly [number, number, number] | undefined> = {
-    ArrowRight: [1, 0, 0],
-    ArrowLeft: [-1, 0, 0],
-    ArrowUp: [0, 1, 0],
-    ArrowDown: [0, -1, 0]
-}
-
 export const App = ({
     volume: source,
     name,
@@ -138,6 +127,14 @@ export const App = ({
     // before the press, because neither change is visible from the outside of a block.
     const drawn = useMemo(() => previewVolume(state, shown), [state, shown])
 
+    /*
+     * The sheet the last export baked, if it is still the sheet for this document.
+     *
+     * Derived, never stored: nothing in the reducer has to remember to throw it away, because
+     * `currentSheet` compares what it was baked from against what is there now. See `sheet/baked.ts`.
+     */
+    const sheet = useMemo(() => currentSheet(state), [state])
+
     const onOrbit = useCallback((event: OrbitEvent, height: number) => {
         dispatch({type: 'orbit', event, height})
     }, [])
@@ -163,237 +160,93 @@ export const App = ({
     }, [])
 
     /*
-     * Reading a file is the one thing that needs an element rather than an action: a browser will
-     * only open a picker from a real click on a real `<input type=file>`. It is created, clicked
-     * and dropped rather than kept in the tree, because a hidden input that lives in the layout is
-     * one more thing for the bounding-box test to trip over.
+     * The file menu, the palette loader and the viewport's drop — every path that reads or writes
+     * the artist's disk. All of them are `session.ts`, which needs no React and no window: each one
+     * is ports in, an `AppAction` or `undefined` out, and `undefined` always means the picker was
+     * cancelled. What is left here is the awaiting and the dispatching.
      */
-    /*
-     * A PNG dropped on the viewport. Which of the two things `FEATURESET.md` asks for it becomes is
-     * decided by the modifier: plain is §33's reference to build against, Shift is §34's import,
-     * where every opaque pixel becomes a voxel. Both need the browser's own decoder, which is what
-     * `createImageBitmap` and a scratch canvas are.
-     */
-    const dropImage = useCallback((file: File | undefined, asVoxels: boolean, onto: Axis) => {
-        if (!file?.type.startsWith('image/')) return
-        void (async () => {
-            const blob = new Blob([await file.arrayBuffer()], {type: file.type})
-            let bitmap: ImageBitmap
-            try {
-                bitmap = await createImageBitmap(blob)
-            } catch {
-                // A file the browser cannot decode is not a picture, whatever it was named.
-                return
-            }
-            if (!asVoxels) {
-                /*
-                 * A `data:` URL, not `URL.createObjectURL`. An object URL is a handle into this
-                 * page's memory: it is dead on the next reload and it cannot be written into a
-                 * `.gpix`, so a project saved with reference art would have opened blank. The cost
-                 * is the PNG's own bytes, base64'd, inside the file.
-                 */
-                dispatch({type: 'reference', plane: onto, url: await dataUrl(blob)})
-                return
-            }
-            const canvas = document.createElement('canvas')
-            canvas.width = bitmap.width
-            canvas.height = bitmap.height
-            const context = canvas.getContext('2d')
-            if (!context) return
-            context.drawImage(bitmap, 0, 0)
-            const {data} = context.getImageData(0, 0, bitmap.width, bitmap.height)
-            const {volume: built} = voxelsFromImage(
-                new Uint8Array(data),
-                bitmap.width,
-                bitmap.height,
-                DEFAULT_EXTRUSION
-            )
-            dispatch({type: 'import-image', volume: built, name: file.name})
-        })()
-    }, [])
+    const [dialog, setDialog] = useState<Dialog>(NO_DIALOG)
 
-    /*
-     * The file menu — New, Open, Save, Save As.
-     *
-     * All four go through the `Files` port rather than touching the browser, for the same reason
-     * the snapshots go through `Store`: the logic that can lose an artist's work is *which* file
-     * gets written and whether the picker was cancelled, and that has to be testable without a
-     * browser. See `doc/files.ts`.
-     */
-    const doSave = useCallback(
-        async (reuse: boolean): Promise<boolean> => {
-            const current = handle.state ?? state
-            const suggested = projectName(current.doc.name)
-            const text = JSON.stringify(saveDocument(asDocument(current), suggested))
-            const written = await files.save(suggested, text, reuse)
-            // A cancelled picker leaves the document exactly as it was, still dirty. It must not
-            // report a save that did not happen.
-            if (written === undefined) return false
-            dispatch({type: 'saved', name: written, at: Date.now()})
-            return true
-        },
-        [files, state]
-    )
-
-    /*
-     * A `.gpix` is ours; a `.vox` is MagicaVoxel's and arrives as an untitled document. Anything
-     * else that will not parse is refused without touching what is open — a half-loaded document
-     * is the one outcome `doc/save.ts` exists to prevent.
-     */
-    const doOpen = useCallback(async () => {
-        const picked = await files.open(PROJECT_ACCEPT)
-        if (!picked) return
-        if (picked.name.toLowerCase().endsWith('.vox')) {
-            try {
-                const built = readVox(picked.bytes)
-                dispatch({
-                    type: 'new',
-                    volume: built,
-                    objects: initialObjects(built),
-                    name: picked.name
+    /** Run whichever half of a transition is not just "draw this dialog". */
+    const take = useCallback(
+        (step: Step) => {
+            setDialog(step.dialog)
+            if (step.opening) {
+                void openProject(files).then(action => {
+                    if (action) dispatch(action)
                 })
-            } catch {
-                // Not a `.vox` whatever it was called. The open document is untouched.
             }
-            return
-        }
-        const loaded = loadDocument(picked.text)
-        if (loaded) dispatch({type: 'open', document: {...loaded, name: picked.name}})
-    }, [files])
-
-    const doNew = useCallback(
-        (size: readonly [number, number, number], fresh: string) => {
-            const {volume: built, objects} = newDocument(size)
-            files.forget()
-            dispatch({
-                type: 'new',
-                volume: built,
-                objects,
-                name: projectName(fresh)
-            })
         },
         [files]
     )
 
     /*
-     * The guard in front of New and Open — what stops an hour of work leaving without being asked
-     * about. It is the *pending* action rather than a boolean, so the dialog's Discard knows what
-     * the artist was trying to do and does it, instead of dismissing itself and making them click
-     * the menu a second time.
+     * Save reads `handle.state` rather than the `state` this render closed over. Ctrl-S and the
+     * unsaved dialog can both fire from a callback older than the last edit, and saving a document
+     * one stroke behind is a data loss that looks like a success.
      */
-    const [pending, setPending] = useState<Guarded | undefined>(undefined)
-    const [asking, setAsking] = useState(false)
-    const [generating, setGenerating] = useState(false)
-
-    const continueWith = useCallback(
-        (what: Guarded | undefined) => {
-            if (what === 'new') setAsking(true)
-            else if (what === 'open') void doOpen()
-            // Generation is guarded at the *dialog*, not at the pick: the dialog is modal and the
-            // pick inside it is the last click of a minute-long wait, which is the worst possible
-            // moment to be asked whether the work it is about to replace matters.
-            else if (what === 'generate') setGenerating(true)
+    const doSave = useCallback(
+        async (reuse: boolean): Promise<boolean> => {
+            const action = await saveProject(files, handle.state ?? state, reuse)
+            if (!action) return false
+            dispatch(action)
+            return true
         },
-        [doOpen]
+        [files, state]
     )
 
     const guarded = useCallback(
         (what: Guarded) => {
-            if (state.doc.dirty) setPending(what)
-            else continueWith(what)
+            take(guard(what, state.doc.dirty))
         },
-        [state.doc.dirty, continueWith]
+        [state.doc.dirty, take]
     )
 
     const loadPalette = useCallback(() => {
-        const input = document.createElement('input')
-        input.type = 'file'
-        input.accept = '.hex,.txt,text/plain'
-        input.addEventListener('change', () => {
-            const file = input.files?.[0]
-            if (!file) return
-            void file.text().then(text => {
-                dispatch({type: 'palette-load', text})
-            })
+        void palettePicked(files).then(action => {
+            if (action) dispatch(action)
         })
-        input.click()
-    }, [])
+    }, [files])
 
     /*
      * Export is one action from two places — the header button and the panel button — and both mean
-     * "write the files", not "show me a preview". So it bakes through the reducer, which is what
-     * golden-hashes, and writes the PNGs off the sheet the reducer produced rather than off a
-     * second render that would only be probably identical.
+     * "write the files", not "show me a preview". Both dispatch `bake`, which is what golden-hashes,
+     * and this writes the PNGs off the sheet the reducer produced rather than off a second render
+     * that would only be probably identical.
      */
-    const onExport = useCallback(() => {
-        dispatch({type: 'bake'})
-    }, [])
-
     useEffect(() => {
-        if (state.sheet && state.exporting) {
+        if (state.exporting) {
             dispatch({type: 'written'})
-            void writeSheet(state.sheet, presetMaps(state, state.preset))
+            void writeExport(state)
         }
-    }, [state.sheet, state.exporting, state.preset])
+        // `exporting` alone: it is set by the one action that also bakes, so a sheet is always there
+        // when it is true, and re-running on every field the writer reads would write twice.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [state.exporting])
 
-    // The mockup's `C`, and the two shortcuts nobody looks up. A shortcut that only exists in the
-    // hint bar's caption is a caption.
+    /*
+     * The shortcuts. Which key means what is `keys.ts` — one table, no DOM — and what is left here
+     * is the listener and the four bindings that go to the disk instead of to the reducer.
+     */
+    const slicing = state.slice !== undefined
     useEffect(() => {
         const onKey = (event: KeyboardEvent): void => {
-            const target = event.target
-            const isTyping =
-                target instanceof HTMLElement
-                && (target.isContentEditable || ['INPUT', 'TEXTAREA'].includes(target.tagName))
-            if (isTyping) return
-            if (event.metaKey || event.ctrlKey) {
-                const key = event.key.toLowerCase()
-                if (key === 'z') dispatch({type: event.shiftKey ? 'redo' : 'undo'})
-                else if (key === 'c') dispatch({type: 'copy'})
-                else if (key === 'v') dispatch({type: 'paste'})
-                // `Ctrl+S` must be swallowed or the browser opens its own Save Page dialog over
-                // the top of ours. Shift is Save As, which always asks.
-                else if (key === 's') void doSave(!event.shiftKey)
-                else if (key === 'o') guarded('open')
-                else if (key === 'n') guarded('new')
-                else return
-                event.preventDefault()
+            const bound = keyAction(pressOf(event), slicing)
+            if (!bound) return
+            if (bound.swallow) event.preventDefault()
+            if (bound.kind === 'action') {
+                dispatch(bound.action)
                 return
             }
-            if (event.altKey) return
-            if (event.key === 'c' || event.key === 'C') capture()
-            if (event.key === 'Escape') dispatch({type: 'clear-selection'})
-            // The two brackets that every editor uses for "more of this" and "less of this".
-            if (event.key === 'f' || event.key === 'F') dispatch({type: 'focus'})
-            // `FEATURESET.md` §6's "press a key". S for slice, and it toggles.
-            if (event.key === 's' || event.key === 'S') {
-                dispatch({type: 'slice', on: state.slice === undefined})
-            }
-            if (event.key === ']') dispatch({type: 'grow-selection'})
-            if (event.key === '[') dispatch({type: 'shrink-selection'})
-            if (event.key === 'Delete' || event.key === 'Backspace') {
-                dispatch({type: 'transform', op: {kind: 'delete'}})
-            }
-            /*
-             * Nudging is along the axes of the *model*, not of the screen: a voxel-safe move is by
-             * whole cells of the grid, and mapping a screen direction onto a grid axis would have
-             * to round somewhere. Shift swaps the horizontal pair for the vertical one, which is
-             * the third axis a two-dimensional keyboard cannot otherwise reach.
-             */
-            const nudge = NUDGES[event.key]
-            if (nudge) {
-                event.preventDefault()
-                const [dx, dy, dz] = nudge
-                dispatch({
-                    type: 'transform',
-                    op: {kind: 'move', delta: event.shiftKey ? [0, 0, dx + dy] : [dx, dy, dz]}
-                })
-            }
+            if (bound.command === 'save') void doSave(true)
+            else if (bound.command === 'save-as') void doSave(false)
+            else guarded(bound.command)
         }
         document.addEventListener('keydown', onKey)
         return () => {
             document.removeEventListener('keydown', onKey)
         }
-    }, [capture, state.slice, doSave, guarded])
+    }, [slicing, doSave, guarded])
 
     /*
      * Closing the tab with unsaved work asks first.
@@ -463,10 +316,7 @@ export const App = ({
         <div className='app'>
             <Header
                 state={state}
-                onWorkspace={workspace => {
-                    dispatch({type: 'workspace', workspace})
-                }}
-                onExport={onExport}
+                dispatch={dispatch}
                 overwrites={files.overwrites}
                 onNew={() => {
                     guarded('new')
@@ -483,20 +333,10 @@ export const App = ({
                 onGenerate={() => {
                     guarded('generate')
                 }}
-                onUndo={() => {
-                    dispatch({type: 'undo'})
-                }}
-                onRedo={() => {
-                    dispatch({type: 'redo'})
-                }}
                 restores={snapshots(store)}
                 onRestore={key => {
-                    const text = store.get(key)
-                    const back = text ? loadDocument(text) : undefined
-                    // `unsaved`, because a snapshot is an edit that was autosaved and never
-                    // written to disk. Restoring one and calling it saved would let the artist
-                    // close the tab without a word.
-                    if (back) dispatch({type: 'open', document: {...back, unsaved: true}})
+                    const action = restoreSnapshot(store, key)
+                    if (action) dispatch(action)
                 }}
                 onForget={() => {
                     clearSnapshots(store)
@@ -507,52 +347,16 @@ export const App = ({
                 <div className='panel rail-panel'>
                     <ToolRail
                         tools={TOOLS}
-                        tool={state.tool}
-                        onTool={tool => {
-                            dispatch({type: 'tool', tool})
-                        }}
+                        state={state}
+                        dispatch={dispatch}
                     />
                 </div>
 
                 <div className='brush-column'>
                     <BrushPanel
-                        volume={volume}
-                        brush={state.brush}
-                        color={state.color}
-                        tool={state.tool}
-                        onBrush={brush => {
-                            dispatch({type: 'brush', brush})
-                        }}
-                        onColor={color => {
-                            dispatch({type: 'color', color})
-                        }}
-                        onEmissive={value => {
-                            dispatch({type: 'emissive', color: state.color, value})
-                        }}
-                        recent={state.recent}
-                        isLocked={state.paletteLocked}
-                        onLock={on => {
-                            dispatch({type: 'palette-lock', on})
-                        }}
-                        onAdd={() => {
-                            dispatch({type: 'palette-add'})
-                        }}
-                        onEyedropper={() => {
-                            dispatch({type: 'tool', tool: 'pick'})
-                        }}
-                        onPaletteColor={css => {
-                            dispatch({type: 'palette-color', color: state.color, css})
-                        }}
-                        onReplace={(from, to) => {
-                            dispatch({type: 'replace-color', from, to})
-                        }}
-                        onSelectColor={index => {
-                            dispatch({type: 'select-color', color: index})
-                        }}
+                        state={state}
+                        dispatch={dispatch}
                         onLoad={loadPalette}
-                        onSave={() => {
-                            writePalette(toHexPalette(volume.palette))
-                        }}
                     />
                 </div>
 
@@ -565,7 +369,13 @@ export const App = ({
                         event.preventDefault()
                         // Onto the locked drawing plane if there is one, and Front otherwise —
                         // the artist who locked a plane is working on it.
-                        dropImage(event.dataTransfer.files[0], event.shiftKey, state.plane ?? 1)
+                        void dropPicture(
+                            event.dataTransfer.files[0],
+                            event.shiftKey,
+                            state.plane ?? 1
+                        ).then(action => {
+                            if (action) dispatch(action)
+                        })
                     }}
                 >
                     <ReferenceLayer
@@ -633,158 +443,33 @@ export const App = ({
 
                 <div className='snap-column'>
                     <GridPanel
-                        grid={state.grid}
-                        edges={state.edges}
-                        snap={state.snap}
-                        invert={state.invert}
-                        voxelSize={Math.max(1, Math.round(state.cell / state.orbit.camera.zoom))}
-                        symmetry={state.symmetry}
-                        canRadial={canRadial(volume)}
-                        plane={state.plane}
-                        onGrid={on => {
-                            dispatch({type: 'grid', on})
-                        }}
-                        onEdges={on => {
-                            dispatch({type: 'edges', on})
-                        }}
-                        onSnap={on => {
-                            dispatch({type: 'snap', on})
-                        }}
-                        onInvert={on => {
-                            dispatch({type: 'invert', on})
-                        }}
-                        onSymmetry={(axis, on) => {
-                            dispatch({type: 'symmetry', axis, on})
-                        }}
-                        onPlane={axis => {
-                            dispatch({type: 'plane', axis})
-                        }}
-                        references={state.references}
-                        onReference={(plane, op) => {
-                            const found = state.references.find(entry => entry.plane === plane)
-                            if (!found) return
-                            if (op === 'lock') {
-                                dispatch({type: 'reference-lock', plane, on: !found.locked})
-                            } else if (op === 'drop') {
-                                dispatch({type: 'reference-drop', plane})
-                            } else {
-                                dispatch({
-                                    type: 'reference-opacity',
-                                    plane,
-                                    opacity: found.opacity + (op === 'brighter' ? 0.15 : -0.15)
-                                })
-                            }
-                        }}
+                        state={state}
+                        dispatch={dispatch}
                     />
                 </div>
 
                 <ViewsStrip
+                    state={state}
+                    dispatch={dispatch}
                     volume={shown}
-                    cameras={state.cameras}
-                    selected={state.selected}
-                    dragging={state.dragging}
-                    onSelect={id => {
-                        dispatch({type: 'select', id})
-                    }}
-                    onCapture={capture}
-                    onDuplicate={() => {
-                        dispatch({type: 'duplicate'})
-                    }}
-                    onDelete={id => {
-                        dispatch({type: 'delete', id})
-                    }}
-                    onDirections={count => {
-                        dispatch({type: 'directions', count})
-                    }}
-                    onAlign={() => {
-                        dispatch({type: 'align'})
-                    }}
-                    onDragStart={id => {
-                        dispatch({type: 'drag-camera', id})
-                    }}
-                    onDragOver={to => {
-                        if (state.dragging !== undefined) {
-                            dispatch({type: 'reorder-camera', id: state.dragging, to})
-                        }
-                    }}
-                    onDragEnd={() => {
-                        if (state.dragging !== undefined) {
-                            dispatch({type: 'drag-camera', id: undefined})
-                        }
-                    }}
                 />
 
                 <div className='panel app-rail'>
                     <ObjectsPanel
-                        objects={state.objects}
-                        // The whole grid, not `shown`: a hidden object still has a voxel count,
-                        // and a row that read "empty" because it was hidden would be a lie.
-                        volume={volume}
-                        query={state.search}
-                        canRemove={canRemove(state.objects)}
-                        blocking={blockingId}
-                        onQuery={query => {
-                            dispatch({type: 'search', query})
-                        }}
-                        onOp={op => {
-                            dispatch({type: 'object', op})
-                        }}
+                        state={state}
+                        dispatch={dispatch}
                     />
                     <RendersPanel
+                        state={state}
+                        dispatch={dispatch}
                         volume={shown}
                         camera={previewed}
-                        map={state.map}
-                        size={state.preview}
-                        onMap={map => {
-                            dispatch({type: 'map', map})
-                        }}
-                        onSize={size => {
-                            dispatch({type: 'preview', size})
-                        }}
                     />
                     <ExportPanel
+                        state={state}
+                        dispatch={dispatch}
                         volume={shown}
-                        cameras={state.cameras}
-                        cell={state.cell}
-                        sheet={state.sheet}
-                        preset={state.preset}
-                        presets={allPresets(state)}
-                        padding={state.padding}
-                        bounds={state.bounds}
-                        onPreset={preset => {
-                            dispatch({type: 'preset', preset})
-                        }}
-                        onCell={cell => {
-                            dispatch({type: 'cell', cell})
-                        }}
-                        onExport={onExport}
-                        onPadding={padding => {
-                            dispatch({type: 'padding', padding})
-                        }}
-                        onBounds={on => {
-                            dispatch({type: 'bounds', on})
-                        }}
-                        onSprites={() => {
-                            if (!state.sheet) return
-                            for (const [index, entry] of state.cameras.entries()) {
-                                void writeSprite(state.sheet, index, entry.name)
-                            }
-                        }}
-                        onMetadata={() => {
-                            if (!state.sheet) return
-                            writeMetadata(
-                                sheetMetadata(shown, state.cameras, state.sheet, state.bounds)
-                            )
-                        }}
-                        onSavePreset={() => {
-                            const chosen = globalThis.prompt('Name this preset')
-                            if (chosen === null) return
-                            dispatch({
-                                type: 'save-preset',
-                                name: chosen,
-                                maps: presetMaps(state, state.preset)
-                            })
-                        }}
+                        sheet={sheet}
                     />
                 </div>
             </div>
@@ -801,34 +486,34 @@ export const App = ({
              *     frame={state.frame}
              *     fps={state.fps}
              *     onFps={fps => {
-             *         dispatch({type: 'fps', fps})
+             *         dispatch({type: 'chrome', chrome: {fps}})
              *     }}
              * />
              */}
 
-            {asking && (
+            {dialog.kind === 'new' && (
                 <NewProjectDialog
                     onClose={() => {
-                        setAsking(false)
+                        take(closed())
                     }}
                     onCreate={(size, fresh) => {
-                        setAsking(false)
-                        doNew(size, fresh)
+                        take(closed())
+                        dispatch(newProject(files, size, fresh))
                     }}
                 />
             )}
 
-            {generating && (
+            {dialog.kind === 'generate' && (
                 <GenerateDialog
                     library={library}
                     {...(llama ? {llama} : {})}
                     scorer={scorer}
                     veto={veto}
                     onClose={() => {
-                        setGenerating(false)
+                        take(closed())
                     }}
                     onPick={(built, made, record) => {
-                        setGenerating(false)
+                        take(closed())
                         files.forget()
                         dispatch({type: 'generate', volume: built, name: made, record})
                     }}
@@ -836,24 +521,22 @@ export const App = ({
             )}
 
             <UnsavedDialog
-                isOpen={pending !== undefined}
+                isOpen={dialog.kind === 'unsaved'}
                 name={state.doc.name}
                 everSaved={state.doc.savedAt !== undefined}
                 onCancel={() => {
-                    setPending(undefined)
+                    take(closed())
                 }}
                 onDiscard={() => {
-                    const what = pending
-                    setPending(undefined)
-                    continueWith(what)
+                    take(proceed(askingAbout(dialog)))
                 }}
                 onSave={() => {
-                    const what = pending
-                    setPending(undefined)
+                    const what = askingAbout(dialog)
+                    take(closed())
                     // Only on a save that actually happened. A cancelled picker must not be a
                     // silent Discard — that is the exact click that loses the work.
                     void doSave(true).then(saved => {
-                        if (saved) continueWith(what)
+                        if (saved) take(proceed(what))
                     })
                 }}
             />

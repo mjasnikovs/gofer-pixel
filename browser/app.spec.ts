@@ -177,7 +177,7 @@ test('the depth view is a grey ramp and the voxel view is flat palette colour', 
      * handle, which is what the handle is for.
      */
     await page.evaluate(() => {
-        window.goferPixel.dispatch({type: 'map', map: 7})
+        window.goferPixel.dispatch({type: 'chrome', chrome: {map: 7}})
     })
     const ids = await viewportSummary(page)
     // car.vox has a handful of materials, and no face lighting means one colour per material.
@@ -217,7 +217,8 @@ test('one click bakes the sheet and the export grid carries its pixels', async (
     await ready(page)
     await page.getByRole('button', {name: 'Export sprite sheet'}).click()
 
-    const sheet = await page.evaluate(() => window.goferPixel.state.sheet)
+    // The baked sheet is derived, never stored — see `sheet/baked.ts`. Read it the way the app does.
+    const sheet = await page.evaluate(() => window.goferPixel.state.baked?.sheet)
     expect(sheet?.width).toBe(256)
     expect(sheet?.height).toBe(128)
 

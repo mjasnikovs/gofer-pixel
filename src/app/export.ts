@@ -1,0 +1,46 @@
+import {shownVolume} from '../doc/objects'
+import {sheetMetadata} from '../sheet/metadata'
+import {writeMetadata, writeSheet, writeSprite} from './download'
+import {currentSheet, presetMaps, type AppState} from './state'
+
+/**
+ * The three things an export writes, each as one call over the whole app state.
+ *
+ * They lived in `App.tsx` as click handlers, each opening with its own `if (!state.sheet) return`
+ * and each reaching for a different combination of the state to answer "which files, from what".
+ * That guard is the interesting part — a sheet can be stale, and writing a stale one is silent —
+ * so it belongs somewhere it is written once rather than three times inside JSX.
+ *
+ * Nothing here re-renders anything. The files are cut out of the sheet the reducer baked, so what
+ * lands in the downloads folder is byte-for-byte what the panel was previewing.
+ */
+
+/** The sheet's maps, as the current preset asks for them — the Export button. */
+export const writeExport = async (state: AppState): Promise<void> => {
+    const sheet = currentSheet(state)
+    if (!sheet) return
+    await writeSheet(sheet, presetMaps(state, state.preset))
+}
+
+/** One PNG per camera, cut out of the sheet — `FEATURESET.md` §17. */
+export const writeSprites = async (state: AppState): Promise<void> => {
+    const sheet = currentSheet(state)
+    if (!sheet) return
+    await Promise.all(state.cameras.map((entry, index) => writeSprite(sheet, index, entry.name)))
+}
+
+/**
+ * The JSON an engine reads next to the sheet — `FEATURESET.md` §37.
+ *
+ * The grid with hidden objects taken out, and *not* sliced, which is what this has always measured.
+ * The bake itself honours slice mode, so a sheet baked in slice mode has boxes described from a
+ * fuller model than the pixels came from. Left as it was: changing it changes exported files, which
+ * is a decision about the format rather than about where this code lives.
+ */
+export const writeSheetMetadata = (state: AppState): void => {
+    const sheet = currentSheet(state)
+    if (!sheet) return
+    writeMetadata(
+        sheetMetadata(shownVolume(state.volume, state.objects), state.cameras, sheet, state.bounds)
+    )
+}

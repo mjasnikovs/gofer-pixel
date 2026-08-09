@@ -1,10 +1,12 @@
+import type {Dispatch} from 'react'
 import {IconButton} from '@astryxdesign/core/IconButton'
 import {Text} from '@astryxdesign/core/Text'
-import {DIRECTION_COUNTS, type NamedCamera} from '../doc/cameras'
+import {DIRECTION_COUNTS} from '../doc/cameras'
 import type {Volume} from '../render/volume'
 import {CameraIcon, CopyIcon, PlusIcon, TrashIcon} from './icons'
 import {SectionHead} from './SectionHead'
 import {Thumbnail} from './Thumbnail'
+import type {AppAction, AppState} from './state'
 
 /**
  * The VIEWS strip that runs under the viewport in `docs/editor.png`, and the only camera list there
@@ -27,152 +29,149 @@ import {Thumbnail} from './Thumbnail'
  * the whole gesture is two handlers dispatching one action the reducer already had.
  */
 export const ViewsStrip = ({
-    volume,
-    cameras,
-    selected,
-    dragging,
-    onSelect,
-    onCapture,
-    onDuplicate,
-    onDelete,
-    onDirections,
-    onAlign,
-    onDragStart,
-    onDragOver,
-    onDragEnd
+    state,
+    dispatch,
+    volume
 }: {
+    state: AppState
+    dispatch: Dispatch<AppAction>
+    /** The grid with hidden objects taken out — memoised in `App.tsx`. See `ExportPanel`. */
     volume: Volume
-    cameras: readonly NamedCamera[]
-    selected: string | undefined
-    dragging: string | undefined
-    onSelect: (id: string) => void
-    onCapture: () => void
-    onDuplicate: () => void
-    onDelete: (id: string) => void
-    onDirections: (count: number) => void
-    onAlign: () => void
-    onDragStart: (id: string) => void
-    onDragOver: (to: number) => void
-    onDragEnd: () => void
-}) => (
-    <div className='panel views-panel'>
-        <SectionHead title='Views'>
-            {DIRECTION_COUNTS.map(count => (
+}) => {
+    const {cameras, selected, dragging} = state
+    const onCapture = (): void => {
+        dispatch({type: 'capture'})
+    }
+    /** A drag that ends anywhere — off the strip, on a row, or with the pointer released. */
+    const onDragEnd = (): void => {
+        if (dragging !== undefined) dispatch({type: 'drag-camera', id: undefined})
+    }
+    return (
+        <div className='panel views-panel'>
+            <SectionHead title='Views'>
+                {DIRECTION_COUNTS.map(count => (
+                    <button
+                        key={count}
+                        type='button'
+                        className='symmetry-axis'
+                        aria-label={`Create ${String(count)} directions`}
+                        title={`Replace the list with ${String(count)} cameras around one pivot`}
+                        onClick={() => {
+                            dispatch({type: 'directions', count})
+                        }}
+                    >
+                        {count}
+                    </button>
+                ))}
                 <button
-                    key={count}
                     type='button'
                     className='symmetry-axis'
-                    aria-label={`Create ${String(count)} directions`}
-                    title={`Replace the list with ${String(count)} cameras around one pivot`}
+                    aria-label='Align the view to the nearest stop'
+                    title='Turn the view to the nearest eighth and the nearest pitch'
                     onClick={() => {
-                        onDirections(count)
+                        dispatch({type: 'align'})
                     }}
                 >
-                    {count}
+                    ⌖
                 </button>
-            ))}
-            <button
-                type='button'
-                className='symmetry-axis'
-                aria-label='Align the view to the nearest stop'
-                title='Turn the view to the nearest eighth and the nearest pitch'
-                onClick={onAlign}
-            >
-                ⌖
-            </button>
-            <IconButton
-                label='Capture view as a camera'
-                tooltip='Capture the current view'
-                icon={<PlusIcon />}
-                size='sm'
-                variant='ghost'
-                onClick={onCapture}
-            />
-            <IconButton
-                label='Duplicate camera'
-                tooltip='Duplicate the selected camera'
-                icon={<CopyIcon />}
-                size='sm'
-                variant='ghost'
-                isDisabled={selected === undefined}
-                onClick={onDuplicate}
-            />
-            <IconButton
-                label='Delete camera'
-                tooltip='Delete the selected camera'
-                icon={<TrashIcon />}
-                size='sm'
-                variant='ghost'
-                isDisabled={selected === undefined}
-                onClick={() => {
-                    if (selected !== undefined) onDelete(selected)
-                }}
-            />
-        </SectionHead>
-        <div
-            className='views-strip'
-            role='radiogroup'
-            aria-label='Views'
-            // A pointer that leaves the strip mid-drag has dropped the tile; the alternative is a
-            // drag that survives the mouse going somewhere else entirely.
-            onPointerLeave={onDragEnd}
-        >
-            {cameras.map((entry, index) => (
-                <button
-                    key={entry.id}
-                    type='button'
-                    role='radio'
-                    aria-checked={entry.id === selected}
-                    title={`${entry.name} — click to look through it, drag to reorder the sheet`}
-                    className='view-tile'
-                    data-selected={entry.id === selected || undefined}
-                    data-dragging={entry.id === dragging || undefined}
+                <IconButton
+                    label='Capture view as a camera'
+                    tooltip='Capture the current view'
+                    icon={<PlusIcon />}
+                    size='sm'
+                    variant='ghost'
+                    onClick={onCapture}
+                />
+                <IconButton
+                    label='Duplicate camera'
+                    tooltip='Duplicate the selected camera'
+                    icon={<CopyIcon />}
+                    size='sm'
+                    variant='ghost'
+                    isDisabled={selected === undefined}
                     onClick={() => {
-                        onSelect(entry.id)
+                        dispatch({type: 'duplicate'})
                     }}
-                    onPointerDown={() => {
-                        onDragStart(entry.id)
+                />
+                <IconButton
+                    label='Delete camera'
+                    tooltip='Delete the selected camera'
+                    icon={<TrashIcon />}
+                    size='sm'
+                    variant='ghost'
+                    isDisabled={selected === undefined}
+                    onClick={() => {
+                        if (selected !== undefined) dispatch({type: 'delete', id: selected})
                     }}
-                    onPointerEnter={() => {
-                        if (dragging !== undefined && dragging !== entry.id) onDragOver(index)
-                    }}
-                    onPointerUp={onDragEnd}
+                />
+            </SectionHead>
+            <div
+                className='views-strip'
+                role='radiogroup'
+                aria-label='Views'
+                // A pointer that leaves the strip mid-drag has dropped the tile; the alternative is a
+                // drag that survives the mouse going somewhere else entirely.
+                onPointerLeave={onDragEnd}
+            >
+                {cameras.map((entry, index) => (
+                    <button
+                        key={entry.id}
+                        type='button'
+                        role='radio'
+                        aria-checked={entry.id === selected}
+                        title={`${entry.name} — click to look through it, drag to reorder the sheet`}
+                        className='view-tile'
+                        data-selected={entry.id === selected || undefined}
+                        data-dragging={entry.id === dragging || undefined}
+                        onClick={() => {
+                            dispatch({type: 'select', id: entry.id})
+                        }}
+                        onPointerDown={() => {
+                            dispatch({type: 'drag-camera', id: entry.id})
+                        }}
+                        onPointerEnter={() => {
+                            if (dragging !== undefined && dragging !== entry.id) {
+                                dispatch({type: 'reorder-camera', id: dragging, to: index})
+                            }
+                        }}
+                        onPointerUp={onDragEnd}
+                    >
+                        <span className='view-shot'>
+                            <Thumbnail
+                                volume={volume}
+                                camera={entry.camera}
+                                size={96}
+                            />
+                            {entry.id === selected ?
+                                <span className='view-badge'>
+                                    <CameraIcon />
+                                </span>
+                            :   undefined}
+                        </span>
+                        <Text
+                            type='supporting'
+                            maxLines={1}
+                        >
+                            {entry.name}
+                        </Text>
+                    </button>
+                ))}
+
+                <button
+                    type='button'
+                    className='view-add'
+                    title='Store the current view as a new camera'
+                    onClick={onCapture}
                 >
-                    <span className='view-shot'>
-                        <Thumbnail
-                            volume={volume}
-                            camera={entry.camera}
-                            size={96}
-                        />
-                        {entry.id === selected ?
-                            <span className='view-badge'>
-                                <CameraIcon />
-                            </span>
-                        :   undefined}
-                    </span>
+                    <PlusIcon />
                     <Text
                         type='supporting'
-                        maxLines={1}
+                        color='disabled'
                     >
-                        {entry.name}
+                        Capture view
                     </Text>
                 </button>
-            ))}
-
-            <button
-                type='button'
-                className='view-add'
-                title='Store the current view as a new camera'
-                onClick={onCapture}
-            >
-                <PlusIcon />
-                <Text
-                    type='supporting'
-                    color='disabled'
-                >
-                    Capture view
-                </Text>
-            </button>
+            </div>
         </div>
-    </div>
-)
+    )
+}

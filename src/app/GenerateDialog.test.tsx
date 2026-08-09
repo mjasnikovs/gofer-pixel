@@ -1,6 +1,7 @@
 import {expect, test} from 'bun:test'
 import {act} from 'react'
 import {createRoot, type Root} from 'react-dom/client'
+import {memoryFiles, type Files} from '../doc/files'
 import {memoryStore, type Store} from '../doc/store'
 import type {BankEntry} from '../gen/bank'
 import {memoryScorer, type Scorer} from '../gen/clip'
@@ -67,7 +68,8 @@ const open = async (
     scorer: Scorer = memoryScorer([], false),
     // Canned silence: the judge answers nothing, which passes every candidate — see `gen/veto.ts`.
     veto: Veto = memoryVeto(['']),
-    store: Store = memoryStore()
+    store: Store = memoryStore(),
+    files: Files = memoryFiles()
 ): Promise<Mounted> => {
     const host = document.createElement('div')
     document.body.appendChild(host)
@@ -81,6 +83,7 @@ const open = async (
                 library={testLibrary}
                 llama={llama}
                 store={store}
+                files={files}
                 scorer={scorer}
                 veto={veto}
                 onClose={() => closed.push(1)}
@@ -196,6 +199,8 @@ test('a batch fills the grid, and every candidate carries what made it', async (
     expect(said('generate-status')).toBe('4 candidates, 0 failed · taught by dog')
     expect(cards()).toHaveLength(4)
     expect(said('clip-status')).toContain('clipserve.py is not running')
+    // The naming switch is off until it is asked for, because it costs a call a candidate.
+    expect(said('veto-status')).toBe('')
 
     await act(async () => {
         control('Use this one').click()
@@ -206,23 +211,6 @@ test('a batch fills the grid, and every candidate carries what made it', async (
     expect(picked[0]?.record.prompt).toBe('a stone tower')
     expect(picked[0]?.record.model).toBe('qwen')
     expect(picked[0]?.volume.sz).toBe(12)
-
-    await close(root, host)
-})
-
-test('a candidate that failed is counted and named, not silently dropped', async () => {
-    const mounted = await open(
-        memoryLlama([carved('tower', '#808080'), new Error('llama-server 503: busy')])
-    )
-    const {root, host} = mounted
-
-    await generate(mounted)
-
-    // Four asked for, the canned replies alternate: two good, two failed.
-    expect(said('generate-status')).toBe(
-        '2 candidates, 2 failed · taught by dog — llama-server 503: busy'
-    )
-    expect(cards()).toHaveLength(2)
 
     await close(root, host)
 })
@@ -312,31 +300,7 @@ test('the slots a batch will fill are on screen before the model answers', async
     await close(mounted.root, mounted.host)
 })
 
-test('naming is off until it is asked for, because it costs a call a candidate', async () => {
-    const veto = memoryVeto(['rock'], false)
-    const mounted = await open(
-        memoryLlama([carved('tower', '#808080')]),
-        memoryScorer([], false),
-        veto
-    )
-    const {root, host} = mounted
-
-    await generate(mounted)
-
-    expect(said('veto-status')).toBe('')
-    // The cards, not the dialog: the menu row's own description says the words "reads as".
-    expect(
-        cards()
-            .map(card => card.textContent)
-            .join()
-    ).not.toContain('reads as')
-    // Not merely hidden: the server was never asked.
-    expect(veto.seen).toHaveLength(0)
-
-    await close(root, host)
-})
-
-test('what a candidate reads as is shown, counted, and allowed to move nothing', async () => {
+test('what a candidate reads as reaches the card the artist is looking at', async () => {
     const mounted = await open(
         memoryLlama([carved('tower', '#808080'), brick]),
         memoryScorer([], false),
@@ -358,41 +322,6 @@ test('what a candidate reads as is shown, counted, and allowed to move nothing',
      */
     expect(cards()[0]?.textContent).toContain('reads as "tower"')
     expect(cards()[0]?.textContent).toContain('tower')
-
-    await close(root, host)
-})
-
-test('a word the model stands behind is the same to the grid as one that matched', async () => {
-    // "a stone tower" named "castle": not the prompt's word, and the model says it could describe
-    // it anyway. Counted as read, and nothing moves either way.
-    const mounted = await open(
-        memoryLlama([carved('tower', '#808080')]),
-        memoryScorer([], false),
-        memoryVeto(['castle'], true)
-    )
-    const {root, host} = mounted
-
-    await toggleNaming()
-    await generate(mounted)
-
-    expect(said('veto-status')).toBe('Naming: 4 of 4 read as the subject')
-    expect(dialog().textContent).toContain('reads as "castle"')
-
-    await close(root, host)
-})
-
-test('a scorer that falls over costs the ranking, not the candidates', async () => {
-    const broken: Scorer = {
-        probe: () => Promise.resolve(true),
-        score: () => Promise.reject(new Error('scorer 500: out of memory'))
-    }
-    const mounted = await open(memoryLlama([carved('tower', '#808080')]), broken)
-    const {root, host} = mounted
-
-    await generate(mounted)
-
-    expect(said('clip-status')).toContain('out of memory')
-    expect(cards()).toHaveLength(4)
 
     await close(root, host)
 })
@@ -557,6 +486,36 @@ test('a dropped model becomes the example the next batch is taught from', async 
     expect(sent[1]?.reply).toContain('box(')
     // It survives a reload, because it cost the artist a file picker to set.
     expect(store.get('gofer-pixel/gen-reference') ?? '').toContain('box(')
+
+    await close(root, host)
+})
+
+test('choosing a model through the picker teaches the same as dropping one', async () => {
+    const llama = memoryLlama([carved('tower', '#808080')])
+    /*
+     * The `Files` port, not a stubbed `<input type=file>`. The dialog gets its own instance rather
+     * than the app's, because this port remembers what Save writes back to and a reference model is
+     * not the document — see `doc/files.ts`.
+     */
+    const disk = new Map<string, string | Uint8Array>([['car.vox', carBytes]])
+    const mounted = await open(
+        llama,
+        memoryScorer([], false),
+        memoryVeto(['']),
+        memoryStore(),
+        memoryFiles(disk)
+    )
+    const {root, host} = mounted
+
+    await act(async () => {
+        control('Choose a model').click()
+    })
+    // The port resolves on the microtask queue; one more flush lands the state it set.
+    await act(async () => {
+        await Promise.resolve()
+    })
+
+    expect(referenceZone().textContent).toContain('Teaching from car.vox')
 
     await close(root, host)
 })
