@@ -5,6 +5,7 @@ import {readReference, type Reference} from './reference'
 import {NO_SYMMETRY, type Symmetry} from './symmetry'
 import type {SheetMap} from '../sheet/sheet'
 import type {Volume} from '../render/volume'
+import {fromBase64, toBase64} from '../image/base64'
 
 /**
  * The document as text — `FEATURESET.md` §32's autosave, crash recovery and snapshots all need one
@@ -103,22 +104,6 @@ const unrle = (packed: Uint8Array, length: number): Uint8Array => {
         }
     }
     return out
-}
-
-/** Chunked, because `String.fromCharCode(...bytes)` on a megabyte blows the argument stack. */
-const toBase64 = (bytes: Uint8Array): string => {
-    let binary = ''
-    for (let i = 0; i < bytes.length; i += 0x8000) {
-        binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
-    }
-    return btoa(binary)
-}
-
-const fromBase64 = (text: string): Uint8Array => {
-    const binary = atob(text)
-    const bytes = new Uint8Array(binary.length)
-    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i)
-    return bytes
 }
 
 const packed = (bytes: Uint8Array): string => toBase64(rle(bytes))

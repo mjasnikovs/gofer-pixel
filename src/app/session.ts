@@ -114,7 +114,8 @@ export const saveProject = async (
  * document is the one outcome `doc/save.ts` exists to prevent.
  */
 export const openProject = async (files: Files): Promise<AppAction | undefined> => {
-    const picked = await files.open(PROJECT_ACCEPT)
+    // The one read in the app that becomes the file Save writes back to — see `ReadFor`.
+    const picked = await files.open(PROJECT_ACCEPT, {remember: true})
     if (!picked) return undefined
     if (picked.name.toLowerCase().endsWith('.vox')) {
         files.forget()
@@ -149,7 +150,7 @@ export const newProject = (
  * replacing `HTMLInputElement.prototype.click`.
  */
 export const loadPalette = async (files: Files): Promise<AppAction | undefined> => {
-    const picked = await files.open(PALETTE_ACCEPT, 'Palette')
+    const picked = await files.open(PALETTE_ACCEPT, {description: 'Palette'})
     return picked ? {type: 'palette-load', text: picked.text} : undefined
 }
 

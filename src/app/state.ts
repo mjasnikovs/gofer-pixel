@@ -12,7 +12,7 @@ import {
 import {beginEdit, commitEdit, NO_CELLS, writeCells, writeOwned, type Draft} from '../doc/edits'
 import type {GenerationRecord} from '../gen/llama'
 import type {Reference} from '../doc/reference'
-import {DEFAULT_OUTPUT, type Document} from '../doc/save'
+import {DEFAULT_OUTPUT, type Document, type SavedOutput} from '../doc/save'
 import {
     addObject,
     duplicateOffset,
@@ -82,6 +82,7 @@ import {
     openDraft,
     previewVolume,
     SELECTS,
+    slicedFor,
     visible,
     TOOLS,
     WRITES,
@@ -119,7 +120,7 @@ import {apply as applyOrbit, type OrbitEvent, type ViewportPointer} from '../vie
  */
 export {MAX_BRUSH, SHAPES}
 export type {Brush, Shape}
-export {GHOST_CELLS, previewVolume, TOOLS, USES_BRUSH}
+export {GHOST_CELLS, previewVolume, slicedFor, TOOLS, USES_BRUSH}
 export type {Band, Blocked, Drag, Hover, HoverKind, Stroke, Tool}
 
 /**
@@ -193,9 +194,9 @@ export interface DocumentIdentity {
  * the undo history.** `CHROME_IS_NOT_SAVED` below turns that sentence into something the compiler
  * checks, so a field cannot be quietly promoted into the document by adding it to two lists.
  *
- * The near-misses are worth naming, because they look like chrome and are not. `cell`, `padding`,
- * `bounds`, `preset` and `presets` all travel in the `.gpix` — they decide what comes out of an
- * export, so they are document. `preview` is the one that separates the two: it is the size the
+ * The near-miss is worth naming, because it looks like chrome and is not. Everything in `output`
+ * travels in the `.gpix` — it decides what comes out of an export, so it is document, and it got
+ * this same fold for that reason. `preview` is the one that separates the two: it is the size the
  * Renders panel draws at, and it is deliberately *not* the sheet's `cell`, because the question it
  * answers is "does this detail survive 16 px" and answering it must not change what gets exported.
  */
@@ -223,6 +224,19 @@ export interface Chrome {
     readonly invert: boolean
     readonly workspace: 'model' | 'render'
     readonly fps: number
+    /**
+     * The row being dragged along a list, if one is — the views strip's camera and the objects
+     * panel's object. `FEATURESET.md` §16.
+     *
+     * Chrome, and it takes the definition exactly: a half-finished gesture is never in the save
+     * file and never in the undo history. The camera's half used to be a top-level field with its
+     * own `drag-camera` action; the object's half was a `useState` inside `ObjectsPanel`, so one
+     * gesture — pointerdown arms, pointerenter reorders, pointerup and pointerleave disarm, with
+     * the same comment written twice about a drag that outlives the mouse — was tested once in
+     * `state.test.ts` at four milliseconds and once through a two-hundred-millisecond window.
+     */
+    readonly draggingCamera: string | undefined
+    readonly draggingObject: number | undefined
 }
 
 /**
@@ -255,16 +269,19 @@ export interface AppState extends Gesture, Chrome {
      * outlive a nudge of the view.
      */
     readonly previewed: string | undefined
-    /** The camera being dragged along the views strip, if one is — `FEATURESET.md` §16. */
-    readonly dragging: string | undefined
-    /** Edge of one sprite in the sheet, in pixels. */
-    readonly cell: number
-    /** Transparent pixels between cells and around the sheet — `FEATURESET.md` §16. */
-    readonly padding: number
-    /** Whether the metadata JSON carries each sprite's opaque box — `FEATURESET.md` §37. */
-    readonly bounds: boolean
-    /** Presets the artist saved, on top of the built-in ones — `FEATURESET.md` §38. */
-    readonly presets: readonly {name: string; maps: readonly SheetMap[]}[]
+    /**
+     * What comes out of an export — `doc/save.ts`'s own `SavedOutput`, whole.
+     *
+     * One field rather than five, for the reason `Chrome` is one field rather than nine: the five
+     * were flattened here, unpacked in `initialState`, rebuilt in `asDocument`, listed one by one
+     * in `DOCUMENT_FIELDS` and read again by `sheetKey` — the same concept written out five times,
+     * and served by four action types whose whole implementation was `{...state, x: action.x}`.
+     *
+     * It is the *format's* type and not a copy of it, so a field cannot be added to one and
+     * forgotten in the other. Unlike `Chrome`, every field in here travels in the `.gpix` and marks
+     * the document dirty — which is exactly the distinction `Chrome`'s doc comment draws.
+     */
+    readonly output: SavedOutput
     /** Pixel art to build against, one image per plane — `FEATURESET.md` §33. */
     readonly references: readonly Reference[]
     /**
@@ -294,7 +311,6 @@ export interface AppState extends Gesture, Chrome {
      * exactly why it needs a lock instead.
      */
     readonly paletteLocked: boolean
-    readonly preset: string
     readonly frame: number
 }
 
@@ -320,13 +336,18 @@ export type AppAction =
     | {type: 'capture'}
     | {type: 'duplicate'}
     | {type: 'delete'; id: string}
-    | {type: 'cell'; cell: number}
-    | {type: 'padding'; padding: number}
-    | {type: 'bounds'; on: boolean}
+    /**
+     * Anything about what an export writes — see `AppState.output`. One action for `cell`,
+     * `padding`, `bounds` and `preset`, because each of the four cases was the same assignment.
+     *
+     * `presets` is deliberately not set through here. Saving one and dropping one have rules — a
+     * built-in name cannot be taken, saving over a name replaces it, dropping the selected one
+     * falls back — and a `Partial` that could carry the whole list would let a caller past them.
+     */
+    | {type: 'output'; output: Omit<Partial<SavedOutput>, 'presets'>}
     | {type: 'save-preset'; name: string; maps: readonly SheetMap[]}
     | {type: 'drop-preset'; name: string}
     | {type: 'reorder-camera'; id: string; to: number}
-    | {type: 'drag-camera'; id: string | undefined}
     | {type: 'reference'; plane: Axis; url: string}
     | {type: 'reference-opacity'; plane: Axis; opacity: number}
     | {type: 'reference-lock'; plane: Axis; on: boolean}
@@ -349,7 +370,6 @@ export type AppAction =
     | {type: 'palette-add'}
     | {type: 'palette-load'; text: string}
     | {type: 'replace-color'; from: number; to: number}
-    | {type: 'preset'; preset: string}
     /** Anything the artist sees but does not ship — see `Chrome`. One action for all nine. */
     | {type: 'chrome'; chrome: Partial<Chrome>}
     | {type: 'unaim'}
@@ -379,9 +399,9 @@ const sheetKey = (state: AppState): SheetKey => ({
     volume: state.volume,
     objects: state.objects,
     cameras: state.cameras,
-    cell: state.cell,
-    padding: state.padding,
-    maps: presetMaps(state, state.preset),
+    cell: state.output.cell,
+    padding: state.output.padding,
+    maps: presetMaps(state, state.output.preset),
     slice: state.slice,
     plane: state.plane
 })
@@ -397,12 +417,12 @@ export const currentSheet = (state: AppState): Sheet | undefined =>
     sheetFor(state.baked, sheetKey(state))
 
 export const presetMaps = (state: AppState, name: string): readonly SheetMap[] =>
-    [...PRESETS, ...state.presets].find(entry => entry.name === name)?.maps ?? PRESETS[0].maps
+    allPresets(state).find(entry => entry.name === name)?.maps ?? PRESETS[0].maps
 
 /** Built-in and saved, in the order the selector lists them. */
 export const allPresets = (
     state: AppState
-): readonly {name: string; maps: readonly SheetMap[]}[] => [...PRESETS, ...state.presets]
+): readonly {name: string; maps: readonly SheetMap[]}[] => [...PRESETS, ...state.output.presets]
 
 /**
  * The three-quarter view, not the front one. A straight-on elevation of a voxel model is a
@@ -443,13 +463,7 @@ export const initialState = (source: Volume, name: string, opened?: OpenedDocume
     const volume = {...source, palette: freshenPalette(source)}
     const cameras = opened?.cameras.length ? [...opened.cameras] : eightDirections(volume)
     const first = opening(cameras)
-    /*
-     * A version-1 file, and every document that was never saved, carries `DEFAULT_OUTPUT` — whose
-     * `preset` is the empty string, because the format may not know the app's preset names. That
-     * empty string becomes the first built-in preset here, which is the one place that mapping
-     * belongs.
-     */
-    const output = opened?.output
+    const saved = opened?.output
     return {
         doc: {name, savedAt: undefined, dirty: opened?.unsaved === true},
         volume,
@@ -457,16 +471,25 @@ export const initialState = (source: Volume, name: string, opened?: OpenedDocume
         cameras,
         selected: first?.id,
         previewed: first?.id,
-        dragging: undefined,
         orbit: {
             camera: first?.camera ?? createCamera(volume, 0, ISOMETRIC_PITCH),
             gesture: undefined
         },
         map: MODE_COLOR,
-        cell: output?.cell ?? 64,
-        padding: output?.padding ?? 0,
-        bounds: output?.bounds ?? false,
-        presets: output?.presets ?? [],
+        output: {
+            cell: saved?.cell ?? 64,
+            padding: saved?.padding ?? 0,
+            bounds: saved?.bounds ?? false,
+            presets: saved?.presets ?? [],
+            /*
+             * A version-1 file, and every document that was never saved, carries `DEFAULT_OUTPUT`
+             * — whose `preset` is the empty string, because the format may not know the app's
+             * preset names. That empty string becomes the first built-in preset here, which is the
+             * one place that mapping belongs.
+             */
+            preset:
+                saved?.preset === undefined || saved.preset === '' ? PRESETS[0].name : saved.preset
+        },
         references: opened?.references ?? [],
         preview: 64,
         baked: undefined,
@@ -496,9 +519,9 @@ export const initialState = (source: Volume, name: string, opened?: OpenedDocume
         snap: true,
         invert: false,
         workspace: 'model',
-        preset:
-            output?.preset === undefined || output.preset === '' ? PRESETS[0].name : output.preset,
         fps: 24,
+        draggingCamera: undefined,
+        draggingObject: undefined,
         frame: 1
     }
 }
@@ -926,15 +949,27 @@ const step = (state: AppState, action: AppAction): AppState => {
             }
         }
 
-        case 'cell':
-            return {...state, cell: action.cell}
-
-        case 'padding':
-            return {...state, padding: Math.max(0, Math.round(action.padding))}
-
-        case 'bounds':
-            // Only the JSON changes, so the baked sheet is still good.
-            return {...state, bounds: action.on}
+        /*
+         * What an export writes — see `AppState.output`. Four cases became one, and unlike
+         * `chrome` the fold is *not* safe by being inert: every field in here travels in the
+         * `.gpix` and three of the four are in `sheetKey`, so this action marks the document dirty
+         * and stales the bake. `bounds` is the exception and needs no special case — it is not in
+         * `sheetKey`, so `sheetFor` keeps the sheet on its own.
+         *
+         * The padding clamp lives here rather than in the panel, so the bound is a property of the
+         * document and holds however the value was set.
+         */
+        case 'output': {
+            const {padding} = action.output
+            return {
+                ...state,
+                output: {
+                    ...state.output,
+                    ...action.output,
+                    ...(padding === undefined ? {} : {padding: Math.max(0, Math.round(padding))})
+                }
+            }
+        }
 
         /*
          * A preset the artist saved — `FEATURESET.md` §38. Saving over one that exists replaces it,
@@ -944,26 +979,30 @@ const step = (state: AppState, action: AppAction): AppState => {
         case 'save-preset': {
             const name = action.name.trim()
             if (name === '' || PRESETS.some(entry => entry.name === name)) return state
-            const kept = state.presets.filter(entry => entry.name !== name)
-            return {...state, presets: [...kept, {name, maps: action.maps}], preset: name}
-        }
-
-        case 'drop-preset': {
-            const presets = state.presets.filter(entry => entry.name !== action.name)
-            if (presets.length === state.presets.length) return state
+            const kept = state.output.presets.filter(entry => entry.name !== name)
             return {
                 ...state,
-                presets,
-                preset: state.preset === action.name ? PRESETS[0].name : state.preset
+                output: {
+                    ...state.output,
+                    presets: [...kept, {name, maps: action.maps}],
+                    preset: name
+                }
             }
         }
 
-        /*
-         * Reordering the camera list is reordering the *sheet*: the cells are laid out in list
-         * order, so this is `FEATURESET.md` §16's "drag to reorder" and it invalidates the bake.
-         */
-        case 'drag-camera':
-            return {...state, dragging: action.id}
+        case 'drop-preset': {
+            const presets = state.output.presets.filter(entry => entry.name !== action.name)
+            if (presets.length === state.output.presets.length) return state
+            return {
+                ...state,
+                output: {
+                    ...state.output,
+                    presets,
+                    preset:
+                        state.output.preset === action.name ? PRESETS[0].name : state.output.preset
+                }
+            }
+        }
 
         /*
          * One reference per plane. Dropping a second front view replaces the first, because two
@@ -1027,7 +1066,7 @@ const step = (state: AppState, action: AppAction): AppState => {
                 ...imported,
                 doc: {...imported.doc, dirty: true},
                 references: state.references,
-                presets: state.presets
+                output: state.output
             }
         }
 
@@ -1052,7 +1091,7 @@ const step = (state: AppState, action: AppAction): AppState => {
                 // The artist's reference art and their saved export presets belong to the desk
                 // rather than to the model, and a new model is not a reason to lose either.
                 references: state.references,
-                presets: state.presets
+                output: state.output
             }
         }
 
@@ -1188,9 +1227,6 @@ const step = (state: AppState, action: AppAction): AppState => {
             return {...state, volume: {...state.volume, emissive}}
         }
 
-        case 'preset':
-            return {...state, preset: action.preset}
-
         /*
          * Everything the artist sees and does not ship — see `Chrome`. Nine cases became one, and
          * the fold is safe precisely because none of them can forget anything: no history to
@@ -1208,12 +1244,8 @@ const DOCUMENT_FIELDS = [
     'cameras',
     'references',
     'symmetry',
-    // The export settings — `SavedOutput`.
-    'cell',
-    'padding',
-    'bounds',
-    'preset',
-    'presets'
+    // Everything an export writes, in one field — `SavedOutput`. It used to be five entries here.
+    'output'
 ] as const satisfies readonly (keyof AppState)[]
 
 /**
@@ -1244,13 +1276,7 @@ export const asDocument = (state: AppState): Document => ({
     // Not in `DOCUMENT_FIELDS`, and deliberately: `origin` only ever changes in the one action that
     // replaces the whole document, so it can never be the field that makes a document unsaved.
     origin: state.origin,
-    output: {
-        cell: state.cell,
-        padding: state.padding,
-        bounds: state.bounds,
-        preset: state.preset,
-        presets: state.presets
-    }
+    output: state.output
 })
 
 export const reduce = (state: AppState, action: AppAction): AppState => {

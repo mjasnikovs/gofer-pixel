@@ -4,6 +4,7 @@ import {overallScore, scoreModel, type ModelScores} from './score'
 import {judge, type Veto, type Verdict} from './veto'
 import {rankingViews} from './views'
 import type {WorkedExample} from './bank'
+import {teachingSet} from './teaching'
 
 /**
  * One batch of candidates, end to end: ask the model N times, score what lands, optionally ask what
@@ -166,11 +167,8 @@ export const runBatch = async (
         onPick: ids => {
             publish({taughtBy: [...ids, ...(reference ? [OWN_MODEL] : [])]})
         },
-        /*
-         * The bank first, then the dropped model. `teach` reverses the bank's picks so the closest
-         * sits nearest the prompt; the artist's own model is appended after that, nearer still.
-         */
-        teach: ids => [...(teach?.(ids) ?? []), ...(reference ? [reference] : [])],
+        // Which examples, in what order, within what budget — all four rules are `teaching.ts`.
+        teach: ids => teachingSet(teach?.(ids) ?? [], reference),
         onAttempt: (attempt, at) => {
             if (attempt.ok) {
                 const scores = scoreModel(attempt.candidate.volume)

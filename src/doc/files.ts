@@ -38,19 +38,32 @@ const picked = (name: string, bytes: Uint8Array): PickedFile => ({
     text: new TextDecoder().decode(bytes)
 })
 
+/**
+ * What a read is for, as far as this port is concerned.
+ *
+ * `remember` is the whole of it, and it is a *caller's* fact rather than the adapter's. Both
+ * implementations used to sniff the extension — `if (name.endsWith('.gpix')) held = handle` —
+ * which meant one rule written twice, and it meant a `.gpix` opened as the generate dialog's
+ * reference model quietly became the file Save wrote the project back over. Only the project
+ * picker asks to be remembered, so only the project picker says so.
+ */
+export interface ReadFor {
+    /** What the native picker calls this file kind in its own filter row. Nothing else. */
+    readonly description?: string
+    /** Whether this read becomes the file `save(…, reuse)` writes back to. Default false. */
+    readonly remember?: boolean
+}
+
 export interface Files {
     /**
      * `accept` is a comma-separated extension list, as an `<input accept>` takes.
      * `undefined` when the artist cancels, which is not an error and must not read like one.
      *
      * Three things read a file off the artist's disk — the project picker, the palette loader and
-     * the generate dialog's reference model — and all three come through here. `description` is
-     * what the native picker calls the file kind in its own filter row; it changes nothing else.
-     *
-     * Opening a project remembers it as the file Save writes back to. Opening anything else does
-     * not touch that, so loading a palette cannot make the next Save ask.
+     * the generate dialog's reference model — and all three come through here. Exactly one of them
+     * passes `remember`, which is why all three can share one instance of this port.
      */
-    open: (accept: string, description?: string) => Promise<PickedFile | undefined>
+    open: (accept: string, read?: ReadFor) => Promise<PickedFile | undefined>
     /**
      * Write `text` as `name`. `reuse` asks to write back over the file this port last opened or
      * saved, without a dialog; it is honoured only when `overwrites` is true and there is such a
@@ -186,20 +199,20 @@ export const browserFiles = (): Files => {
             held = undefined
         },
 
-        open: async (accept, description = 'gofer-pixel project') => {
+        open: async (accept, read) => {
             const showOpen = picker.showOpenFilePicker
             if (!showOpen) return inputOpen(accept)
             try {
                 const [handle] = await showOpen({
-                    types: pickerTypes(accept, description),
+                    types: pickerTypes(accept, read?.description ?? 'gofer-pixel project'),
                     multiple: false
                 })
                 if (!handle) return undefined
                 const file = await handle.getFile()
-                // Only a project is worth writing back to. A `.vox` opened as a document becomes an
-                // untitled one — `forget` is the caller's to call — and a palette or a reference
-                // model is not a document at all, so neither may touch what Save writes back to.
-                if (file.name.endsWith(PROJECT_EXTENSION)) held = handle
+                // Only a read that asked to be remembered is worth writing back to. A `.vox` opened
+                // as a document becomes an untitled one — `forget` is the caller's to call — and a
+                // palette or a reference model is not a document at all, so neither asks.
+                if (read?.remember === true) held = handle
                 return picked(file.name, new Uint8Array(await file.arrayBuffer()))
             } catch {
                 // A cancelled picker throws `AbortError`, and so does a page that has lost user
@@ -255,14 +268,14 @@ export const memoryFiles = (
             held = undefined
         },
 
-        open: async accept => {
+        open: async (accept, read) => {
             const wanted = accept.split(',').map(part => part.trim())
             const name = [...backing.keys()].find(key =>
                 wanted.some(extension => key.endsWith(extension))
             )
             const stored = name === undefined ? undefined : backing.get(name)
             if (name === undefined || stored === undefined) return undefined
-            if (name.endsWith(PROJECT_EXTENSION)) held = name
+            if (read?.remember === true) held = name
             return Promise.resolve(
                 picked(name, typeof stored === 'string' ? new TextEncoder().encode(stored) : stored)
             )

@@ -55,69 +55,6 @@ export interface VoxSpec {
  */
 export const MAX_SIZE = 32
 
-/** The JSON schema sent to llama-server, which turns it into a decoding grammar. */
-export const VOX_SCHEMA = {
-    type: 'object',
-    properties: {
-        name: {type: 'string'},
-        size: {type: 'array', items: {type: 'integer'}, minItems: 3, maxItems: 3},
-        mirror_x: {type: 'boolean'},
-        ops: {
-            type: 'array',
-            minItems: 1,
-            maxItems: 40,
-            items: {
-                anyOf: [
-                    {
-                        type: 'object',
-                        properties: {
-                            op: {const: 'box'},
-                            from: {
-                                type: 'array',
-                                items: {type: 'integer'},
-                                minItems: 3,
-                                maxItems: 3
-                            },
-                            to: {type: 'array', items: {type: 'integer'}, minItems: 3, maxItems: 3},
-                            color: {type: 'string', pattern: '^#[0-9a-fA-F]{6}$'}
-                        },
-                        required: ['op', 'from', 'to', 'color'],
-                        additionalProperties: false
-                    },
-                    {
-                        type: 'object',
-                        properties: {
-                            op: {const: 'ball'},
-                            at: {type: 'array', items: {type: 'integer'}, minItems: 3, maxItems: 3},
-                            r: {type: 'array', items: {type: 'integer'}, minItems: 3, maxItems: 3},
-                            color: {type: 'string', pattern: '^#[0-9a-fA-F]{6}$'}
-                        },
-                        required: ['op', 'at', 'r', 'color'],
-                        additionalProperties: false
-                    },
-                    {
-                        type: 'object',
-                        properties: {
-                            op: {const: 'erase'},
-                            from: {
-                                type: 'array',
-                                items: {type: 'integer'},
-                                minItems: 3,
-                                maxItems: 3
-                            },
-                            to: {type: 'array', items: {type: 'integer'}, minItems: 3, maxItems: 3}
-                        },
-                        required: ['op', 'from', 'to'],
-                        additionalProperties: false
-                    }
-                ]
-            }
-        }
-    },
-    required: ['name', 'size', 'mirror_x', 'ops'],
-    additionalProperties: false
-} as const
-
 const clampAxis = (value: unknown): number => {
     if (typeof value !== 'number' || !Number.isFinite(value)) return 1
     return Math.min(MAX_SIZE, Math.max(1, Math.floor(value)))

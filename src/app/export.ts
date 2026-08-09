@@ -19,7 +19,7 @@ import {currentSheet, presetMaps, type AppState} from './state'
 export const writeExport = async (state: AppState): Promise<void> => {
     const sheet = currentSheet(state)
     if (!sheet) return
-    await writeSheet(sheet, presetMaps(state, state.preset))
+    await writeSheet(sheet, presetMaps(state, state.output.preset))
 }
 
 /** One PNG per camera, cut out of the sheet — `FEATURESET.md` §17. */
@@ -32,15 +32,22 @@ export const writeSprites = async (state: AppState): Promise<void> => {
 /**
  * The JSON an engine reads next to the sheet — `FEATURESET.md` §37.
  *
- * The grid with hidden objects taken out, and *not* sliced, which is what this has always measured.
- * The bake itself honours slice mode, so a sheet baked in slice mode has boxes described from a
- * fuller model than the pixels came from. Left as it was: changing it changes exported files, which
- * is a decision about the format rather than about where this code lives.
+ * `shownVolume` and deliberately not `slicedFor` over it — the one place in the app that measures
+ * something other than the grid as the artist sees it. The bake itself honours slice mode, so a
+ * sheet baked in slice mode has boxes described from a fuller model than the pixels came from.
+ * Left as it was: changing it changes exported files, which is a decision about the format rather
+ * than about where this code lives. It is an opt-out from `doc/gesture.ts`'s derivation, not a
+ * second spelling of it.
  */
 export const writeSheetMetadata = (state: AppState): void => {
     const sheet = currentSheet(state)
     if (!sheet) return
     writeMetadata(
-        sheetMetadata(shownVolume(state.volume, state.objects), state.cameras, sheet, state.bounds)
+        sheetMetadata(
+            shownVolume(state.volume, state.objects),
+            state.cameras,
+            sheet,
+            state.output.bounds
+        )
     )
 }

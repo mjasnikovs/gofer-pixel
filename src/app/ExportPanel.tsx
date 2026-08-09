@@ -62,7 +62,8 @@ export const ExportPanel = ({
     /** The last bake if it is still this document's — derived in `App.tsx`; see `sheet/baked.ts`. */
     sheet: Sheet | undefined
 }) => {
-    const {cameras, cell, preset, padding, bounds} = state
+    const {cameras} = state
+    const {cell, preset, padding, bounds} = state.output
     return (
         <section className='section section-grows'>
             <SectionHead title='Export preset'>
@@ -73,7 +74,7 @@ export const ExportPanel = ({
                         size='sm'
                         value={String(cell)}
                         onChange={value => {
-                            dispatch({type: 'cell', cell: Number(value)})
+                            dispatch({type: 'output', output: {cell: Number(value)}})
                         }}
                     >
                         {CELL_SIZES.map(size => (
@@ -104,7 +105,7 @@ export const ExportPanel = ({
                                 label: entry.name
                             }))}
                             onChange={chosen => {
-                                dispatch({type: 'preset', preset: chosen})
+                                dispatch({type: 'output', output: {preset: chosen}})
                             }}
                         />
                     </span>
@@ -159,7 +160,7 @@ export const ExportPanel = ({
                                 className='symmetry-axis'
                                 data-on={size === padding || undefined}
                                 onClick={() => {
-                                    dispatch({type: 'padding', padding: size})
+                                    dispatch({type: 'output', output: {padding: size}})
                                 }}
                             >
                                 {size}
@@ -173,7 +174,7 @@ export const ExportPanel = ({
                             labelPosition='start'
                             value={bounds}
                             onChange={on => {
-                                dispatch({type: 'bounds', on})
+                                dispatch({type: 'output', output: {bounds: on}})
                             }}
                         />
                     </span>

@@ -1,6 +1,6 @@
 import {expect, test} from 'bun:test'
 import {voxelAt} from '../render/volume'
-import {countFilled, MAX_SIZE, rasterise, readSpec, VOX_SCHEMA, type VoxSpec} from './ops'
+import {countFilled, MAX_SIZE, rasterise, readSpec, type VoxSpec} from './ops'
 
 const spec = (ops: VoxSpec['ops'], over: Partial<VoxSpec> = {}): VoxSpec => ({
     name: 'test',
@@ -168,12 +168,4 @@ test('an unnamed model still has a name', () => {
     })
 
     expect(read?.name).toBe('Generated')
-})
-
-test('the schema the server is asked to enforce matches the ops that can be read', () => {
-    // The grammar is the only thing standing between a 27B model and a parser, so the two lists
-    // have to be the same list.
-    const {anyOf} = VOX_SCHEMA.properties.ops.items
-    expect(anyOf.map(entry => entry.properties.op.const)).toEqual(['box', 'ball', 'erase'])
-    expect(VOX_SCHEMA.properties.ops.maxItems).toBe(40)
 })

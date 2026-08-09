@@ -38,13 +38,13 @@ export const ViewsStrip = ({
     /** The grid with hidden objects taken out — memoised in `App.tsx`. See `ExportPanel`. */
     volume: Volume
 }) => {
-    const {cameras, selected, dragging} = state
+    const {cameras, selected, draggingCamera: dragging} = state
     const onCapture = (): void => {
         dispatch({type: 'capture'})
     }
     /** A drag that ends anywhere — off the strip, on a row, or with the pointer released. */
     const onDragEnd = (): void => {
-        if (dragging !== undefined) dispatch({type: 'drag-camera', id: undefined})
+        if (dragging !== undefined) dispatch({type: 'chrome', chrome: {draggingCamera: undefined}})
     }
     return (
         <div className='panel views-panel'>
@@ -127,7 +127,7 @@ export const ViewsStrip = ({
                             dispatch({type: 'select', id: entry.id})
                         }}
                         onPointerDown={() => {
-                            dispatch({type: 'drag-camera', id: entry.id})
+                            dispatch({type: 'chrome', chrome: {draggingCamera: entry.id}})
                         }}
                         onPointerEnter={() => {
                             if (dragging !== undefined && dragging !== entry.id) {

@@ -1,7 +1,8 @@
 import {expect, test} from 'bun:test'
 import {createVolume, setVoxel} from '../render/volume'
 import {browserScorer, memoryScorer, rankAgreement} from './clip'
-import {onGrey, rankingViews, toBase64, VIEW_SIZE, VIEW_YAWS} from './views'
+import {onGrey, rankingViews, VIEW_SIZE, VIEW_YAWS} from './views'
+import {toBase64} from '../image/base64'
 
 const model = () => {
     const volume = createVolume(

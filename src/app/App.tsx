@@ -1,8 +1,8 @@
-import {useCallback, useEffect, useMemo, useReducer, useState} from 'react'
+import {useCallback, useEffect, useMemo, useReducer, useRef, useState} from 'react'
 import {objectAt, shownVolume} from '../doc/objects'
 import {saveDocument} from '../doc/save'
-import {browserFiles, type Files} from '../doc/files'
-import {browserStore, clearSnapshots, putSnapshot, snapshots, type Store} from '../doc/store'
+import type {Files} from '../doc/files'
+import {clearSnapshots, putSnapshot, snapshots, type Store} from '../doc/store'
 import {browserScorer, type Scorer} from '../gen/clip'
 import type {Llama} from '../gen/llama'
 import {defaultLibrary, type Library} from '../gen/library'
@@ -31,13 +31,14 @@ import {
     initialState,
     previewVolume,
     reduce,
+    slicedFor,
     TOOLS,
     type OpenedDocument
 } from './state'
 import {GenerateDialog} from './GenerateDialog'
 import {NewProjectDialog} from './NewProjectDialog'
 import {UnsavedDialog} from './UnsavedDialog'
-import {handle} from './handle'
+import {markDrawn, publish} from './handle'
 import {keyAction, pressOf} from './keys'
 import {
     asking as askingAbout,
@@ -82,22 +83,48 @@ import {
  *
  * The keyboard is `keys.ts`; what a key means is a table, and what is here is the listener.
  */
+/**
+ * The two stateless ports, built once at module load rather than per render.
+ *
+ * They close over an endpoint string and nothing else, so a second instance is a waste rather than
+ * a bug — which is exactly why they may have a default and `store` and `files` may not.
+ */
+const DEFAULT_SCORER = browserScorer()
+const DEFAULT_VETO = browserVeto()
+
 export const App = ({
     volume: source,
     name,
     opened,
-    store = browserStore(),
-    files = browserFiles(),
+    store,
+    files,
     library = defaultLibrary,
     llama,
-    scorer = browserScorer(),
-    veto = browserVeto()
+    scorer = DEFAULT_SCORER,
+    veto = DEFAULT_VETO
 }: {
     volume: Volume
     name: string
     opened?: OpenedDocument | undefined
-    store?: Store
-    files?: Files
+    /**
+     * Where the autosave goes — see `doc/store.ts`.
+     *
+     * Required, and that is the whole point. It used to default to `browserStore()`, and a default
+     * parameter is evaluated on *every call to this function*, which is every render: the effect
+     * below has `store` in its dependencies, so a new instance each render meant a full RLE and
+     * base64 of the document on every pointer move of a stroke rather than once per committed edit.
+     */
+    store: Store
+    /**
+     * The artist's disk — see `doc/files.ts`.
+     *
+     * Required for a second and worse reason than `store`: a `Files` **is stateful**. It remembers
+     * the handle Save writes back to, and a default parameter threw that memory away on the very
+     * re-render that `dispatch({type: 'saved'})` caused — so `overwrites` promised a Save that
+     * overwrote and every Ctrl-S opened the picker again. A `Files` must outlive a render, and the
+     * only way to say so is to refuse to make one here.
+     */
+    files: Files
     /** The local model — see `src/gen/llama.ts`. A port, so a test needs no GPU. */
     llama?: Llama
     /**
@@ -117,11 +144,25 @@ export const App = ({
     const {volume} = state
 
     /*
-     * What is drawn is the grid with hidden objects taken out of it, and everything that renders
-     * uses it: the viewport, every thumbnail and the exported sheet. The panels that are about the
-     * *document* rather than about the picture — the palette, the object list — keep the whole one.
+     * The grid with hidden objects taken out of it. Everything that renders uses it: the viewport,
+     * every thumbnail and the exported sheet. The panels that are about the *document* rather than
+     * about the picture — the palette, the object list — keep the whole one.
+     *
+     * Two memos rather than one call to `visible(state)`, because they go stale against different
+     * things: hiding an object rebuilds a grid and must not re-run while the view turns, and the
+     * slice depends on which way the camera faces and must.
      */
-    const shown = useMemo(() => shownVolume(volume, state.objects), [volume, state.objects])
+    const hidden = useMemo(() => shownVolume(volume, state.objects), [volume, state.objects])
+
+    /*
+     * And in slice mode, the layers in front of the current one gone as well — `doc/gesture.ts`.
+     *
+     * This used to be the plain `shownVolume` above, which meant the app drew the model whole while
+     * `hoverAt` picked against the sliced one and `bake` shipped the sliced one. Three derivations
+     * of "the grid as the artist sees it", two of them missing a term. There is one now, and it
+     * lives next to the rule it belongs to.
+     */
+    const shown = useMemo(() => slicedFor(state, hidden), [state, hidden])
 
     // What the viewport draws — see `previewVolume`. Erase shows its hole and Fill its new paint
     // before the press, because neither change is visible from the outside of a block.
@@ -148,11 +189,11 @@ export const App = ({
     }, [])
 
     const onReady = useCallback((raycaster: Raycaster) => {
-        handle.raycaster = raycaster
+        publish({raycaster})
     }, [])
 
     const onFrame = useCallback(() => {
-        handle.markDrawn()
+        markDrawn()
     }, [])
 
     const capture = useCallback(() => {
@@ -181,18 +222,25 @@ export const App = ({
     )
 
     /*
-     * Save reads `handle.state` rather than the `state` this render closed over. Ctrl-S and the
-     * unsaved dialog can both fire from a callback older than the last edit, and saving a document
-     * one stroke behind is a data loss that looks like a success.
+     * The latest state, readable from a callback older than it.
+     *
+     * Ctrl-S and the unsaved dialog can both fire from a closure built several edits ago, and
+     * saving a document one stroke behind is a data loss that looks like a success. This used to
+     * read `handle.state` — the seam the *browser tests* drive the app through, whose own header
+     * says the app only ever writes to it. A real correctness requirement met by a testing
+     * singleton is a requirement two mounted apps would silently share, and the thing they would
+     * share is which document gets written to disk.
      */
+    const latest = useRef(state)
+
     const doSave = useCallback(
         async (reuse: boolean): Promise<boolean> => {
-            const action = await saveProject(files, handle.state ?? state, reuse)
+            const action = await saveProject(files, latest.current, reuse)
             if (!action) return false
             dispatch(action)
             return true
         },
-        [files, state]
+        [files]
     )
 
     const guarded = useCallback(
@@ -283,11 +331,14 @@ export const App = ({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [commits, store])
 
-    // Publishing to the browser-test seam is exactly what an effect is for: pushing React's latest
-    // state out to something that is not React.
+    /*
+     * Pushing React's latest state out to the two things that are not React: the ref the file
+     * callbacks read, and the seam the browser suite drives the app through. Both are writes, and
+     * `handle` is now only ever written — see `handle.ts`.
+     */
     useEffect(() => {
-        handle.state = state
-        handle.dispatch = dispatch
+        latest.current = state
+        publish({state, dispatch})
     }, [state])
 
     /** What the render panel inspects. Survives orbiting; see `previewed` in `state.ts`. */
@@ -507,6 +558,8 @@ export const App = ({
                 <GenerateDialog
                     library={library}
                     {...(llama ? {llama} : {})}
+                    store={store}
+                    files={files}
                     scorer={scorer}
                     veto={veto}
                     onClose={() => {

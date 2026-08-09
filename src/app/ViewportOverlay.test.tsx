@@ -1,8 +1,8 @@
 import {expect, test} from 'bun:test'
 import {act} from 'react'
 import {createRoot} from 'react-dom/client'
-import {basisFor, createCamera} from '../render/camera'
-import {createVolume, setVoxel, type Volume} from '../render/volume'
+import {createCamera} from '../render/camera'
+import {createVolume, setVoxel} from '../render/volume'
 import {
     BrushGhost,
     GroundGrid,
@@ -176,84 +176,6 @@ test('no hover means no ghost at all', async () => {
     await drawn.done()
 })
 
-test('a single floating cell draws three faces, twelve edges and a shadow', async () => {
-    const drawn = await ghost(hovering([[3, 3, 4]]))
-
-    // Half the cube faces away and the near side already covers it.
-    expect(drawn.moves('fill')).toBe(3)
-    // Nothing next to it, so no edge is coplanar with anything.
-    expect(drawn.moves('outline')).toBe(12)
-    // The footprint on the floor, plus a line down to it from each of its four corners.
-    expect(drawn.moves('drop')).toBe(5)
-
-    await drawn.done()
-})
-
-test('a cell standing on the floor casts no shadow, because there is nowhere to drop to', async () => {
-    const drawn = await ghost(hovering([[3, 3, 0]]))
-
-    expect(drawn.path('drop')).toBe('')
-    expect(drawn.moves('fill')).toBe(3)
-
-    await drawn.done()
-})
-
-/*
- * The face between two touching cells is inside the block. Drawing it costs nothing visible and
- * everything in trust: a preview with internal faces in it is not a preview of a solid.
- */
-test('two cells side by side hide the face they share', async () => {
-    const one = await ghost(hovering([[3, 3, 4]]))
-    const two = await ghost(
-        hovering([
-            [3, 3, 4],
-            [4, 3, 4]
-        ])
-    )
-
-    // Six near faces if they were drawn separately; five, because the shared pair is one of them
-    // and only the visible half is drawn at all.
-    expect(two.moves('fill')).toBeLessThan(one.moves('fill') * 2)
-
-    await one.done()
-    await two.done()
-})
-
-test('a flat run of cells is not ruled into a lattice', async () => {
-    const run = await ghost(
-        hovering([
-            [2, 3, 4],
-            [3, 3, 4],
-            [4, 3, 4]
-        ])
-    )
-
-    /*
-     * Edges are drawn a cell at a time, so a 3 × 1 × 1 bar is four long edges cut into three
-     * segments each — twelve — plus four around each end cap. Twenty. Three loose cubes would be
-     * thirty-six, and the sixteen missing are exactly the cross-sections `FLAT` refuses to rule
-     * across a straight run.
-     */
-    expect(run.moves('outline')).toBe(20)
-
-    await run.done()
-})
-
-test('two cells touching only at a corner keep the pinch between them', async () => {
-    const pinched = await ghost(
-        hovering([
-            [3, 3, 4],
-            [4, 4, 4]
-        ])
-    )
-
-    // The edge where the two meet is a genuine crease, so it survives where a side-by-side pair's
-    // would not: more edges than the 12 of a solid bar.
-    expect(pinched.moves('outline')).toBeGreaterThan(12)
-
-    await pinched.done()
-})
-
 test('the ghost is the colour the press would actually put down', async () => {
     const painted = new Uint8Array(256 * 4)
     painted.set([10, 120, 230, 255], 3 * 4)
@@ -316,131 +238,10 @@ test('the ghost turns with the model rather than being a decal of one angle', as
 /**
  * The floor is two lattices, and the seam between them is the promise the grid makes.
  *
- * Inside the volume, one line per voxel, stopping dead on the boundary — a cell drawn is a cell that
- * can be filled. Outside, a coarser lattice that fades away, so the ground is still there to judge
- * height against without offering squares that answer a press with "Outside the grid".
+ * The lattice arithmetic itself is `overlay.ts` and `overlay.test.ts` — where it can be asked about
+ * points rather than about the letters in a `d` attribute. What is left here is what only exists
+ * once it is SVG: the masks, the gradient, and the elements they are hung on.
  */
-const floor = async (
-    box: Volume
-): Promise<{
-    fine: SVGLineElement[]
-    ground: SVGLineElement[]
-    project: (p: readonly [number, number, number]) => {x: number; y: number}
-    done: () => Promise<void>
-}> => {
-    const camera = createCamera(box, 0.9, 0.5)
-    const host = document.createElement('div')
-    document.body.appendChild(host)
-    const root = createRoot(host)
-    await act(async () => {
-        root.render(
-            <GroundGrid
-                volume={box}
-                camera={camera}
-            />
-        )
-    })
-
-    const fade = host.querySelector('g[mask="url(#ground-grid-fade)"]')
-    const ground = [...(fade?.querySelectorAll('line') ?? [])]
-    const fine = [...host.querySelectorAll('line')].filter(line => !ground.includes(line))
-
-    const {right, up, center} = basisFor(camera, box, 1)
-    const project = (p: readonly [number, number, number]) => {
-        const d = [p[0] - center[0], p[1] - center[1], p[2] - center[2]] as const
-        return {
-            x: d[0] * right[0] + d[1] * right[1] + d[2] * right[2],
-            y: -(d[0] * up[0] + d[1] * up[1] + d[2] * up[2])
-        }
-    }
-
-    return {
-        fine,
-        ground,
-        project,
-        done: async () => {
-            await act(async () => {
-                root.unmount()
-            })
-            host.remove()
-        }
-    }
-}
-
-const ends = (lines: SVGLineElement[]): {x: number; y: number}[] =>
-    lines.flatMap(line => [
-        {x: Number(line.getAttribute('x1')), y: Number(line.getAttribute('y1'))},
-        {x: Number(line.getAttribute('x2')), y: Number(line.getAttribute('y2'))}
-    ])
-
-test('the fine lattice stops exactly on the boundary of the volume', async () => {
-    const box = createVolume(32, 32, 32, new Uint8Array(256 * 4))
-    const drawn = await floor(box)
-
-    expect(drawn.fine.length).toBeGreaterThan(0)
-
-    // The corners of the floor the artist may actually draw on, projected.
-    const corners = [
-        drawn.project([0, 0, 0]),
-        drawn.project([box.sx, 0, 0]),
-        drawn.project([0, box.sy, 0]),
-        drawn.project([box.sx, box.sy, 0])
-    ]
-    const limit = Math.max(...corners.map(c => Math.hypot(c.x, c.y)))
-    const reach = Math.max(...ends(drawn.fine).map(p => Math.hypot(p.x, p.y)))
-
-    expect(reach).toBeLessThanOrEqual(limit + 1e-6)
-    // And it reaches the boundary rather than stopping short of it.
-    expect(reach).toBeGreaterThan(limit - 1e-6)
-
-    await drawn.done()
-})
-
-test('a cell inside the volume is one voxel, not two', async () => {
-    const box = createVolume(32, 32, 32, new Uint8Array(256 * 4))
-    const drawn = await floor(box)
-
-    // 33 lines each way: one per voxel boundary, both edges included.
-    expect(drawn.fine.length).toBe((box.sx + 1) * 2)
-
-    await drawn.done()
-})
-
-test('the ground beyond the volume is coarser than the cells inside it, and reaches further', async () => {
-    const box = createVolume(32, 32, 32, new Uint8Array(256 * 4))
-    const drawn = await floor(box)
-
-    const spacing = (lines: SVGLineElement[]): number => {
-        const seen = [...new Set(ends(lines).map(p => p.x.toFixed(4)))].map(Number).sort((a, b) => a - b) // prettier-ignore
-        let gap = Infinity
-        for (let i = 1; i < seen.length; i += 1) gap = Math.min(gap, (seen[i] ?? 0) - (seen[i - 1] ?? 0)) // prettier-ignore
-        return gap
-    }
-
-    expect(spacing(drawn.ground)).toBeGreaterThan(spacing(drawn.fine) * 1.5)
-
-    const out = Math.max(...ends(drawn.ground).map(p => Math.hypot(p.x, p.y)))
-    const inside = Math.max(...ends(drawn.fine).map(p => Math.hypot(p.x, p.y)))
-    expect(out).toBeGreaterThan(inside)
-
-    await drawn.done()
-})
-
-test('the ground sits centred on the volume, whatever the coarse cell divides into', async () => {
-    // 32 is not a whole number of coarse cells, which is exactly when a from-the-edge walk drifts.
-    const box = createVolume(32, 32, 32, new Uint8Array(256 * 4))
-    const drawn = await floor(box)
-
-    const middle = drawn.project([box.sx / 2, box.sy / 2, 0])
-    const xs = ends(drawn.ground).map(p => p.x - middle.x)
-    const ys = ends(drawn.ground).map(p => p.y - middle.y)
-
-    expect(Math.max(...xs) + Math.min(...xs)).toBeCloseTo(0, 6)
-    expect(Math.max(...ys) + Math.min(...ys)).toBeCloseTo(0, 6)
-
-    await drawn.done()
-})
-
 test('the ground fades out, so nothing far from the volume asks to be clicked', async () => {
     const box = createVolume(32, 32, 32, new Uint8Array(256 * 4))
     const camera = createCamera(box, 0.9, 0.5)

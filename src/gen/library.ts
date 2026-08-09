@@ -1,7 +1,8 @@
 import MANIFEST from '../assets/examples/examples.json'
 import {volumeFromFile} from '../doc/models'
 import type {Volume} from '../render/volume'
-import {exampleFrom, readManifest, type BankEntry, type Manifest, type WorkedExample} from './bank'
+import {readManifest, type BankEntry, type Manifest, type WorkedExample} from './bank'
+import {exampleFrom} from './teaching'
 import {BUILT_IN_REPLIES} from './builtin'
 
 /**
@@ -14,13 +15,17 @@ import {BUILT_IN_REPLIES} from './builtin'
  */
 export interface Library {
     readonly manifest: Manifest
+    /**
+     * One entry, unfiltered. Only tests call it, and that is the point: `teach` now drops anything
+     * over `LINE_BUDGET`, so measuring what the shipped bank actually costs has to go round it.
+     */
     readonly example: (id: string) => WorkedExample | undefined
     /**
-     * The examples for a pick, as prior turns, in the order they should be sent.
+     * The examples for a pick, **in the order they were picked** — closest first.
      *
-     * **Reversed from the order they were picked in.** The picking call answers closest-first, and
-     * the turn nearest the prompt is the one the model imitates hardest, so the closest example
-     * goes last. That is reasoning, not a measurement — nothing has compared the two orders.
+     * A lookup and nothing else. Which order they are *sent* in, and what else joins them, is
+     * `teaching.ts`: it used to be a `.reverse()` here and a lambda in `batch.ts`, two halves of
+     * one rule in two modules.
      */
     readonly teach: (ids: readonly string[]) => readonly WorkedExample[]
 }
@@ -34,9 +39,17 @@ const resolve = async (
 ): Promise<WorkedExample | undefined> => {
     if (entry.file !== undefined) {
         const volume = await source(entry.file)
-        // A named file that will not load falls through to the built-in rather than dropping the
-        // entry. A missing teacher is a worse outcome than a stale one — see `readPicks`.
-        if (volume) return exampleFrom(entry, volume)
+        /*
+         * A named file that will not load falls through to the built-in rather than dropping the
+         * entry. A missing teacher is a worse outcome than a stale one — see `readPicks`. A file
+         * that loads but decomposes past `LINE_BUDGET` takes the same road, and that is the hole
+         * this closes: it used to go straight into the teaching set, unchecked, and every candidate
+         * of every batch paid for it. The drop path had refused the same model by name.
+         */
+        if (volume) {
+            const {example, fits} = exampleFrom(entry, volume)
+            if (fits) return example
+        }
     }
     const reply = BUILT_IN_REPLIES[entry.id]
     return reply === undefined ? undefined : {prompt: entry.subject, reply}
@@ -55,7 +68,6 @@ export const buildLibrary = async (manifest: Manifest, source: ModelSource): Pro
             ids
                 .map(id => examples.get(id))
                 .filter((example): example is WorkedExample => example !== undefined)
-                .reverse()
     }
 }
 

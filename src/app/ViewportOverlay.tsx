@@ -4,7 +4,19 @@ import {Text} from '@astryxdesign/core/Text'
 import type {Cell} from '../doc/selection'
 import {basisFor, type Camera, type Vec3} from '../render/camera'
 
-import {filledBounds, type Volume} from '../render/volume'
+import type {Volume} from '../render/volume'
+import {
+    BOX_EDGES,
+    boxCorners,
+    dot,
+    floorOf,
+    ghostMesh,
+    projector,
+    unitCubeCorners,
+    type Point,
+    type Quad,
+    type Segment
+} from './overlay'
 import {CameraIcon, MagnetIcon, MouseIcon} from './icons'
 import type {Blocked} from './state'
 
@@ -24,150 +36,19 @@ const AXES: readonly {label: string; vector: Vec3; color: string}[] = [
     {label: 'Z', vector: [0, 0, 1], color: '#4a8ff0'}
 ]
 
-const dot = (a: Vec3, b: Vec3): number => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-
 const GIZMO = 30
 
 /**
  * The ground grid, drawn over the render rather than in it.
  *
  * It has to be an overlay: putting it in the shader would put it in the CPU raycaster too, or else
- * break the parity those two are held to, and a grid is not part of a sprite. So it is projected
- * with the camera's own basis — one `viewBox` in voxels, sliced the way an orthographic camera
- * slices, which is exactly what `zoom` means — and then masked by the volume's projected bounding
- * box so the lines stop at the model instead of being drawn across its face.
- *
- * The mask is a convex hull of the eight projected corners. A box seen from any angle projects to a
- * convex hexagon (or a rectangle head-on), so the hull is the silhouette, exactly.
+ * break the parity those two are held to, and a grid is not part of a sprite. Every number in it —
+ * the two lattice pitches, the centring, the screen-space falloff and the hole cut around the
+ * voxels — is `floorOf` in `overlay.ts`. What is left here is the SVG.
  */
-const hull = (points: {x: number; y: number}[]): {x: number; y: number}[] => {
-    const sorted = [...points].sort((a, b) => a.x - b.x || a.y - b.y)
-    const half = (source: {x: number; y: number}[]): {x: number; y: number}[] => {
-        const out: {x: number; y: number}[] = []
-        for (const point of source) {
-            while (out.length >= 2) {
-                const a = out[out.length - 2]
-                const b = out[out.length - 1]
-                if (!a || !b) break
-                const cross = (b.x - a.x) * (point.y - a.y) - (b.y - a.y) * (point.x - a.x)
-                if (cross > 0) break
-                out.pop()
-            }
-            out.push(point)
-        }
-        out.pop()
-        return out
-    }
-    return [...half(sorted), ...half([...sorted].reverse())]
-}
-
 export const GroundGrid = ({volume, camera}: {volume: Volume; camera: Camera}) => {
-    const {right, up, center} = basisFor(camera, volume, 1)
-    const project = (p: Vec3): {x: number; y: number} => {
-        const d: Vec3 = [p[0] - center[0], p[1] - center[1], p[2] - center[2]]
-        return {x: dot(d, right), y: -dot(d, up)}
-    }
-
-    /*
-     * One line per voxel while that is legible, and a coarser lattice once it is not.
-     *
-     * Legibility is a screen question, so `zoom` — how many voxels the viewport shows — decides it,
-     * not how big the grid is. Keyed to `sx, sy` it drew two-voxel cells on a 32³ document with room
-     * for one-voxel ones, and never coarsened at all when the artist zoomed out.
-     */
-    const step = Math.max(1, 2 ** Math.ceil(Math.log2(camera.zoom / 128)))
-
-    /*
-     * Two lattices, because a cell is a promise.
-     *
-     * One uniform lattice used to run `pad` voxels past the volume, and every square out there took
-     * a press that did nothing but say "Outside the grid" — the floor drew cells where no cell can
-     * be filled. Deleting the overhang is not the fix: without ground under and around the model
-     * nothing says how high anything is floating.
-     *
-     * So the two regions are drawn as different things. Inside, one line per voxel, stopping dead on
-     * the boundary — small squares read as pixels. Outside, a lattice five times coarser that fades
-     * out before it reaches the edge of the pad — big squares read as ground, and nothing far out
-     * invites a click. The fine lattice's own last line is the boundary; it needs no separate edge.
-     */
-    const coarse = step * 5
-    const pad = coarse * 2
-
-    /** Every gridline coordinate from `from` to `to`, always including `to` itself. */
-    const ticks = (from: number, to: number, by: number): number[] => {
-        const out: number[] = []
-        for (let k = from; k < to; k += by) out.push(k)
-        out.push(to)
-        return out
-    }
-    const span = (a: Vec3, b: Vec3) => ({a: project(a), b: project(b)})
-
-    const fine = [
-        ...ticks(0, volume.sx, step).map(x => span([x, 0, 0], [x, volume.sy, 0])),
-        ...ticks(0, volume.sy, step).map(y => span([0, y, 0], [volume.sx, y, 0]))
-    ]
-    /*
-     * The ground is laid out from the middle, not from the volume's near edge.
-     *
-     * Walking from `-pad` in steps of `coarse` only lands on the far edge when `coarse` divides the
-     * volume. It divided 32 at four voxels and does not at five, so the lattice gained a stub cell
-     * on two sides and the whole floor read as pushed off-centre. Anchoring on the middle makes it
-     * symmetric whatever the two numbers are; the middle is rounded to a fine line so the coarse
-     * lattice still lands on voxel boundaries.
-     */
-    const around = (mid: number, out: number, by: number): number[] => {
-        const n = Math.ceil(out / by)
-        const line: number[] = []
-        for (let k = -n; k <= n; k += 1) line.push(mid + k * by)
-        return line
-    }
-    const midOf = (size: number): number => Math.round(size / 2 / step) * step
-    const xs = around(midOf(volume.sx), volume.sx / 2 + pad, coarse)
-    const ys = around(midOf(volume.sy), volume.sy / 2 + pad, coarse)
-    const x0 = xs[0] ?? 0
-    const x1 = xs[xs.length - 1] ?? 0
-    const y0 = ys[0] ?? 0
-    const y1 = ys[ys.length - 1] ?? 0
-    const ground = [
-        ...xs.map(x => span([x, y0, 0], [x, y1, 0])),
-        ...ys.map(y => span([x0, y, 0], [x1, y, 0]))
-    ]
-
-    /*
-     * The falloff is radial in *screen* space, so it does not swing about as the camera orbits: a
-     * gradient in voxels would fade the far corner of an isometric view and not the near one. It
-     * holds full strength out to the furthest corner of the volume itself, so the coarse lattice
-     * starts at the boundary rather than already half gone.
-     */
-    const middle = project([volume.sx / 2, volume.sy / 2, 0])
-    const reach = (x: number, y: number): number => {
-        const p = project([x, y, 0])
-        return Math.hypot(p.x - middle.x, p.y - middle.y)
-    }
-    const inner = Math.max(reach(0, 0), reach(volume.sx, 0), reach(0, volume.sy), reach(volume.sx, volume.sy)) // prettier-ignore
-    const outer = Math.max(reach(x0, y0), reach(x1, y0), reach(x0, y1), reach(x1, y1))
-
-    /*
-     * The hole is cut around the *voxels*, not around the grid.
-     *
-     * Masking by `sx, sy, sz` looked right on `car.vox`, whose model fills its grid — and took the
-     * floor away entirely on any document that does not. A 128³ grid holding a handful of voxels
-     * projects a box the size of the viewport, so the artist got a picture with a grid round the
-     * edges, nothing under the model, and no way at all to tell how high anything was floating.
-     */
-    const box = filledBounds(volume)
-    const corners: Vec3[] = []
-    for (let i = 0; i < 8; i += 1) {
-        if (!box) break
-        corners.push([
-            (i & 1) === 0 ? box.min[0] : box.max[0] + 1,
-            ((i >> 1) & 1) === 0 ? box.min[1] : box.max[1] + 1,
-            ((i >> 2) & 1) === 0 ? box.min[2] : box.max[2] + 1
-        ])
-    }
-    const silhouette = hull(corners.map(project))
-        .map(({x, y}) => `${String(x)},${String(y)}`)
-        .join(' ')
+    const {fine, ground, middle, inner, outer, silhouette} = floorOf(volume, camera)
+    const points = silhouette.map((p: Point) => `${String(p.x)},${String(p.y)}`).join(' ')
 
     const half = camera.zoom / 2
     return (
@@ -186,7 +67,7 @@ export const GroundGrid = ({volume, camera}: {volume: Volume; camera: Camera}) =
                     fill='white'
                 />
                 <polygon
-                    points={silhouette}
+                    points={points}
                     fill='black'
                 />
             </mask>
@@ -217,7 +98,7 @@ export const GroundGrid = ({volume, camera}: {volume: Volume; camera: Camera}) =
             </mask>
             <g mask='url(#ground-grid-mask)'>
                 <g mask='url(#ground-grid-fade)'>
-                    {ground.map((line, index) => (
+                    {ground.map((line: Segment, index: number) => (
                         <line
                             key={index}
                             x1={line.a.x}
@@ -230,7 +111,7 @@ export const GroundGrid = ({volume, camera}: {volume: Volume; camera: Camera}) =
                         />
                     ))}
                 </g>
-                {fine.map((line, index) => (
+                {fine.map((line: Segment, index: number) => (
                     <line
                         key={index}
                         x1={line.a.x}
@@ -283,27 +164,6 @@ export const GroundGrid = ({volume, camera}: {volume: Volume; camera: Camera}) =
  * press will do nothing at all. It is drawn dashed and inert rather than in a new colour, because
  * "this does nothing" is the absence of an action and should not look like a second kind of action.
  */
-/** The three axes, and for each the two it spreads over. Typed so indexing a cell stays a number. */
-type Axis3 = 0 | 1 | 2
-const AXES3: readonly Axis3[] = [0, 1, 2]
-const PERP: Record<Axis3, readonly [Axis3, Axis3]> = {
-    0: [1, 2],
-    1: [0, 2],
-    2: [0, 1]
-}
-
-/**
- * The neighbourhoods around a cube edge that are not an edge of anything, as a four-bit mask of the
- * cells meeting along it — bits in the order `(-1,-1) (-1,0) (0,-1) (0,0)` across the two axes the
- * edge does not run down.
- *
- * Empty and full are obvious. The four two-bit entries are the ones worth naming: two cells sitting
- * *side by side* mean the surface runs straight through, so the faces meeting at the edge are
- * coplanar and drawing a line there would rule a lattice across a flat slab. Two cells meeting only
- * at the corner is the opposite case — a genuine pinch — and it stays, as do one and three.
- */
-const FLAT: ReadonlySet<number> = new Set([0b0000, 0b1111, 0b0011, 0b1100, 0b0101, 0b1010])
-
 export const BrushGhost = ({
     volume,
     camera,
@@ -323,127 +183,14 @@ export const BrushGhost = ({
             />
         )
     }
-    const {right, up, forward, center} = basisFor(camera, volume, 1)
-    const project = (p: Vec3): string => {
-        const d: Vec3 = [p[0] - center[0], p[1] - center[1], p[2] - center[2]]
-        return `${String(dot(d, right))} ${String(-dot(d, up))}`
-    }
-
-    const key = (x: number, y: number, z: number): string =>
-        `${String(x)},${String(y)},${String(z)}`
-    const cells = new Set(hover.cells.map(([x, y, z]) => key(x, y, z)))
-
-    // The outside of the block, and only the half of it facing the viewer.
-    const skin: string[] = []
-    for (const cell of hover.cells) {
-        const [x, y, z] = cell
-        for (const axis of AXES3) {
-            for (const side of [0, 1]) {
-                const step = side === 0 ? -1 : 1
-                const at: [number, number, number] = [x, y, z]
-                at[axis] += step
-                if (cells.has(key(at[0], at[1], at[2]))) continue
-                const normal: [number, number, number] = [0, 0, 0]
-                normal[axis] = step
-                // A face pointing away from the camera is the far side of the block, and the near
-                // side is already covering it.
-                if (dot(normal, forward) >= 0) continue
-                const [u, v] = PERP[axis]
-                const corner = (a: number, b: number): Vec3 => {
-                    const point: [number, number, number] = [x, y, z]
-                    point[axis] = cell[axis] + side
-                    point[u] = cell[u] + a
-                    point[v] = cell[v] + b
-                    return point
-                }
-                skin.push(
-                    `M${project(corner(0, 0))}`
-                        + `L${project(corner(1, 0))}`
-                        + `L${project(corner(1, 1))}`
-                        + `L${project(corner(0, 1))}Z`
-                )
-            }
-        }
-    }
-
-    /*
-     * Every edge the footprint could have, keyed by where it runs. `along` is the axis it points
-     * down; `a` and `b` are its position on the other two, in lattice coordinates — so the four
-     * cells that meet along it are the four combinations of one step back on each.
-     */
-    const wire: string[] = []
-    const seen = new Set<string>()
-    for (const cell of hover.cells) {
-        for (const along of AXES3) {
-            const [u, v] = PERP[along]
-            for (const du of [0, 1]) {
-                for (const dv of [0, 1]) {
-                    const a = cell[u] + du
-                    const b = cell[v] + dv
-                    const id = `${String(along)}:${String(cell[along])}:${String(a)}:${String(b)}`
-                    if (seen.has(id)) continue
-                    seen.add(id)
-
-                    let around = 0
-                    let bit = 1
-                    for (const ou of [-1, 0]) {
-                        for (const ov of [-1, 0]) {
-                            const at: [number, number, number] = [0, 0, 0]
-                            at[along] = cell[along]
-                            at[u] = a + ou
-                            at[v] = b + ov
-                            if (cells.has(key(at[0], at[1], at[2]))) around |= bit
-                            bit <<= 1
-                        }
-                    }
-                    if (FLAT.has(around)) continue
-
-                    const end = (t: number): Vec3 => {
-                        const point: [number, number, number] = [0, 0, 0]
-                        point[along] = cell[along] + t
-                        point[u] = a
-                        point[v] = b
-                        return point
-                    }
-                    wire.push(`M${project(end(0))}L${project(end(1))}`)
-                }
-            }
-        }
-    }
-
-    /*
-     * The shadow, and the drop to it.
-     *
-     * An orthographic camera gives away nothing about height: a block one voxel up and a block ten
-     * up are the same picture moved a few pixels, and with an empty grid under them there is nothing
-     * to move relative to. So the footprint is repeated on the floor and joined to the block by its
-     * four corners — the oldest trick there is, and the only one that reads without a second view.
-     */
-    let x0 = Infinity
-    let y0 = Infinity
-    let z0 = Infinity
-    let x1 = -Infinity
-    let y1 = -Infinity
-    for (const [x, y, z] of hover.cells) {
-        if (x < x0) x0 = x
-        if (y < y0) y0 = y
-        if (z < z0) z0 = z
-        if (x > x1) x1 = x
-        if (y > y1) y1 = y
-    }
-    const drop: string[] = []
-    if (z0 > 0) {
-        const feet: [number, number][] = [
-            [x0, y0],
-            [x1 + 1, y0],
-            [x1 + 1, y1 + 1],
-            [x0, y1 + 1]
-        ]
-        drop.push(
-            feet.map((f, i) => `${i === 0 ? 'M' : 'L'}${project([f[0], f[1], 0])}`).join('') + 'Z'
-        )
-        for (const [x, y] of feet) drop.push(`M${project([x, y, z0])}L${project([x, y, 0])}`)
-    }
+    const {skin, wire, shadow, legs} = ghostMesh(hover.cells, camera, volume)
+    const at = ({x, y}: Point): string => `${String(x)} ${String(y)}`
+    const face = (quad: Quad): string => `M${quad.map(at).join('L')}Z`
+    const line = ({a: from, b: to}: Segment): string => `M${at(from)}L${at(to)}`
+    const drop = [
+        ...(shadow.length > 0 ? [`M${shadow.map(at).join('L')}Z`] : []),
+        ...legs.map(line)
+    ]
 
     const half = camera.zoom / 2
     return (
@@ -464,11 +211,11 @@ export const BrushGhost = ({
             />
             <path
                 className='brush-ghost-fill'
-                d={skin.join('')}
+                d={skin.map(face).join('')}
             />
             <path
                 className='brush-ghost-outline'
-                d={wire.join('')}
+                d={wire.map(line).join('')}
                 fill='none'
                 vectorEffect='non-scaling-stroke'
             />
@@ -523,22 +270,7 @@ const paintOf = (volume: Volume, index: number | undefined): string | undefined 
 const GhostBox = ({volume, camera, hover}: {volume: Volume; camera: Camera; hover: GhostHover}) => {
     const {bounds} = hover
     if (!bounds) return undefined
-    const {right, up, center} = basisFor(camera, volume, 1)
-    const project = (p: Vec3): {x: number; y: number} => {
-        const d: Vec3 = [p[0] - center[0], p[1] - center[1], p[2] - center[2]]
-        return {x: dot(d, right), y: -dot(d, up)}
-    }
-    const {min, max} = bounds
-    const flat: {x: number; y: number}[] = []
-    for (let i = 0; i < 8; i += 1) {
-        flat.push(
-            project([
-                (i & 1) === 0 ? min[0] : max[0] + 1,
-                ((i >> 1) & 1) === 0 ? min[1] : max[1] + 1,
-                ((i >> 2) & 1) === 0 ? min[2] : max[2] + 1
-            ])
-        )
-    }
+    const flat = boxCorners(bounds.min, bounds.max).map(projector(camera, volume))
 
     const half = camera.zoom / 2
     return (
@@ -587,25 +319,8 @@ export const SelectionBox = ({
     /** How many voxels the drag in progress would destroy, which turns the box the warning colour. */
     losing?: number
 }) => {
-    const {right, up, center} = basisFor(camera, volume, 1)
-    const project = (p: Vec3): {x: number; y: number} => {
-        const d: Vec3 = [p[0] - center[0], p[1] - center[1], p[2] - center[2]]
-        return {x: dot(d, right), y: -dot(d, up)}
-    }
     const half = camera.zoom / 2
-
-    const corners: Vec3[] = []
-    if (bounds) {
-        const {min, max} = bounds
-        for (let i = 0; i < 8; i += 1) {
-            corners.push([
-                (i & 1) === 0 ? min[0] : max[0] + 1,
-                ((i >> 1) & 1) === 0 ? min[1] : max[1] + 1,
-                ((i >> 2) & 1) === 0 ? min[2] : max[2] + 1
-            ])
-        }
-    }
-    const flat = corners.map(project)
+    const flat = (bounds ? boxCorners(bounds.min, bounds.max) : []).map(projector(camera, volume))
 
     return (
         <>
@@ -645,21 +360,6 @@ export const SelectionBox = ({
         </>
     )
 }
-
-const BOX_EDGES: readonly [number, number][] = [
-    [0, 1],
-    [2, 3],
-    [4, 5],
-    [6, 7],
-    [0, 2],
-    [1, 3],
-    [4, 6],
-    [5, 7],
-    [0, 4],
-    [1, 5],
-    [2, 6],
-    [3, 7]
-]
 
 export const AxisGizmo = ({volume, camera}: {volume: Volume; camera: Camera}) => {
     const {right, up, forward} = basisFor(camera, volume, 1)
@@ -724,27 +424,10 @@ const CUBE = (CUBE_VIEWBOX - CUBE_STROKE) / Math.sqrt(3)
 
 export const ViewCube = ({volume, camera}: {volume: Volume; camera: Camera}) => {
     const {right, up} = basisFor(camera, volume, 1)
-    const corners: Vec3[] = []
-    for (let i = 0; i < 8; i += 1)
-        corners.push([(i & 1) - 0.5, ((i >> 1) & 1) - 0.5, ((i >> 2) & 1) - 0.5])
-    const flat = corners.map(corner => ({
+    const flat = unitCubeCorners().map(corner => ({
         x: dot(corner, right) * CUBE,
         y: -dot(corner, up) * CUBE
     }))
-    const edges: [number, number][] = [
-        [0, 1],
-        [2, 3],
-        [4, 5],
-        [6, 7],
-        [0, 2],
-        [1, 3],
-        [4, 6],
-        [5, 7],
-        [0, 4],
-        [1, 5],
-        [2, 6],
-        [3, 7]
-    ]
 
     return (
         <svg
@@ -754,7 +437,7 @@ export const ViewCube = ({volume, camera}: {volume: Volume; camera: Camera}) => 
             height='60'
             aria-hidden='true'
         >
-            {edges.map(([from, to]) => (
+            {BOX_EDGES.map(([from, to]) => (
                 <line
                     key={`${String(from)}-${String(to)}`}
                     x1={flat[from]?.x ?? 0}

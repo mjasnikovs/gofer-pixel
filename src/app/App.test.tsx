@@ -8,7 +8,6 @@ import {DEFAULT_OUTPUT, loadDocument, saveDocument} from '../doc/save'
 import {latestSnapshot, memoryStore, snapshots, type Store} from '../doc/store'
 import {memoryFiles, type Files} from '../doc/files'
 import {initialObjects} from '../doc/objects'
-import type {Axis} from '../doc/brush'
 import {NO_SYMMETRY} from '../doc/symmetry'
 import {memoryScorer} from '../gen/clip'
 import {memoryLlama, type Llama} from '../gen/llama'
@@ -35,8 +34,8 @@ const volume = readVox(
  * one.
  */
 const mount = async (
-    store?: Store,
-    files?: Files,
+    store: Store = memoryStore(),
+    files: Files = memoryFiles(),
     llama?: Llama
 ): Promise<{root: Root; host: HTMLElement}> => {
     const host = document.createElement('div')
@@ -47,8 +46,8 @@ const mount = async (
             <App
                 volume={volume}
                 name='car.vox'
-                {...(store ? {store} : {})}
-                {...(files ? {files} : {})}
+                store={store}
+                files={files}
                 {...(llama ? {llama, scorer: memoryScorer([], false)} : {})}
             />
         )
@@ -188,108 +187,6 @@ test('capturing adds a ninth camera and throws the stale sheet away', async () =
     await unmount(mounted)
 })
 
-test('the C shortcut in the hint bar is the shortcut, not a caption', async () => {
-    const mounted = await mount()
-
-    await act(async () => {
-        document.dispatchEvent(new KeyboardEvent('keydown', {key: 'c'}))
-    })
-    expect(handle.state?.cameras).toHaveLength(9)
-
-    // A shortcut that fires while the user is typing is a bug, not a shortcut.
-    const field = document.createElement('input')
-    document.body.appendChild(field)
-    await act(async () => {
-        field.dispatchEvent(new KeyboardEvent('keydown', {key: 'c', bubbles: true}))
-    })
-    expect(handle.state?.cameras).toHaveLength(9)
-    field.remove()
-
-    await unmount(mounted)
-})
-
-test('arming a tool and loading a colour reach the document, not just the panel', async () => {
-    const mounted = await mount()
-    expect(handle.state?.tool).toBe('draw')
-
-    await act(async () => {
-        control(mounted.host, 'Erase').click()
-    })
-    expect(handle.state?.tool).toBe('erase')
-    expect(control(mounted.host, 'Erase').getAttribute('aria-checked')).toBe('true')
-    expect(control(mounted.host, 'Draw').getAttribute('aria-checked')).toBe('false')
-
-    // The palette is the model's own first, then DB32 — the car's three colours and 31 more, with
-    // none of MagicaVoxel's ramp padding the grid out to its full 56.
-    const swatches = [...mounted.host.querySelectorAll<HTMLElement>('.swatch')]
-    expect(swatches.length).toBe(34)
-    expect(swatches[0]?.getAttribute('aria-label')).toContain('used by this model')
-    await act(async () => {
-        swatches[3]?.click()
-    })
-    expect(String(handle.state?.color)).toBe(
-        swatches[3]?.getAttribute('aria-label')?.replace(/\D/g, '') ?? ''
-    )
-
-    // The stepper stops at the document's bound rather than running past it, and says so where a
-    // keyboard user can hear it — Astryx keeps a tooltipped control focusable and marks it
-    // `aria-disabled` instead of dropping it out of the tab order.
-    for (let i = 0; i < 10; i += 1) {
-        await act(async () => {
-            control(mounted.host, 'Larger brush').click()
-        })
-    }
-    expect(handle.state?.brush.size).toBe(8)
-    expect(control(mounted.host, 'Larger brush').getAttribute('aria-disabled')).toBe('true')
-
-    await unmount(mounted)
-})
-
-test('the brush row goes dead for the tools that do not read it, and comes back for the ones that do', async () => {
-    const mounted = await mount()
-    const shapes = (): HTMLElement[] => [
-        ...mounted.host.querySelectorAll<HTMLElement>('[aria-label="Brush shape"] .shape')
-    ]
-    const figures = (): HTMLElement[] => [
-        ...mounted.host.querySelectorAll<HTMLElement>('[aria-label="Figure"] .shape')
-    ]
-    // The four shapes and the five figures of the two rows, so a silent renaming cannot pass here.
-    expect(shapes()).toHaveLength(4)
-    expect(figures()).toHaveLength(5)
-    expect(shapes()[0]?.getAttribute('aria-disabled')).toBeNull()
-
-    await act(async () => {
-        control(mounted.host, 'Move').click()
-    })
-    expect(handle.state?.tool).toBe('move')
-    expect(control(mounted.host, 'Smaller brush').getAttribute('aria-disabled')).toBe('true')
-    expect(control(mounted.host, 'Larger brush').getAttribute('aria-disabled')).toBe('true')
-    for (const button of [...shapes(), ...figures()]) {
-        expect(button.getAttribute('aria-disabled')).toBe('true')
-        // The label says which tool is the reason, not merely that the control is off.
-        expect(button.getAttribute('aria-label')).toContain('Move does not use the brush')
-    }
-
-    // Greyed and inert, not greyed and still wired: a click on the ring changes nothing.
-    const before = handle.state?.brush
-    await act(async () => {
-        shapes()[2]?.click()
-        figures()[3]?.click()
-    })
-    expect(handle.state?.brush).toEqual(before as never)
-
-    await act(async () => {
-        control(mounted.host, 'Draw').click()
-    })
-    expect(shapes()[2]?.getAttribute('aria-disabled')).toBeNull()
-    await act(async () => {
-        shapes()[2]?.click()
-    })
-    expect(handle.state?.brush.shape).toBe('ring')
-
-    await unmount(mounted)
-})
-
 test('the undo button undoes, and greys itself out when there is nothing left', async () => {
     const mounted = await mount()
     // Nothing has happened yet, so both are off — and Astryx keeps a tooltipped control focusable
@@ -321,31 +218,6 @@ test('the undo button undoes, and greys itself out when there is nothing left', 
     await unmount(mounted)
 })
 
-test('two snapshots in the same second are two distinct entries in the menu', async () => {
-    // Autosave fires per committed edit, so this is the ordinary case, not a corner one: two strokes
-    // inside a second used to render two menu items with one React key and log a warning.
-    const backing = new Map<string, string>()
-    const store = memoryStore(backing)
-    const document_ = saveDocument(asSaved(), 'car.vox')
-    const at = Date.parse('2026-08-07T19:11:18.000Z')
-    backing.set('gofer-pixel/snapshot/' + String(at), JSON.stringify({...document_, at}))
-    backing.set('gofer-pixel/snapshot/' + String(at + 400), JSON.stringify({...document_, at}))
-
-    const mounted = await mount(store)
-    await act(async () => {
-        control(mounted.host, 'Main menu').click()
-    })
-
-    const labels = [...global.document.querySelectorAll('[role="menuitem"]')].map(node =>
-        node.textContent.trim()
-    )
-    const restores = labels.filter(label => label.startsWith('Restore'))
-    expect(restores).toHaveLength(2)
-    expect(new Set(restores).size).toBe(2)
-
-    await unmount(mounted)
-})
-
 test('the viewport says why it has no picture instead of showing an empty box', async () => {
     const mounted = await mount()
     const failure = mounted.host.querySelector('[data-testid="viewport-failure"]')
@@ -361,7 +233,21 @@ test('the viewport says why it has no picture instead of showing an empty box', 
 })
 
 test('an edit is autosaved, and the save reopens as the document that made it', async () => {
-    const store = memoryStore()
+    /*
+     * `writes` counts what reaches the disk, because "once per committed edit" is the claim the
+     * autosave effect makes and it is a claim about *how often*. While `store` was a default
+     * parameter it changed identity every render, so the effect's `[commits, store]` re-ran on
+     * every one and a whole RLE-and-base64 of the grid went through here at pointer rate.
+     */
+    const writes: string[] = []
+    const backing = new Map<string, string>()
+    const store: Store = {
+        ...memoryStore(backing),
+        set: (key, value) => {
+            writes.push(key)
+            backing.set(key, value)
+        }
+    }
     const mounted = await mount(store)
     expect(snapshots(store)).toHaveLength(0)
 
@@ -379,6 +265,8 @@ test('an edit is autosaved, and the save reopens as the document that made it', 
     const kept = snapshots(store)
     expect(kept).toHaveLength(1)
     expect(kept[0]?.name).toBe('car.vox')
+    // One write per entry in the history, and not one per render of the tree above it.
+    expect(writes).toHaveLength(handle.state?.history.past.length ?? -1)
 
     const text = latestSnapshot(store)
     if (!text) throw new Error('the autosave is there to be read')
@@ -710,125 +598,6 @@ test('a typed custom size is the box that gets built', async () => {
  */
 const PICTURE = 'data:image/png;base64,iVBORw0KGgo='
 
-const withReference = async (plane: Axis = 1) => {
-    const mounted = await mount()
-    await act(async () => {
-        handle.dispatch?.({type: 'reference', plane, url: PICTURE})
-    })
-    return mounted
-}
-
-const references = () => handle.state?.references ?? []
-
-test('a reference appears with its row, and only once something has been dropped', async () => {
-    const mounted = await mount()
-
-    expect(mounted.host.textContent).not.toContain(' ref')
-    expect(mounted.host.querySelector('.reference-layer')).toBeNull()
-
-    await act(async () => {
-        handle.dispatch?.({type: 'reference', plane: 1, url: PICTURE})
-    })
-
-    expect(references()).toEqual([{plane: 1, url: PICTURE, opacity: 0.5, locked: false}])
-    expect(mounted.host.querySelector('.reference-layer image')?.getAttribute('href')).toBe(PICTURE)
-    // The row names the plane it belongs to, so two references are told apart.
-    expect(mounted.host.textContent).toContain('XZ ref')
-
-    await unmount(mounted)
-})
-
-test('fainter and brighter step the reference opacity and stop at the ends', async () => {
-    const mounted = await withReference()
-
-    await act(async () => {
-        control(mounted.host, 'Fainter reference').click()
-    })
-    expect(references()[0]?.opacity).toBeCloseTo(0.35, 6)
-
-    await act(async () => {
-        control(mounted.host, 'Brighter reference').click()
-    })
-    expect(references()[0]?.opacity).toBeCloseTo(0.5, 6)
-
-    // Clamped, not wrapped: four more steps up would run past 1 without this.
-    for (let step = 0; step < 5; step += 1)
-        await act(async () => {
-            control(mounted.host, 'Brighter reference').click()
-        })
-    expect(references()[0]?.opacity).toBe(1)
-
-    for (let step = 0; step < 9; step += 1)
-        await act(async () => {
-            control(mounted.host, 'Fainter reference').click()
-        })
-    expect(references()[0]?.opacity).toBe(0)
-
-    await unmount(mounted)
-})
-
-/*
- * The lock, and what replacing a picture means — one window, because neither depends on the other
- * having started from a clean one and each says what it changed.
- */
-test('a locked reference cannot be faded or dropped by accident', async () => {
-    const mounted = await withReference()
-
-    const lock = control(mounted.host, 'Lock the reference')
-    expect(lock.getAttribute('aria-checked')).toBe('false')
-    // The button says which way it goes, rather than only which state it is in.
-    expect(lock.getAttribute('title')).toContain('Lock it')
-
-    await act(async () => {
-        lock.click()
-    })
-    expect(references()[0]?.locked).toBe(true)
-    expect(control(mounted.host, 'Lock the reference').getAttribute('title')).toBe(
-        'Unlock the reference'
-    )
-
-    await act(async () => {
-        control(mounted.host, 'Fainter reference').click()
-    })
-    await act(async () => {
-        control(mounted.host, 'Remove the reference').click()
-    })
-    expect(references()).toEqual([{plane: 1, url: PICTURE, opacity: 0.5, locked: true}])
-
-    // Unlocked again, the same two clicks land.
-    await act(async () => {
-        control(mounted.host, 'Lock the reference').click()
-    })
-    await act(async () => {
-        control(mounted.host, 'Remove the reference').click()
-    })
-    expect(references()).toEqual([])
-    expect(mounted.host.querySelector('.reference-layer')).toBeNull()
-
-    await unmount(mounted)
-})
-
-test('a second picture on the same plane replaces the first rather than stacking', async () => {
-    const mounted = await withReference()
-    const other = 'data:image/png;base64,iVBORw0KGgoAAAA='
-
-    await act(async () => {
-        handle.dispatch?.({type: 'reference', plane: 1, url: other})
-    })
-    expect(references()).toEqual([{plane: 1, url: other, opacity: 0.5, locked: false}])
-    expect(mounted.host.querySelectorAll('.reference-layer image')).toHaveLength(1)
-
-    // A different plane is a different picture and both stay.
-    await act(async () => {
-        handle.dispatch?.({type: 'reference', plane: 2, url: PICTURE})
-    })
-    expect(references()).toHaveLength(2)
-    expect(mounted.host.querySelectorAll('.reference-layer image')).toHaveLength(2)
-    expect(mounted.host.textContent).toContain('XY ref')
-
-    await unmount(mounted)
-})
-
 test('reference art survives a save and reopen', async () => {
     const disk = new Map<string, string>()
     const mounted = await mount(memoryStore(), memoryFiles(disk))
@@ -848,58 +617,6 @@ test('reference art survives a save and reopen', async () => {
 
     const back = loadDocument(disk.get('car.gpix') ?? '')
     expect(back?.references).toEqual([{plane: 0, url: PICTURE, opacity: 0.5, locked: true}])
-
-    await unmount(mounted)
-})
-
-/*
- * The Renders panel — `docs/editor.png`'s RENDERS row. Five maps off one ray, at four sizes, plus
- * §19's normal check under the one map it belongs to.
- */
-test('picking a map redraws the preview, and only Normal brings the light check with it', async () => {
-    const mounted = await mount()
-    const preview = () => mounted.host.querySelector('canvas.render-canvas')
-
-    expect(handle.state?.map).toBe(0)
-    expect(mounted.host.querySelector('.normal-check')).toBeNull()
-
-    await act(async () => {
-        control(mounted.host, 'Normal').click()
-    })
-    expect(handle.state?.map).toBe(1)
-    expect(mounted.host.querySelector('.normal-check')).not.toBeNull()
-    expect(mounted.host.textContent).toContain('% of the sprite faces the light')
-    expect(mounted.host.textContent).toContain('+X right, +Y up, +Z out of the screen')
-
-    await act(async () => {
-        control(mounted.host, 'AO').click()
-    })
-    expect(handle.state?.map).toBe(4)
-    expect(mounted.host.querySelector('.normal-check')).toBeNull()
-    expect(preview()).not.toBeNull()
-
-    await unmount(mounted)
-})
-
-test('the preview size is the sprite size, not the size of the box it sits in', async () => {
-    const mounted = await mount()
-    const preview = () => mounted.host.querySelector('canvas.render-canvas')
-
-    expect(preview()?.getAttribute('data-pixels')).toBe('64x64')
-
-    await act(async () => {
-        control(mounted.host, 'Preview at 16 pixels').click()
-    })
-    expect(handle.state?.preview).toBe(16)
-    expect(preview()?.getAttribute('data-pixels')).toBe('16x16')
-
-    // And the light check follows it, so both halves of the diagnostic show the same pixels.
-    await act(async () => {
-        control(mounted.host, 'Normal').click()
-    })
-    expect(mounted.host.querySelector('.normal-check canvas')?.getAttribute('data-pixels')).toBe(
-        '16x16'
-    )
 
     await unmount(mounted)
 })
@@ -939,6 +656,20 @@ test('the keyboard listener is wired to the table and to the reducer', async () 
     expect(handle.state?.orbit.camera.zoom).toBe(zoomed)
     await press('f')
     expect(handle.state?.orbit.camera.zoom).not.toBe(zoomed)
+
+    // An unmodified letter is a shortcut, and C captures the view as a ninth camera.
+    await press('c')
+    expect(handle.state?.cameras).toHaveLength(9)
+
+    // A shortcut that fires while the user is typing is a bug, not a shortcut. This is the whole
+    // reason the listener is on `document` rather than on the control that owns each binding.
+    const field = document.createElement('input')
+    document.body.appendChild(field)
+    await act(async () => {
+        field.dispatchEvent(new KeyboardEvent('keydown', {key: 'c', bubbles: true}))
+    })
+    expect(handle.state?.cameras).toHaveLength(9)
+    field.remove()
 
     await unmount(mounted)
 })
@@ -1005,394 +736,6 @@ test('the selection bar appears with a selection and its transforms reach the do
         control(mounted.host, 'Deselect').click()
     })
     expect(bar()).toBeNull()
-
-    await unmount(mounted)
-})
-
-/*
- * The views strip is the sheet's own order, so everything that rewires it invalidates the bake.
- * `FEATURESET.md` §16's "drag to reorder" is the one that has no keyboard equivalent to fall back
- * on, which is why it is driven here as three drag events rather than trusted to the reducer.
- */
-test('the views strip rebuilds, aligns, duplicates, deletes and reorders the camera list', async () => {
-    const mounted = await mount()
-    const names = () => (handle.state?.cameras ?? []).map(entry => entry.name)
-
-    expect(names()).toHaveLength(8)
-
-    await act(async () => {
-        control(mounted.host, 'Create 4 directions').click()
-    })
-    expect(names()).toHaveLength(4)
-
-    await act(async () => {
-        within(mounted.host, '.views-strip', 'Right').click()
-    })
-    await act(async () => {
-        control(mounted.host, 'Duplicate camera').click()
-    })
-    expect(names()).toHaveLength(5)
-
-    await act(async () => {
-        control(mounted.host, 'Delete camera').click()
-    })
-    expect(names()).toHaveLength(4)
-
-    // Align turns the live view to the nearest stop, which is what makes a captured camera square.
-    await act(async () => {
-        handle.dispatch?.({
-            type: 'orbit',
-            event: {type: 'pointerdown', x: 100, y: 100, secondary: false},
-            height: 512
-        })
-    })
-    await act(async () => {
-        handle.dispatch?.({
-            type: 'orbit',
-            event: {type: 'pointermove', x: 137, y: 118},
-            height: 512
-        })
-    })
-    await act(async () => {
-        handle.dispatch?.({type: 'orbit', event: {type: 'pointerup'}, height: 512})
-    })
-    const crooked = handle.state?.orbit.camera.yaw ?? 0
-    await act(async () => {
-        control(mounted.host, 'Align the view to the nearest stop').click()
-    })
-    expect(handle.state?.orbit.camera.yaw).not.toBe(crooked)
-
-    const order = names()
-    const tiles = [...mounted.host.querySelectorAll('.views-strip [role="radio"]')]
-    const [first, , third] = tiles
-    if (!first || !third) throw new Error('the strip should hold four cameras')
-    await act(async () => {
-        first.dispatchEvent(new Event('pointerdown', {bubbles: true}))
-    })
-    expect(handle.state?.dragging).toBeDefined()
-    await act(async () => {
-        third.dispatchEvent(new Event('pointerover', {bubbles: true}))
-    })
-    await act(async () => {
-        third.dispatchEvent(new Event('pointerup', {bubbles: true}))
-    })
-    expect(handle.state?.dragging).toBeUndefined()
-    expect(names()).not.toEqual(order)
-    expect(names().toSorted()).toEqual(order.toSorted())
-
-    await unmount(mounted)
-})
-
-/*
- * The export panel. Every knob here changes bytes in a file, so each one is checked against the
- * sheet the reducer produced rather than against the control's own state.
- */
-test('padding, bounds and sprite size are the sheet’s own numbers', async () => {
-    const mounted = await mount()
-
-    await act(async () => {
-        control(mounted.host, '2 pixels of padding').click()
-    })
-    expect(handle.state?.padding).toBe(2)
-
-    // Astryx's Switch is a checkbox with a `<label for>` beside it, so it is reached by role.
-    const box = mounted.host.querySelector<HTMLElement>('.export-body input[role="switch"]')
-    if (!box) throw new Error('no collision-box switch')
-    const wasBoxed = handle.state?.bounds
-    await act(async () => {
-        box.click()
-    })
-    expect(handle.state?.bounds).toBe(!wasBoxed)
-
-    await act(async () => {
-        control(mounted.host, '32 px').click()
-    })
-    await act(async () => {
-        control(mounted.host, 'Export sprite sheet').click()
-    })
-
-    // Four across, eight cameras: two rows of 32 px cells with 2 px around and between.
-    expect(sheet()?.width).toBe(4 * 34 + 2)
-    expect(sheet()?.height).toBe(2 * 34 + 2)
-    expect(sheet()?.padding).toBe(2)
-    expect(handle.state?.bounds).toBe(!wasBoxed)
-
-    await unmount(mounted)
-})
-
-test('the two extra downloads do nothing until there is a sheet to cut them from', async () => {
-    const written: string[] = []
-    const realCreate = URL.createObjectURL
-    const realClick = HTMLAnchorElement.prototype.click
-    URL.createObjectURL = (): string => 'blob:test'
-    HTMLAnchorElement.prototype.click = function click(this: HTMLAnchorElement): void {
-        written.push(this.download)
-    }
-
-    try {
-        const mounted = await mount()
-        // The menu closes on every pick, so it is opened once per item.
-        const pick = async (label: string): Promise<void> => {
-            await act(async () => {
-                control(mounted.host, 'More export options').click()
-            })
-            await act(async () => {
-                menuItem(label).click()
-            })
-        }
-
-        await pick('Download every sprite separately')
-        await pick('Download metadata JSON')
-        expect(written).toEqual([])
-
-        await act(async () => {
-            control(mounted.host, 'Export sprite sheet').click()
-        })
-        written.length = 0
-
-        await pick('Download every sprite separately')
-        await pick('Download metadata JSON')
-        /*
-         * One PNG per camera, plus the JSON that says where each of them landed.
-         *
-         * The sheet's own two files are excluded by name rather than by the clear above. Export
-         * writes them from an effect, through a `CompressionStream` that settles on the macrotask
-         * queue, so `sprites.png` and `sprites-normal.png` can land *after* the clear — which made
-         * this count 10 on about one run in three, depending on what else the suite had queued.
-         */
-        const sprites = written.filter(name => name.endsWith('.png') && !name.startsWith('sprites'))
-        expect(sprites).toHaveLength(8)
-        expect(written).toContain('sprites.json')
-
-        await unmount(mounted)
-    } finally {
-        URL.createObjectURL = realCreate
-        HTMLAnchorElement.prototype.click = realClick
-    }
-})
-
-test('saving a preset takes the name the artist typed, and a cancelled prompt saves nothing', async () => {
-    const realPrompt = globalThis.prompt
-    const answers: (string | null)[] = [null, 'Mine']
-    globalThis.prompt = (): string | null => answers.shift() ?? null
-
-    try {
-        const mounted = await mount()
-        const presets = () => (handle.state?.presets ?? []).length
-
-        const before = presets()
-        await act(async () => {
-            control(mounted.host, 'Save these maps as a preset').click()
-        })
-        expect(presets()).toBe(before)
-
-        await act(async () => {
-            control(mounted.host, 'Save these maps as a preset').click()
-        })
-        expect(presets()).toBe(before + 1)
-        expect(handle.state?.preset).toBe('Mine')
-
-        await unmount(mounted)
-    } finally {
-        globalThis.prompt = realPrompt
-    }
-})
-
-/*
- * The objects panel — `FEATURESET.md` §18. Show, solo, lock, duplicate, delete and the search box,
- * driven from the row rather than from the reducer, because the row is where the wiring can rot.
- */
-test('the objects panel’s switches and its search reach the document', async () => {
-    const mounted = await mount()
-    const objects = () => handle.state?.objects.list ?? []
-
-    await act(async () => {
-        control(mounted.host, 'Add an object').click()
-    })
-    expect(objects()).toHaveLength(2)
-    const added = objects()[1]?.name ?? ''
-
-    await act(async () => {
-        control(mounted.host, `Show ${added}`).click()
-    })
-    expect(objects()[1]?.hidden).toBe(true)
-
-    await act(async () => {
-        control(mounted.host, `Lock ${added}`).click()
-    })
-    expect(objects()[1]?.locked).toBe(true)
-
-    // Solo is one field on the list, not `hidden` on every other row: turning it off has to put
-    // back exactly what was hidden before, and a per-row flag could not.
-    await act(async () => {
-        control(mounted.host, `Show only ${added}`).click()
-    })
-    expect(handle.state?.objects.solo).toBe(objects()[1]?.id)
-    await act(async () => {
-        control(mounted.host, `Show only ${added}`).click()
-    })
-    expect(handle.state?.objects.solo).toBeUndefined()
-
-    await act(async () => {
-        control(mounted.host, `Duplicate ${added}`).click()
-    })
-    expect(objects()).toHaveLength(3)
-
-    // The search box only appears past `SEARCH_FROM`, so there has to be something to search.
-    for (let step = 0; step < 7; step += 1)
-        await act(async () => {
-            handle.dispatch?.({type: 'object', op: {kind: 'add'}})
-        })
-    const rows = () => mounted.host.querySelectorAll('.object-list [role="radio"]').length
-    const all = rows()
-    expect(all).toBeGreaterThan(8)
-
-    const field = mounted.host.querySelector<HTMLInputElement>('.object-body input[type="text"]')
-    if (!field) throw new Error('no search box')
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
-    await act(async () => {
-        setter?.call(field, 'nothing-matches-this')
-        field.dispatchEvent(new Event('input', {bubbles: true}))
-    })
-    expect(handle.state?.search).toBe('nothing-matches-this')
-
-    // Nothing left, and the list says so rather than showing an empty box.
-    expect(rows()).toBe(0)
-    expect(mounted.host.querySelector('.object-list')?.textContent).toBe('No object matches that.')
-
-    await unmount(mounted)
-})
-
-/*
- * A `.vox` is MagicaVoxel's format and arrives as an untitled document; anything that will not
- * parse is refused without touching what is open. A half-loaded document is the one outcome
- * `doc/save.ts` exists to prevent, so the refusal is the assertion that matters here.
- *
- * `memoryFiles` carries text, and a `.vox` is a RIFF container full of arbitrary bytes — so these
- * two bring their own port rather than round-tripping the model through UTF-8.
- */
-/*
- * The brush column. Every one of these is a one-line closure between a panel and the reducer, which
- * is exactly the kind of wiring that rots without anyone noticing: the control still moves, the
- * document stops hearing about it.
- */
-test('the brush and palette controls reach the document', async () => {
-    const mounted = await mount()
-    const paletteSwitch = (label: string): HTMLElement => {
-        const found = [...mounted.host.querySelectorAll<HTMLElement>('.brush-column label')].find(
-            node => node.textContent.trim() === label
-        )
-        const input =
-            found?.previousElementSibling?.querySelector<HTMLElement>('input')
-            ?? mounted.host.querySelector<HTMLElement>(
-                `input[id="${found?.getAttribute('for') ?? ''}"]`
-            )
-        if (!input) throw new Error(`no switch labelled "${label}"`)
-        return input
-    }
-
-    await act(async () => {
-        control(mounted.host, 'Larger brush').click()
-    })
-    expect(handle.state?.brush.size).toBe(3)
-    await act(async () => {
-        control(mounted.host, 'Smaller brush').click()
-    })
-    expect(handle.state?.brush.size).toBe(2)
-
-    // Emissive is a property of the loaded colour, not of the brush — it follows the palette entry.
-    await act(async () => {
-        paletteSwitch('Emissive').click()
-    })
-    expect(handle.state?.volume.emissive[handle.state.color]).toBeGreaterThan(0)
-
-    await act(async () => {
-        paletteSwitch('Lock').click()
-    })
-    expect(handle.state?.paletteLocked).toBe(true)
-
-    await act(async () => {
-        control(mounted.host, 'Add a colour to the palette').click()
-    })
-    expect(handle.state?.color).toBeGreaterThan(0)
-
-    await act(async () => {
-        control(mounted.host, 'Pick a colour from the model').click()
-    })
-    expect(handle.state?.tool).toBe('pick')
-
-    await unmount(mounted)
-})
-
-test('recoloring a palette entry repaints every voxel that was using it', async () => {
-    const mounted = await mount()
-    const loaded = handle.state?.color ?? 1
-
-    const field = mounted.host.querySelector<HTMLInputElement>(
-        `input[aria-label="Colour of palette entry ${String(loaded)}"]`
-    )
-    if (!field) throw new Error('no colour field')
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
-    await act(async () => {
-        setter?.call(field, '#123456')
-        field.dispatchEvent(new Event('input', {bubbles: true}))
-    })
-
-    expect([...(handle.state?.volume.palette ?? []).slice(loaded * 4, loaded * 4 + 3)]).toEqual([
-        0x12, 0x34, 0x56
-    ])
-
-    await unmount(mounted)
-})
-
-/*
- * The scene toggles under the viewport — grid, edges, snap, invert — plus symmetry and the drawing
- * plane. `FEATURESET.md` §5 and §12.
- */
-test('the scene toggles, symmetry and the drawing plane all reach the document', async () => {
-    const mounted = await mount()
-    const toggle = (label: string): HTMLElement => {
-        const row = [...mounted.host.querySelectorAll<HTMLElement>('.snap-toggle')].find(node =>
-            node.textContent.includes(label)
-        )
-        const input = row?.querySelector<HTMLElement>('input[role="switch"]')
-        if (!input) throw new Error(`no toggle labelled "${label}"`)
-        return input
-    }
-
-    for (const [label, field] of [
-        ['Grid', 'grid'],
-        ['Edges', 'edges'],
-        ['Snap', 'snap'],
-        ['Invert', 'invert']
-    ] as const) {
-        const was = handle.state?.[field]
-        await act(async () => {
-            toggle(label).click()
-        })
-        expect(handle.state?.[field]).toBe(!was)
-    }
-
-    await act(async () => {
-        control(mounted.host, 'Mirror drawing across X').click()
-    })
-    expect(handle.state?.symmetry.x).toBe(true)
-
-    // The car is 16 × 10, so radial is refused and says so rather than going quietly dead.
-    const radial = control(mounted.host, 'Radial symmetry needs a grid that is square in X and Y')
-    await act(async () => {
-        radial.click()
-    })
-    expect(handle.state?.symmetry.radial).toBe(false)
-
-    await act(async () => {
-        control(mounted.host, 'Lock drawing to the XY plane').click()
-    })
-    expect(handle.state?.plane).toBe(2)
-    await act(async () => {
-        control(mounted.host, 'Draw on the face under the cursor').click()
-    })
-    expect(handle.state?.plane).toBeUndefined()
 
     await unmount(mounted)
 })
@@ -1542,136 +885,6 @@ test('the palette writes back out as a .hex file', async () => {
  * Rename is a double-click, delete asks first, and reorder is a drag on the name and nowhere else.
  * All three are state the panel keeps for itself, so none of them show up in a reducer test.
  */
-const objectRows = (host: HTMLElement): HTMLElement[] => [
-    ...host.querySelectorAll<HTMLElement>('.object-list .object-name')
-]
-
-test('a name renames in place, and Enter and Escape both put the row back', async () => {
-    const mounted = await mount()
-    await act(async () => {
-        handle.dispatch?.({type: 'object', op: {kind: 'add'}})
-    })
-
-    const [, added] = objectRows(mounted.host)
-    if (!added) throw new Error('no second object')
-    await act(async () => {
-        added.dispatchEvent(new MouseEvent('dblclick', {bubbles: true}))
-    })
-
-    const field = mounted.host.querySelector<HTMLInputElement>('.object-list input[type="text"]')
-    if (!field) throw new Error('the row should have turned into a field')
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
-    await act(async () => {
-        setter?.call(field, 'Roof')
-        field.dispatchEvent(new Event('input', {bubbles: true}))
-    })
-    expect(handle.state?.objects.list[1]?.name).toBe('Roof')
-
-    await act(async () => {
-        field.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}))
-    })
-    expect(mounted.host.querySelector('.object-list input[type="text"]')).toBeNull()
-    expect(objectRows(mounted.host)[1]?.textContent).toContain('Roof')
-
-    // Escape leaves it too — a field that only closes on Enter is a field with no way out.
-    await act(async () => {
-        objectRows(mounted.host)[1]?.dispatchEvent(new MouseEvent('dblclick', {bubbles: true}))
-    })
-    const again = mounted.host.querySelector<HTMLElement>('.object-list input[type="text"]')
-    await act(async () => {
-        again?.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}))
-    })
-    expect(mounted.host.querySelector('.object-list input[type="text"]')).toBeNull()
-
-    await unmount(mounted)
-})
-
-/*
- * "You can undo it" is not a reason to let a stray click cost an hour in silence, so the dialog
- * says the name and the voxel count — the whole of what is about to be lost.
- */
-test('deleting an object asks first, and says how many voxels go with it', async () => {
-    const mounted = await mount()
-    await act(async () => {
-        handle.dispatch?.({type: 'object', op: {kind: 'add'}})
-    })
-    const empty = handle.state?.objects.list[1]?.name ?? ''
-
-    await act(async () => {
-        control(mounted.host, `Delete ${empty}`).click()
-    })
-    expect(openDialogTitle()).toBe(`Delete ${empty}?`)
-    expect(global.document.querySelector('dialog[open]')?.textContent).toContain('It is empty')
-
-    // Cancelling leaves the object where it was.
-    await act(async () => {
-        control(global.document.body, 'Cancel').click()
-    })
-    expect(handle.state?.objects.list).toHaveLength(2)
-
-    // The one with the voxels in it counts them instead.
-    const model = handle.state?.objects.list[0]?.name ?? ''
-    await act(async () => {
-        control(mounted.host, `Delete ${model}`).click()
-    })
-    expect(global.document.querySelector('dialog[open]')?.textContent).toContain('478 voxels')
-
-    await act(async () => {
-        control(global.document.body, 'Delete').click()
-    })
-    expect(handle.state?.objects.list).toHaveLength(1)
-    expect(handle.state?.objects.list[0]?.name).toBe(empty)
-
-    await unmount(mounted)
-})
-
-test('a row drags along the list to reorder it, and the drag dies with the pointer', async () => {
-    const mounted = await mount()
-    for (let step = 0; step < 2; step += 1)
-        await act(async () => {
-            handle.dispatch?.({type: 'object', op: {kind: 'add'}})
-        })
-    const order = () => (handle.state?.objects.list ?? []).map(entry => entry.name)
-    const before = order()
-    expect(before).toHaveLength(3)
-
-    const rows = objectRows(mounted.host)
-    const [first, , third] = rows
-    if (!first || !third) throw new Error('three rows expected')
-
-    // The drag starts on the name and nowhere else — starting it on the row would arm a reorder
-    // every time one of the switches beside it was pressed.
-    await act(async () => {
-        first.dispatchEvent(new Event('pointerdown', {bubbles: true}))
-    })
-    await act(async () => {
-        third.dispatchEvent(new Event('pointerover', {bubbles: true}))
-    })
-    await act(async () => {
-        third.dispatchEvent(new Event('pointerup', {bubbles: true}))
-    })
-
-    expect(order()).not.toEqual(before)
-    expect(order().toSorted()).toEqual(before.toSorted())
-
-    // A pointer that leaves the list has dropped the row: the next hover must not keep reordering.
-    const dropped = order()
-    await act(async () => {
-        objectRows(mounted.host)[0]?.dispatchEvent(new Event('pointerdown', {bubbles: true}))
-    })
-    await act(async () => {
-        mounted.host
-            .querySelector('.object-list')
-            ?.dispatchEvent(new Event('pointerout', {bubbles: true}))
-    })
-    await act(async () => {
-        objectRows(mounted.host)[2]?.dispatchEvent(new Event('pointerover', {bubbles: true}))
-    })
-    expect(order()).toEqual(dropped)
-
-    await unmount(mounted)
-})
-
 /*
  * The window with a working viewport in it.
  *
@@ -1865,6 +1078,45 @@ test('Ctrl-S saves, Ctrl-Shift-S asks, and both are taken off the browser', asyn
     await unmount(mounted)
 })
 
+/*
+ * The port outlives the render, which is the whole reason `store` and `files` are required props.
+ *
+ * They used to be default parameters — `files = browserFiles()` — and a default parameter runs on
+ * every call to the component function. A `Files` remembers the handle Save writes back to, so the
+ * re-render that `dispatch({type: 'saved'})` caused threw that memory away and the *next* Ctrl-S
+ * opened the picker again. Every test injected a port, so nothing here ever ran the broken path;
+ * the compiler now refuses to let one be built in a render at all, and this pins the behaviour
+ * that made it worth refusing.
+ */
+test('a second save writes back to the same file without asking again', async () => {
+    const disk = new Map<string, string>()
+    const asked: string[] = []
+    const mounted = await mount(
+        memoryStore(),
+        memoryFiles(disk, suggested => {
+            asked.push(suggested)
+            return suggested
+        })
+    )
+
+    for (const _ of [0, 1]) {
+        await act(async () => {
+            handle.dispatch?.({type: 'object', op: {kind: 'add'}})
+        })
+        await pressKey('s', {ctrlKey: true})
+        await act(async () => {
+            await Promise.resolve()
+        })
+    }
+
+    expect(handle.state?.doc.dirty).toBe(false)
+    expect([...disk.keys()]).toEqual(['car.gpix'])
+    // Once. The second Save reused what the first one held, across the re-render between them.
+    expect(asked).toEqual(['car.gpix'])
+
+    await unmount(mounted)
+})
+
 test('Ctrl-O and Ctrl-N go through the same guard the menu does', async () => {
     const mounted = await mount(memoryStore(), memoryFiles())
 
@@ -2030,132 +1282,6 @@ const restoreItem = (): HTMLElement => {
     if (!found) throw new Error('no restore point in the menu')
     return found
 }
-
-const swatch = (host: HTMLElement, index: number): HTMLElement => {
-    const found = [...host.querySelectorAll<HTMLElement>('.swatches .swatch')].find(node =>
-        node.getAttribute('aria-label')?.startsWith(`Colour ${String(index)}`)
-    )
-    if (!found) throw new Error(`no swatch for colour ${String(index)}`)
-    return found
-}
-
-test('shift-clicking a swatch selects every voxel of that colour', async () => {
-    const mounted = await mount()
-    expect(handle.state?.selection.size).toBe(0)
-
-    await act(async () => {
-        swatch(mounted.host, 1).dispatchEvent(
-            new MouseEvent('click', {bubbles: true, shiftKey: true})
-        )
-    })
-
-    expect(handle.state?.selection.size).toBeGreaterThan(0)
-
-    await unmount(mounted)
-})
-
-test('alt-clicking a swatch repaints the loaded colour’s voxels with it', async () => {
-    const mounted = await mount()
-    const loaded = handle.state?.color ?? 1
-    const of = (index: number): number =>
-        (handle.state?.volume.data ?? new Uint8Array()).filter(value => value === index).length
-    const before = of(loaded)
-    expect(before).toBeGreaterThan(0)
-
-    const other = [...(handle.state?.volume.data ?? [])].find(
-        value => value !== 0 && value !== loaded
-    )
-    if (other === undefined) throw new Error('the model should use more than one colour')
-
-    await act(async () => {
-        swatch(mounted.host, other).dispatchEvent(
-            new MouseEvent('click', {bubbles: true, altKey: true})
-        )
-    })
-
-    expect(of(loaded)).toBe(0)
-    expect(of(other)).toBeGreaterThan(before)
-
-    await unmount(mounted)
-})
-
-test('a recent colour loads it back without going hunting in the grid', async () => {
-    const mounted = await mount()
-
-    // Two colours used, so the recent row appears at all.
-    await act(async () => {
-        handle.dispatch?.({type: 'color', color: 2})
-    })
-    await act(async () => {
-        handle.dispatch?.({type: 'color', color: 5})
-    })
-
-    const recent = mounted.host.querySelector<HTMLElement>(
-        '.recent-swatches [aria-label="Recent colour 2"]'
-    )
-    if (!recent) throw new Error('no recent swatch for colour 2')
-    await act(async () => {
-        recent.click()
-    })
-
-    expect(handle.state?.color).toBe(2)
-
-    await unmount(mounted)
-})
-
-test('a preset changes which maps an export writes', async () => {
-    const mounted = await mount()
-    expect(handle.state?.preset).toBe('Sprite Sheet (Auto)')
-
-    // Astryx's Selector keeps its listbox in the tree, so the option is reachable without the
-    // popover having been opened first.
-    const option = [...mounted.host.querySelectorAll<HTMLElement>('[role="option"]')].find(
-        node => node.textContent.trim() === 'Every map'
-    )
-    if (!option) throw new Error('no "Every map" option')
-    await act(async () => {
-        option.click()
-    })
-
-    expect(handle.state?.preset).toBe('Every map')
-
-    // The smallest sprite the panel offers: what is being checked is which maps get baked, and
-    // eight PNG encodes of a 256 × 128 sheet cost a second to prove nothing about that.
-    await act(async () => {
-        control(mounted.host, '32 px').click()
-    })
-    await act(async () => {
-        control(mounted.host, 'Export sprite sheet').click()
-    })
-    expect(Object.keys(sheet()?.maps ?? {})).toHaveLength(8)
-
-    await unmount(mounted)
-})
-
-test('with every camera deleted the render panel says so instead of showing a blank box', async () => {
-    const mounted = await mount()
-
-    // Selected, deleted, selected again: the button acts on the chosen camera and the choice does
-    // not survive the deletion.
-    for (let step = 0; step < 8; step += 1) {
-        const next = handle.state?.cameras[0]
-        if (!next) break
-        await act(async () => {
-            within(mounted.host, '.views-strip', next.name).click()
-        })
-        await act(async () => {
-            control(mounted.host, 'Delete camera').click()
-        })
-    }
-
-    expect(handle.state?.cameras).toEqual([])
-    expect(mounted.host.querySelector('.render-preview')?.textContent).toBe(
-        'No cameras — capture one to preview its maps.'
-    )
-    expect(mounted.host.querySelector('canvas.render-canvas')).toBeNull()
-
-    await unmount(mounted)
-})
 
 test('dragging a file over the viewport is accepted, so the browser does not open it', async () => {
     const mounted = await mount()

@@ -3,6 +3,7 @@ import {encodePng} from '../image/png'
 import {basisFor, createCamera} from '../render/camera'
 import {render} from '../render/raycast'
 import type {Volume} from '../render/volume'
+import {toBase64} from '../image/base64'
 
 /**
  * The pictures a candidate is judged on.
@@ -42,15 +43,6 @@ export const onGrey = (rgba: Uint8Array): Uint8Array => {
         out[i + 3] = 255
     }
     return out
-}
-
-/** Chunked, because `String.fromCharCode(...bytes)` on a large buffer blows the argument stack. */
-export const toBase64 = (bytes: Uint8Array): string => {
-    let binary = ''
-    for (let i = 0; i < bytes.length; i += 0x8000) {
-        binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
-    }
-    return btoa(binary)
 }
 
 /** One candidate's four views, as base64 PNGs — what the scoring service is handed. */

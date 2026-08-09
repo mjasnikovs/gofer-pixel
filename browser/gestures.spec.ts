@@ -520,6 +520,48 @@ test('copy and paste put the block back one voxel up', async ({page}) => {
     expect(pasted.selection).toBeGreaterThan(0)
 })
 
+/**
+ * Slice mode is a thing you can *see* — `FEATURESET.md` §6 is "the layers in front going away".
+ *
+ * It is here rather than in `bun test` because it is the only place the claim is observable: the
+ * assertion is about the pixels the GPU actually drew, and `state.slice` flipping is what the
+ * reducer test already covers. It is worth a test at all because for a while it was false. The app
+ * derived the viewport's grid with `shownVolume` while `hoverAt` picked against `visible()` and
+ * `bake` shipped `visible()` — so the model on screen stayed whole while the click landed on a
+ * model with everything in front of the layer removed. One derivation now, in `doc/gesture.ts`.
+ */
+const opaqueViewportPixels = (page: Page): Promise<number> =>
+    page.evaluate(() => {
+        const canvas = document.querySelector('canvas.viewport-canvas')
+        if (!(canvas instanceof HTMLCanvasElement)) throw new Error('no canvas')
+        const gl = canvas.getContext('webgl2')
+        if (!gl) throw new Error('no context')
+        const pixels = new Uint8Array(canvas.width * canvas.height * 4)
+        gl.readPixels(0, 0, canvas.width, canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, pixels)
+        let count = 0
+        for (let i = 3; i < pixels.length; i += 4) if (pixels[i] === 255) count += 1
+        return count
+    })
+
+test('slice mode takes the layers in front off the screen, not just out of the state', async ({
+    page
+}) => {
+    await ready(page)
+    const whole = await opaqueViewportPixels(page)
+    expect(whole).toBeGreaterThan(1000)
+
+    await page.keyboard.press('s')
+    expect((await read(page)).slice).toBeGreaterThanOrEqual(0)
+    const cut = await opaqueViewportPixels(page)
+
+    // The near half of the car is gone, so there is visibly less of it lit.
+    expect(cut).toBeLessThan(whole)
+
+    await page.keyboard.press('s')
+    expect((await read(page)).slice).toBeUndefined()
+    expect(await opaqueViewportPixels(page)).toBe(whole)
+})
+
 test('the keys that are not about the selection reach their own corners', async ({page}) => {
     const {was} = await start(page, 'move')
 

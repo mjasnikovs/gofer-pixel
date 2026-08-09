@@ -1,6 +1,13 @@
 import {expect, test} from 'bun:test'
 import {countFilled, type VoxSpec} from './ops'
-import {browserLlama, candidatesOf, generateMany, memoryLlama, SYSTEM, type Attempt} from './llama'
+import {
+    browserLlama,
+    generateMany,
+    memoryLlama,
+    SYSTEM,
+    type Attempt,
+    type Candidate
+} from './llama'
 import {readManifest, type Manifest, type WorkedExample} from './bank'
 import MANIFEST from '../assets/examples/examples.json'
 
@@ -25,6 +32,10 @@ const empty: VoxSpec = {
 
 const at = (): Date => new Date(0)
 
+/** The attempts that produced something. One line, and it was an export nothing but this used. */
+const landed = (attempts: readonly Attempt[]): readonly Candidate[] =>
+    attempts.filter(attempt => attempt.ok).map(attempt => attempt.candidate)
+
 test('every candidate gets its own seed, counting up from the one it was given', async () => {
     const llama = memoryLlama([tower])
 
@@ -42,7 +53,7 @@ test('a candidate carries the voxels, the spec and what produced it', async () =
         temperature: 0.5,
         now: at
     })
-    const candidate = candidatesOf(attempts)[0]
+    const candidate = landed(attempts)[0]
     if (!candidate) throw new Error('expected a candidate')
 
     expect(countFilled(candidate.volume)).toBe(4 * 4 * 8)
@@ -66,7 +77,7 @@ test('a failed candidate is reported, not quietly replaced', async () => {
     expect(attempts[1]).toEqual({ok: false, error: 'llama-server 503: busy'})
     // Three asked for, three attempted: a silent retry would hide a prompt that has stopped working.
     expect(llama.seen).toHaveLength(3)
-    expect(candidatesOf(attempts)).toHaveLength(2)
+    expect(landed(attempts)).toHaveLength(2)
 })
 
 test('a model that rasterises to nothing is a failure rather than an empty document', async () => {

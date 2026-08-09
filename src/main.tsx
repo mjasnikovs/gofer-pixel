@@ -14,6 +14,7 @@ import {App} from './app/App'
 import {handle} from './app/handle'
 import {goferPixelTheme} from './theme/gofer-pixel'
 import carVox from './assets/car.vox?url'
+import {browserFiles} from './doc/files'
 import {loadDocument} from './doc/save'
 import {browserStore, latestSnapshot} from './doc/store'
 import {readVox} from './vox/vox-file'
@@ -34,8 +35,18 @@ import {readVox} from './vox/vox-file'
  * click away in the snapshot list. A save that fails to load is skipped rather than fatal: the
  * worst case has to be an old document, never a window that will not open.
  */
+/**
+ * The two stateful ports, built once for the life of the process.
+ *
+ * Not in `App`'s default parameters, which is where they used to be: a default parameter runs on
+ * every call to the component function, so `files` lost the handle Save writes back to on the very
+ * re-render that saving caused, and `store` changed identity fast enough to make the autosave
+ * effect fire on every pointer move. A port is a thing with memory; it has to outlive a render.
+ */
+const store = browserStore()
+const files = browserFiles()
+
 const recovered = (() => {
-    const store = browserStore()
     const latest = latestSnapshot(store)
     return latest ? loadDocument(latest) : undefined
 })()
@@ -60,6 +71,8 @@ if (host) {
                 <App
                     volume={volume}
                     name={name}
+                    store={store}
+                    files={files}
                     opened={recovered ? {...recovered, name, unsaved: true} : undefined}
                 />
             </Theme>

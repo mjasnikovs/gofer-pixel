@@ -221,7 +221,7 @@ export const GridPanel = ({state, dispatch}: {state: AppState; dispatch: Dispatc
     const {grid, edges, snap, invert, symmetry, plane, references, volume} = state
     const canRadial = symmetryCanRadial(volume)
     /** How wide one voxel lands on screen. The zoom is pixels per world unit; a voxel is one. */
-    const voxelSize = Math.max(1, Math.round(state.cell / state.orbit.camera.zoom))
+    const voxelSize = Math.max(1, Math.round(state.output.cell / state.orbit.camera.zoom))
     const chrome = (next: Partial<AppState>): void => {
         dispatch({type: 'chrome', chrome: next})
     }

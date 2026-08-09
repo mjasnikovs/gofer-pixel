@@ -54,10 +54,12 @@ test('forgetting the file makes the next save ask again', async () => {
 })
 
 /*
- * A `.vox` is somebody else's format and this app cannot write it. Opening one must therefore not
- * arm the reuse path, or the next Ctrl+S turns their model into JSON MagicaVoxel cannot read.
+ * A read that did not ask to be remembered must not arm the reuse path — see `ReadFor`. It is the
+ * palette loader and the generate dialog's reference model that depend on this, and it is why all
+ * three readers can share one instance of the port. The rule that a `.vox` opened as a *document*
+ * is untitled is `openProject`'s, and `session.test.ts` holds it.
  */
-test('opening a .vox does not make it the file Save writes back to', async () => {
+test('a read that does not ask to be remembered is not the file Save writes back to', async () => {
     const disk = new Map<string, string>([['car.vox', 'VOX ']])
     const asked: string[] = []
     const files = memoryFiles(disk, suggested => {
@@ -191,7 +193,7 @@ test('a picker the artist escapes out of writes nothing and reports nothing', as
     )
 })
 
-test('opening a .vox reads its real bytes and does not arm the overwrite', async () => {
+test('an unremembered read gets its real bytes back and does not arm the overwrite', async () => {
     // A byte above 0x7f, which is what makes reading a binary file as text lossy.
     const raw = Uint8Array.from([0x56, 0x4f, 0x58, 0x20, 0x99, 0x00, 0xff])
     const stub = stubPicker([])
@@ -223,7 +225,7 @@ test('opening a .vox reads its real bytes and does not arm the overwrite', async
     )
 })
 
-test('opening a .gpix does arm the overwrite, so the next Ctrl+S is silent', async () => {
+test('a remembered read arms the overwrite, so the next Ctrl+S is silent', async () => {
     const stub = stubPicker([{name: 'knight.gpix', text: '{"a":1}'}])
     await withPicker(
         {
@@ -235,7 +237,7 @@ test('opening a .gpix does arm the overwrite, so the next Ctrl+S is silent', asy
         },
         async () => {
             const files = browserFiles()
-            expect((await files.open(PROJECT_ACCEPT))?.text).toBe('{"a":1}')
+            expect((await files.open(PROJECT_ACCEPT, {remember: true}))?.text).toBe('{"a":1}')
 
             expect(await files.save('knight.gpix', 'edited', true)).toBe('knight.gpix')
             expect(stub.asked).toEqual([])

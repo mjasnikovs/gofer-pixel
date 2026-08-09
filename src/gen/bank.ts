@@ -1,6 +1,3 @@
-import type {Volume} from '../render/volume'
-import {decompose, exampleCost, opsToCode} from './decompose'
-
 /**
  * The worked-example bank: one directory of models, one manifest that describes them.
  *
@@ -125,35 +122,3 @@ export const readPicks = (value: string, manifest: Manifest): readonly string[] 
     }
     return out.length === 0 ? [manifest.fallback] : out
 }
-
-/**
- * A model, as the example that teaches it.
- *
- * The headline is the artist's `notes` when there are any, and the measurements otherwise. The
- * measurements alone still tell the model that a plan comes before the code, which is most of what
- * the comment is doing.
- */
-export const exampleFrom = (entry: BankEntry, volume: Volume): WorkedExample => {
-    const spec = decompose(volume, entry.subject)
-    const [width, height, depth] = spec.size
-    const name = entry.subject.replace(/^(a|an|the) /, '')
-    const measured = `${name}: ${String(width)} wide, ${String(height)} tall, ${String(depth)} long`
-    return {
-        prompt: entry.subject,
-        reply: opsToCode(spec, entry.notes === '' ? measured : `${name}: ${entry.notes}`)
-    }
-}
-
-/**
- * What an example costs before it stops being worth its rent.
- *
- * Every candidate in every batch pays for every example it is shown, in full. 80 lines is roughly
- * 900 tokens, and at three examples that is most of a candidate's budget spent before the model has
- * read the prompt. The answer to a model that will not fit is a simpler model.
- */
-export const LINE_BUDGET = 80
-
-export const overBudget = (example: WorkedExample): boolean =>
-    example.reply.split('\n').length > LINE_BUDGET
-
-export {exampleCost}

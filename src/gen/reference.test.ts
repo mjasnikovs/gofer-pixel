@@ -7,7 +7,7 @@ import {NO_SYMMETRY} from '../doc/symmetry'
 import {DEFAULT_OUTPUT} from '../doc/save'
 import {createVolume, setVoxel} from '../render/volume'
 import {magicaPalette} from '../vox/vox-file'
-import {LINE_BUDGET} from './bank'
+import {LINE_BUDGET} from './teaching'
 import {choose, forget, recall, REFERENCE_KEY, take, takeFile} from './reference'
 
 /**
@@ -149,11 +149,27 @@ test('a cancelled picker is not a failure and must not be reported as one', asyn
     expect(await choose(memoryStore(), empty, 'a knight')).toBeUndefined()
 })
 
-test('a chosen model is taken through the port Open and Save use', async () => {
+/*
+ * The same port the app opens and saves through, and a `.gpix` at that — which is exactly the case
+ * that used to force a second `Files` instance to exist. The read passes no `remember`, so picking
+ * somebody's project as a teacher cannot make it the file the next Save writes the document over.
+ */
+test('a chosen model is taken through the port Open and Save use, and does not become the save target', async () => {
     const store = memoryStore()
-    const disk = new Map<string, string | Uint8Array>([['mine.gpix', gpix(simple())]])
-    const outcome = await choose(store, memoryFiles(disk), 'a knight')
+    const theirs = gpix(simple())
+    const disk = new Map<string, string | Uint8Array>([['mine.gpix', theirs]])
+    const asked: string[] = []
+    const files = memoryFiles(disk, suggested => {
+        asked.push(suggested)
+        return suggested
+    })
+    const outcome = await choose(store, files, 'a knight')
 
     expect(outcome?.ok).toBe(true)
     expect(recall(store)).toEqual(outcome?.example)
+
+    // A Save asking to reuse still opens the picker: the teacher was read, never adopted.
+    await files.save('car.gpix', '{}', true)
+    expect(asked).toEqual(['car.gpix'])
+    expect(disk.get('mine.gpix')).toBe(theirs)
 })

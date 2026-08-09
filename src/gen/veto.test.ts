@@ -45,7 +45,7 @@ test('the match is generous, because a good cat once came back "sheep"', () => {
 
 test('a word that is already the subject costs no second call', async () => {
     const veto = memoryVeto(['cat'])
-    expect(await judge(veto, cat(), 'a cat')).toEqual({word: 'cat', pass: true, why: 'named'})
+    expect(await judge(veto, cat(), 'a cat')).toEqual({word: 'cat', pass: true})
     expect(veto.seen).toHaveLength(0)
 })
 
@@ -53,16 +53,14 @@ test('a different word is put to the model, and its answer decides', async () =>
     const agrees = memoryVeto(['sheep'], true)
     expect(await judge(agrees, cat(), 'a cat')).toEqual({
         word: 'sheep',
-        pass: true,
-        why: 'agreed'
+        pass: true
     })
     expect(agrees.seen).toEqual([{word: 'sheep', prompt: 'a cat'}])
 
     const refuses = memoryVeto(['robot'], false)
     expect(await judge(refuses, cat(), 'a cat')).toEqual({
         word: 'robot',
-        pass: false,
-        why: 'wrong'
+        pass: false
     })
 })
 
@@ -70,13 +68,11 @@ test('every way of not getting an answer passes the candidate', async () => {
     // A veto that vetoes cats is worse than no veto, so nothing but an explicit "no" fails.
     expect(await judge(memoryVeto([new Error('llama-server 503')]), cat(), 'a cat')).toEqual({
         word: '',
-        pass: true,
-        why: 'unavailable'
+        pass: true
     })
     expect(await judge(memoryVeto(['']), cat(), 'a cat')).toEqual({
         word: '',
-        pass: true,
-        why: 'silent'
+        pass: true
     })
     const broken: Veto = {
         name: () => Promise.resolve('sheep'),
@@ -84,8 +80,7 @@ test('every way of not getting an answer passes the candidate', async () => {
     }
     expect(await judge(broken, cat(), 'a cat')).toEqual({
         word: 'sheep',
-        pass: true,
-        why: 'unavailable'
+        pass: true
     })
 })
 

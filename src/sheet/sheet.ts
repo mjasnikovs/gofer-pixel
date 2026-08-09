@@ -29,15 +29,13 @@ export interface Sheet {
      * UI test three and a half seconds of garbage collection. What a preset wants is what gets
      * built; `FEATURESET.md` §38 is the reason there is a preset to ask.
      */
+    /**
+     * Height and depth are one measurement read two ways round, so the exporter writes both rather
+     * than making the artist work out which convention their engine wants. They are exact
+     * complements — `height = 255 - depth` — and neither costs a second render.
+     */
     readonly maps: Readonly<Partial<Record<SheetMap, Uint8Array>>>
 }
-
-/**
- * Height and depth are one measurement read two ways round, so the exporter writes both rather than
- * making the artist work out which convention their engine wants. They are exact complements —
- * `height = 255 - depth` — and neither costs a second render.
- */
-export const HEIGHT_IS_DEPTH = true
 
 /** Four across is what a sheet of eight directions wants to be; it is a layout, not a constraint. */
 export const DEFAULT_COLUMNS = 4

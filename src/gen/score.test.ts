@@ -1,6 +1,6 @@
 import {expect, test} from 'bun:test'
 import {createVolume, setVoxel, type Volume} from '../render/volume'
-import {bboxFill, connectivity, overallScore, scoreModel, sliceUsage, symmetryX} from './score'
+import {bboxFill, connectivity, overallScore, scoreModel, sliceUsage} from './score'
 
 const box = (
     volume: Volume,
@@ -38,7 +38,6 @@ test('an empty grid scores zero everywhere rather than dividing by nothing', () 
         connectivity: 0,
         sliceUsage: 0,
         bboxFill: 0,
-        symmetryX: 0,
         colorsUsed: 0,
         voxels: 0
     })
@@ -65,19 +64,6 @@ test('a solid block fills its box; a hollow one does not', () => {
     const hollow = box(createVolume(6, 6, 6), [0, 0, 0], [5, 5, 5])
     box(hollow, [1, 1, 1], [4, 4, 4], 0)
     expect(bboxFill(hollow)).toBeCloseTo((216 - 64) / 216, 5)
-})
-
-test('symmetry is measured about the grid centre, which is what mirror_x reflects across', () => {
-    const centred = createVolume(8, 4, 4)
-    setVoxel(centred, 1, 0, 0, 1)
-    setVoxel(centred, 6, 0, 0, 1)
-    expect(symmetryX(centred)).toBe(1)
-
-    // The same shape, shifted. It is symmetric to look at and not about the axis it claimed.
-    const shifted = createVolume(8, 4, 4)
-    setVoxel(shifted, 1, 0, 0, 1)
-    setVoxel(shifted, 2, 0, 0, 1)
-    expect(symmetryX(shifted)).toBe(0)
 })
 
 test('colours counted are the ones on voxels, not the ones in the palette', () => {

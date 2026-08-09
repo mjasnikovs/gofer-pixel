@@ -303,6 +303,3 @@ export const generateMany = async (
     }
     return attempts
 }
-
-export const candidatesOf = (attempts: readonly Attempt[]): readonly Candidate[] =>
-    attempts.filter(attempt => attempt.ok).map(attempt => attempt.candidate)

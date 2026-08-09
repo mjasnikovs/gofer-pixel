@@ -8,8 +8,8 @@ import {Switch} from '@astryxdesign/core/Switch'
 import {Text} from '@astryxdesign/core/Text'
 import {TextInput} from '@astryxdesign/core/TextInput'
 import {ISOMETRIC_PITCH} from '../doc/cameras'
-import {browserFiles, type Files} from '../doc/files'
-import {browserStore, type Store} from '../doc/store'
+import type {Files} from '../doc/files'
+import type {Store} from '../doc/store'
 import type {WorkedExample} from '../gen/bank'
 import {choose, forget, recall, takeFile, type Outcome} from '../gen/reference'
 import {
@@ -118,8 +118,8 @@ const CandidateCard = ({
 export const GenerateDialog = ({
     library,
     llama,
-    store = browserStore(),
-    files = browserFiles(),
+    store,
+    files,
     scorer,
     veto,
     onClose,
@@ -130,15 +130,16 @@ export const GenerateDialog = ({
     library: () => Promise<Library>
     /** Overridden by tests. Left out, it is built from the bank's manifest once that has loaded. */
     llama?: Llama
-    /** Where the dropped reference is remembered across reloads. */
-    store?: Store
+    /** Where the dropped reference is remembered across reloads. Required — see `App`. */
+    store: Store
     /**
      * Where "Choose a model" reads from — see `doc/files.ts`.
      *
-     * Its own instance, not the app's. This port remembers which file Save writes back to, and a
-     * reference model is not the document.
+     * The app's own instance, and it may be, because the read passes no `remember`. It used to be a
+     * second port built here precisely so a reference model could not become the file Save writes
+     * back to; that rule now lives at the seam instead of in a duplicated construction.
      */
-    files?: Files
+    files: Files
     scorer: Scorer
     /** The naming judge — see `gen/veto.ts`. Same server as `llama`, different question. */
     veto: Veto

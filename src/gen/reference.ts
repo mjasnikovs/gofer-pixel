@@ -1,7 +1,8 @@
 import {MODEL_ACCEPT, volumeFromFile} from '../doc/models'
 import type {Files} from '../doc/files'
 import type {Store} from '../doc/store'
-import {exampleFrom, LINE_BUDGET, overBudget, type WorkedExample} from './bank'
+import type {WorkedExample} from './bank'
+import {exampleFrom, lineCount, LINE_BUDGET} from './teaching'
 
 /**
  * The artist's own model, as the example it teaches the next batch with.
@@ -82,9 +83,9 @@ export const take = (store: Store, name: string, bytes: Uint8Array, subject: str
             ok: false
         }
     }
-    const example = exampleFrom({id: 'reference', subject, use: '', notes: ''}, volume)
-    if (overBudget(example)) {
-        const lines = example.reply.split('\n').length
+    const {example, fits} = exampleFrom({id: 'reference', subject, use: '', notes: ''}, volume)
+    if (!fits) {
+        const lines = lineCount(example)
         return {
             example: undefined,
             note:
@@ -118,7 +119,9 @@ export const choose = async (
     files: Files,
     subject: string
 ): Promise<Outcome | undefined> => {
-    const picked = await files.open(MODEL_ACCEPT, 'Voxel model')
+    // No `remember`: a reference model is not the document, so reading one — even a `.gpix` — must
+    // not become the file the next Save writes the project over.
+    const picked = await files.open(MODEL_ACCEPT, {description: 'Voxel model'})
     if (!picked) return undefined
     return take(store, picked.name, picked.bytes, subject)
 }

@@ -368,19 +368,36 @@ const OUTSIDE: Blocked = {reason: 'outside', object: undefined}
 const live = (draft: Draft): Volume => ({...draft.volume})
 
 /**
- * The grid as the artist sees it: hidden objects emptied out of it.
+ * The second half of `visible`: the layers in front of the slice taken away — `FEATURESET.md` §6.
  *
- * Everything that renders, picks or exports goes through here, so what is on screen is what can be
- * clicked and what gets written. It returns the volume itself when nothing is hidden, which is the
- * usual case and the reason this is cheap enough to call per pointer event.
+ * Split out from it, and this is the only reason: the app has to memoise the two halves against
+ * different things. Hiding an object rebuilds a grid, so `shownVolume` must not re-run while the
+ * view turns; slicing depends on which way the camera faces, so it must. Composing them here
+ * rather than in `App.tsx` is what stops the picture on screen being derived from a *different*
+ * rule than the pointer and the bake — which is what it was, and in slice mode the model on screen
+ * was whole while the click landed on a model with everything in front of the layer removed.
+ *
+ * Returns `shown` itself when slice mode is off, which is the usual case and is what makes it
+ * cheap enough to sit inside a memo that the camera invalidates.
  */
-export const visible = (state: Gesture): Volume => {
-    const shown = shownVolume(state.volume, state.objects)
+export const slicedFor = (state: Gesture, shown: Volume): Volume => {
     if (state.slice === undefined) return shown
     const axis = state.plane ?? 2
     const {forward} = basisFor(state.orbit.camera, state.volume, 1)
     return slicedVolume(shown, {axis, layer: state.slice}, forward)
 }
+
+/**
+ * The grid as the artist sees it: hidden objects emptied out of it, and in slice mode the layers in
+ * front of the current one as well.
+ *
+ * Everything that renders, picks or exports goes through here or through `slicedFor`, so what is on
+ * screen is what can be clicked and what gets written. It returns the volume itself when nothing is
+ * hidden and nothing is sliced, which is the usual case and the reason this is cheap enough to call
+ * per pointer event.
+ */
+export const visible = (state: Gesture): Volume =>
+    slicedFor(state, shownVolume(state.volume, state.objects))
 
 /** A draft that knows which object new voxels join and which objects refuse to be touched. */
 export const openDraft = (state: Gesture, volume: Volume = state.volume): Draft =>

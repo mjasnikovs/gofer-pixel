@@ -4,7 +4,8 @@ import {basisFor, createCamera} from '../render/camera'
 import {render} from '../render/raycast'
 import type {Volume} from '../render/volume'
 import {DEFAULT_ENDPOINT} from './llama'
-import {onGrey, toBase64} from './views'
+import {onGrey} from './views'
+import {toBase64} from '../image/base64'
 
 /**
  * What a candidate reads as, in the vision model's own words.
@@ -66,23 +67,17 @@ export interface Veto {
     readonly couldDescribe: (word: string, prompt: string, signal?: AbortSignal) => Promise<boolean>
 }
 
-/** Why a candidate passed or did not. Counted in the status line; it moves nothing. */
-export type VetoWhy =
-    /** The word is in the prompt. No second call was needed. */
-    | 'named'
-    /** The words differ and the model said the word still describes the prompt. */
-    | 'agreed'
-    /** The words differ and the model said no. The only verdict that fails. */
-    | 'wrong'
-    /** The model answered with nothing. */
-    | 'silent'
-    /** The server could not be asked. */
-    | 'unavailable'
-
+/**
+ * What the judge made of one candidate.
+ *
+ * `pass` is counted into the status line — "3 of 4 read as the subject" — and moves nothing else;
+ * `FEATURESET.md`'s naming brief is explicit that the judge names a sprite and does not get to
+ * reject it. There used to be a `why` beside it, five string cases deep, that nothing anywhere
+ * read.
+ */
 export interface Verdict {
     readonly word: string
     readonly pass: boolean
-    readonly why: VetoWhy
 }
 
 /**
@@ -172,15 +167,15 @@ export const judge = async (
     try {
         word = await veto.name(volume, signal)
     } catch {
-        return {word: '', pass: true, why: 'unavailable'}
+        return {word: '', pass: true}
     }
-    if (word === '') return {word, pass: true, why: 'silent'}
-    if (namesTheSubject(word, prompt)) return {word, pass: true, why: 'named'}
+    if (word === '') return {word, pass: true}
+    if (namesTheSubject(word, prompt)) return {word, pass: true}
     try {
         const agreed = await veto.couldDescribe(word, prompt, signal)
-        return {word, pass: agreed, why: agreed ? 'agreed' : 'wrong'}
+        return {word, pass: agreed}
     } catch {
-        return {word, pass: true, why: 'unavailable'}
+        return {word, pass: true}
     }
 }
 

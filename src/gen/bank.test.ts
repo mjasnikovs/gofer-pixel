@@ -1,15 +1,8 @@
 import {expect, test} from 'bun:test'
 import MANIFEST from '../assets/examples/examples.json'
 import {volumeFromFile} from '../doc/models'
-import {
-    exampleFrom,
-    MAX_PICKS,
-    overBudget,
-    pickPrompt,
-    readManifest,
-    readPicks,
-    type Manifest
-} from './bank'
+import {MAX_PICKS, pickPrompt, readManifest, readPicks, type Manifest} from './bank'
+import {exampleFrom, overBudget} from './teaching'
 import {BUILT_IN_REPLIES} from './builtin'
 import {specFromCode} from './code'
 import {buildLibrary} from './library'
@@ -95,11 +88,15 @@ test('a pick that names nothing falls back to one example rather than to none', 
     expect(readPicks('', manifest)).toEqual([manifest.fallback])
 })
 
-test('the closest example is sent last, nearest the prompt', async () => {
+/*
+ * A lookup, in the order it was asked for. Which order the turns are *sent* in is `teaching.ts` —
+ * it used to be a `.reverse()` in here and a lambda in `batch.ts`, two halves of one rule.
+ */
+test('the examples come back in the order they were picked', async () => {
     const library = await buildLibrary(manifest, fromDisk)
     const taught = library.teach(['dog', 'tower'])
     expect(taught).toHaveLength(2)
-    expect(taught[1]?.prompt).toBe('a dog')
+    expect(taught.map(one => one.prompt)).toEqual(['a dog', 'a stone tower'])
 })
 
 test('an id with no example is dropped from the turns rather than sent as a hole', async () => {
@@ -130,7 +127,7 @@ test('a decomposed example opens on the notes when there are any, and measuremen
     const car = readVox(
         new Uint8Array(await Bun.file(new URL('../assets/car.vox', import.meta.url)).arrayBuffer())
     )
-    const written = exampleFrom(
+    const {example: written} = exampleFrom(
         {
             id: 'car',
             subject: 'a car',
@@ -141,7 +138,10 @@ test('a decomposed example opens on the notes when there are any, and measuremen
     )
     expect(written.reply.split('\n')[0]).toBe('// car: cabin set back, wheels at the corners')
 
-    const measured = exampleFrom({id: 'car', subject: 'a car', use: 'vehicles', notes: ''}, car)
+    const {example: measured} = exampleFrom(
+        {id: 'car', subject: 'a car', use: 'vehicles', notes: ''},
+        car
+    )
     // The measurements still say a plan comes before the code, which is most of what it is for.
     expect(measured.reply.split('\n')[0]).toBe('// car: 14 wide, 6 tall, 10 long')
 })

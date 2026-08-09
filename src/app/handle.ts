@@ -10,7 +10,10 @@ import type {AppAction, AppState} from './state'
  * the thing this replaces.
  *
  * It is one mutable object rather than a global registry so that nothing in the app can come to
- * depend on it — the app only ever writes.
+ * depend on it — the app only ever writes, and `publish` below is the whole of what the app may
+ * reach. That used to be a sentence in this comment and it was not true: `App.tsx` read
+ * `handle.state` in Save, so a module-level singleton meant for tests decided which document went
+ * to disk, and two apps mounted at once would have shared it.
  */
 export interface AppHandle {
     raycaster: Raycaster | undefined
@@ -43,4 +46,22 @@ export const handle: AppHandle = {
         resolveFirstFrame?.()
         resolveFirstFrame = undefined
     }
+}
+
+/**
+ * The half of the handle the app is allowed to touch, and the only thing it imports from here.
+ *
+ * A function rather than the object, so "the app only ever writes" is something you can check by
+ * looking at an import list instead of something you have to trust. Everything a browser test
+ * *reads* — `state`, `dispatch`, `raycaster`, `firstFrame` — is unreachable through it.
+ */
+export const publish = (
+    what: Partial<Pick<AppHandle, 'raycaster' | 'state' | 'dispatch'>>
+): void => {
+    Object.assign(handle, what)
+}
+
+/** The other write the app makes: a frame has landed. See `firstFrame`. */
+export const markDrawn = (): void => {
+    handle.markDrawn()
 }

@@ -251,8 +251,16 @@ export const ObjectsPanel = ({
         dispatch({type: 'object', op})
     }
     const [renaming, setRenaming] = useState<number | undefined>(undefined)
-    const [dragging, setDragging] = useState<number | undefined>(undefined)
     const [pending, setPending] = useState<VoxObject | undefined>(undefined)
+    /*
+     * The drag is in the reducer, beside the views strip's — see `Chrome.draggingObject`. It was a
+     * `useState` here, which is why the identical gesture next door cost four milliseconds to test
+     * and this one cost a two-hundred-millisecond window and four synthetic pointer events.
+     */
+    const {draggingObject: dragging} = state
+    const setDragging = (id: number | undefined): void => {
+        dispatch({type: 'chrome', chrome: {draggingObject: id}})
+    }
 
     const extents = useMemo(() => objectExtents(volume), [volume])
     const searchable = objects.list.length > SEARCH_FROM

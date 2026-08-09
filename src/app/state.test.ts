@@ -159,7 +159,7 @@ test('the sheet is baked on demand and thrown away whenever it would go stale', 
 
     expect(currentSheet(reduce(baked, {type: 'delete', id: 'dir-1'}))).toBeUndefined()
     expect(currentSheet(reduce(baked, {type: 'capture'}))).toBeUndefined()
-    expect(currentSheet(reduce(baked, {type: 'cell', cell: 32}))).toBeUndefined()
+    expect(currentSheet(reduce(baked, {type: 'output', output: {cell: 32}}))).toBeUndefined()
     // Changing which map the *viewport* draws does not invalidate an exported sheet.
     expect(currentSheet(reduce(baked, {type: 'chrome', chrome: {map: MODE_NORMAL}}))).toBe(
         currentSheet(baked)
@@ -987,7 +987,9 @@ test('marking a colour emissive lights it in the emission map and nowhere else',
     expect(glowing.volume).not.toBe(state.volume)
     expect(state.volume.emissive[state.color]).toBe(0)
 
-    const baked = reduce(reduce(glowing, {type: 'preset', preset: 'Every map'}), {type: 'bake'})
+    const baked = reduce(reduce(glowing, {type: 'output', output: {preset: 'Every map'}}), {
+        type: 'bake'
+    })
     const emission = currentSheet(baked)?.maps.emission ?? new Uint8Array(0)
     let lit = 0
     for (let i = 0; i < emission.length; i += 4) if ((emission[i] ?? 0) > 0) lit += 1
@@ -998,7 +1000,9 @@ test('a preset decides which maps get baked, and colour is always one of them', 
     const auto = reduce(fresh(), {type: 'bake'})
     expect(Object.keys(currentSheet(auto)?.maps ?? {}).sort()).toEqual(['color', 'normal'])
 
-    const every = reduce(reduce(fresh(), {type: 'preset', preset: 'Every map'}), {type: 'bake'})
+    const every = reduce(reduce(fresh(), {type: 'output', output: {preset: 'Every map'}}), {
+        type: 'bake'
+    })
     expect(Object.keys(currentSheet(every)?.maps ?? {})).toHaveLength(SHEET_MAPS.length)
 })
 
@@ -1194,12 +1198,39 @@ test('loading a palette replaces the colours and leaves every voxel where it was
     expect(currentSheet(loaded)).toBeUndefined()
 })
 
+/*
+ * The same gesture, on the other list. Both drags are `Chrome` now — pointerdown arms, pointerenter
+ * reorders, pointerup and pointerleave disarm — so both are four milliseconds here rather than one
+ * of them being a two-hundred-millisecond window and four synthetic pointer events.
+ */
+test('dragging a row along the object list reorders it, and nothing else', () => {
+    const state = reduce(fresh(), {type: 'object', op: {kind: 'add'}})
+    const twice = reduce(state, {type: 'object', op: {kind: 'add'}})
+    const names = (next: AppState): string[] => next.objects.list.map(({name}) => name)
+    const before = names(twice)
+    expect(before).toHaveLength(3)
+
+    const first = twice.objects.list[0]?.id ?? -1
+    const held = reduce(twice, {type: 'chrome', chrome: {draggingObject: first}})
+    expect(held.draggingObject).toBe(first)
+    // Arming a drag is not an edit: no history, no dirty flag, and the bake is still good.
+    expect(held.history.past).toEqual(twice.history.past)
+    expect(held.doc.dirty).toBe(twice.doc.dirty)
+
+    const moved = reduce(held, {type: 'object', op: {kind: 'reorder', id: first, to: 2}})
+    expect(names(moved)).not.toEqual(before)
+    expect(names(moved).toSorted()).toEqual(before.toSorted())
+
+    const dropped = reduce(moved, {type: 'chrome', chrome: {draggingObject: undefined}})
+    expect(dropped.draggingObject).toBeUndefined()
+})
+
 test('dragging a view along the strip reorders the sheet it packs', () => {
     const state = fresh()
     const names = (next: AppState): string[] => next.cameras.map(({name}) => name)
 
-    const held = reduce(state, {type: 'drag-camera', id: 'dir-0'})
-    expect(held.dragging).toBe('dir-0')
+    const held = reduce(state, {type: 'chrome', chrome: {draggingCamera: 'dir-0'}})
+    expect(held.draggingCamera).toBe('dir-0')
 
     const moved = reduce(held, {type: 'reorder-camera', id: 'dir-0', to: 2})
     expect(names(moved).slice(0, 3)).toEqual(['Front Right', 'Right', 'Front'])
@@ -1216,26 +1247,30 @@ test('dragging a view along the strip reorders the sheet it packs', () => {
 })
 
 test('padding changes the sheet it is baked into and nothing else', () => {
-    const tight = reduce(reduce(fresh(), {type: 'preset', preset: 'Every map'}), {type: 'bake'})
+    const tight = reduce(reduce(fresh(), {type: 'output', output: {preset: 'Every map'}}), {
+        type: 'bake'
+    })
     const loose = reduce(
-        reduce(reduce(fresh(), {type: 'preset', preset: 'Every map'}), {
-            type: 'padding',
-            padding: 2
+        reduce(reduce(fresh(), {type: 'output', output: {preset: 'Every map'}}), {
+            type: 'output',
+            output: {padding: 2}
         }),
         {type: 'bake'}
     )
     expect(currentSheet(loose)?.width).toBeGreaterThan(currentSheet(tight)?.width ?? 0)
     expect(currentSheet(loose)?.cell).toBe(currentSheet(tight)?.cell as never)
-    expect(currentSheet(reduce(tight, {type: 'padding', padding: 1}))).toBeUndefined()
+    expect(currentSheet(reduce(tight, {type: 'output', output: {padding: 1}}))).toBeUndefined()
 
     // Collision bounds are a fact about the JSON, so the baked sheet is still good.
-    expect(currentSheet(reduce(tight, {type: 'bounds', on: true}))).toBe(currentSheet(tight))
+    expect(currentSheet(reduce(tight, {type: 'output', output: {bounds: true}}))).toBe(
+        currentSheet(tight)
+    )
 })
 
 test('a saved preset joins the list and can be taken back out of it', () => {
     const state = fresh()
     const saved = reduce(state, {type: 'save-preset', name: 'My rig', maps: ['color', 'ao']})
-    expect(saved.preset).toBe('My rig')
+    expect(saved.output.preset).toBe('My rig')
     expect(allPresets(saved).map(entry => entry.name)).toContain('My rig')
     expect(presetMaps(saved, 'My rig')).toEqual(['color', 'ao'])
     expect(Object.keys(currentSheet(reduce(saved, {type: 'bake'}))?.maps ?? {}).sort()).toEqual([
@@ -1249,11 +1284,11 @@ test('a saved preset joins the list and can be taken back out of it', () => {
 
     // Saving the same name twice replaces rather than doubling.
     const again = reduce(saved, {type: 'save-preset', name: 'My rig', maps: ['color']})
-    expect(again.presets).toHaveLength(1)
+    expect(again.output.presets).toHaveLength(1)
 
     const dropped = reduce(again, {type: 'drop-preset', name: 'My rig'})
-    expect(dropped.presets).toHaveLength(0)
-    expect(dropped.preset).toBe('Sprite Sheet (Auto)')
+    expect(dropped.output.presets).toHaveLength(0)
+    expect(dropped.output.preset).toBe('Sprite Sheet (Auto)')
     expect(reduce(dropped, {type: 'drop-preset', name: 'My rig'})).toBe(dropped)
 })
 
@@ -1312,7 +1347,7 @@ test('importing a PNG opens it as a document and keeps the references and preset
     expect(opened.cameras).toHaveLength(8)
     // But the artist's own settings are theirs, not the file's.
     expect(opened.references).toHaveLength(1)
-    expect(opened.presets).toHaveLength(1)
+    expect(opened.output.presets).toHaveLength(1)
 })
 
 test('slice mode opens on the middle layer, walks with the wheel, and leaves with the plane', () => {
@@ -1788,9 +1823,9 @@ test('changing the model makes the document dirty; changing the session does not
     const drawn = reduce(reduce(state, at('down', column, row)), at('up', column, row))
     expect(drawn.doc.dirty).toBe(true)
     expect(reduce(state, {type: 'capture'}).doc.dirty).toBe(true)
-    expect(reduce(state, {type: 'cell', cell: 32}).doc.dirty).toBe(true)
-    expect(reduce(state, {type: 'padding', padding: 2}).doc.dirty).toBe(true)
-    expect(reduce(state, {type: 'bounds', on: true}).doc.dirty).toBe(true)
+    expect(reduce(state, {type: 'output', output: {cell: 32}}).doc.dirty).toBe(true)
+    expect(reduce(state, {type: 'output', output: {padding: 2}}).doc.dirty).toBe(true)
+    expect(reduce(state, {type: 'output', output: {bounds: true}}).doc.dirty).toBe(true)
     expect(reduce(state, {type: 'symmetry', axis: 'x', on: true}).doc.dirty).toBe(true)
     expect(reduce(state, {type: 'palette-color', color: 1, css: '#ff0000'}).doc.dirty).toBe(true)
     expect(reduce(state, {type: 'object', op: {kind: 'add'}}).doc.dirty).toBe(true)
@@ -1895,7 +1930,7 @@ test('opening a document takes its references and presets, not the ones already 
 
     expect(theirs.references.map(({url}) => url)).toEqual(['data:image/png;base64,theirs'])
     expect(theirs.doc).toEqual({name: 'theirs.gpix', savedAt: undefined, dirty: false})
-    expect([theirs.cell, theirs.padding, theirs.bounds]).toEqual([16, 4, true])
+    expect([theirs.output.cell, theirs.output.padding, theirs.output.bounds]).toEqual([16, 4, true])
     expect(theirs.symmetry.x).toBe(true)
 })
 
@@ -1953,7 +1988,7 @@ test('a document that nobody generated has no origin, and drawing does not give 
 })
 
 test('what the state says the document is, is what gets written down', () => {
-    const state = reduce(fresh(), {type: 'cell', cell: 32})
+    const state = reduce(fresh(), {type: 'output', output: {cell: 32}})
     const written = asDocument(state)
 
     expect(written.volume).toBe(state.volume)
@@ -1962,14 +1997,14 @@ test('what the state says the document is, is what gets written down', () => {
     expect(written.references).toBe(state.references)
     expect(written.symmetry).toBe(state.symmetry)
     expect(written.output.cell).toBe(32)
-    expect(written.output.preset).toBe(state.preset)
+    expect(written.output.preset).toBe(state.output.preset)
 
     // Round-tripped through the format, it opens as the same document.
     const back = loadDocument(JSON.stringify(saveDocument(written, state.doc.name)))
     if (!back) throw new Error('what we just wrote is one of ours')
     const reopened = reduce(state, {type: 'open', document: {...back, name: 'car.gpix'}})
     expect(reopened.volume.data).toEqual(state.volume.data)
-    expect(reopened.cell).toBe(32)
+    expect(reopened.output.cell).toBe(32)
     expect(reopened.doc.dirty).toBe(false)
 })
 

@@ -5,10 +5,20 @@ import {render} from '../render/raycast'
 import type {ViewportPointer} from '../viewport/orbit'
 import {ISOMETRIC_PITCH} from './cameras'
 import {EMPTY_HISTORY} from './history'
-import {initialObjects} from './objects'
+import {initialObjects, shownVolume} from './objects'
+import type {Volume} from '../render/volume'
 import {EMPTY_SELECTION} from './selection'
 import {NO_SYMMETRY} from './symmetry'
-import {beginStroke, changedAim, endStroke, forgetAim, hoverAt, type Gesture} from './gesture'
+import {
+    beginStroke,
+    changedAim,
+    endStroke,
+    forgetAim,
+    hoverAt,
+    slicedFor,
+    visible,
+    type Gesture
+} from './gesture'
 
 /**
  * The pointer gestures against `Gesture` itself, with no `AppState` anywhere.
@@ -136,4 +146,25 @@ test('the hover cache belongs to this module and can be emptied', () => {
     forgetAim()
     const again = hoverAt({...state, aim: pointer('move', x, y)})
     expect(again.hover?.region?.size).toBe(cached)
+})
+
+/*
+ * `visible` is `slicedFor` over `shownVolume`, and the split is what lets `App.tsx` memoise the two
+ * halves against different things without spelling either of them a second time. The app used to
+ * spell the first half on its own and draw from that, so in slice mode the picture was the whole
+ * model while the pointer and the bake used this.
+ */
+test('the grid the artist sees is the grid a click lands on, in slice mode too', () => {
+    const state = fresh()
+    const filled = (grid: Volume): number => grid.data.reduce((n, v) => (v === 0 ? n : n + 1), 0)
+
+    expect(visible(state)).toBe(state.volume)
+
+    const sliced: Gesture = {...state, plane: 2, slice: Math.floor(state.volume.sz / 2)}
+    const seen = visible(sliced)
+    expect(seen).not.toBe(sliced.volume)
+    expect(filled(seen)).toBeLessThan(filled(state.volume))
+
+    // And the two entry points agree, because one is written in terms of the other.
+    expect(slicedFor(sliced, shownVolume(sliced.volume, sliced.objects)).data).toEqual(seen.data)
 })

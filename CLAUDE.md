@@ -49,9 +49,11 @@ What is there now, and roughly in dependency order:
 | `src/app/`          | the whole app as one value and one `reduce`, plus the panels that show it        |
 | `src/app/session`   | New, Open, Save, the palette, the picture drop — every path to the artist's disk |
 | `src/app/keys`      | every keyboard shortcut, as one table                                            |
+| `src/app/overlay`   | projection, the ground lattice and the ghost's meshes — no SVG in it             |
 | `src/gen/`          | the local-AI pipeline: prompt → primitives → voxels, and the two scorers         |
 | `src/gen/batch`     | one batch end to end: generate, score, name, rank — the dialog just draws it     |
 | `src/gen/reference` | the artist's own model as the example the next batch is taught from              |
+| `src/gen/teaching`  | which examples teach a batch, in what order, within what line budget             |
 | `src/theme/`        | `theme.ts` and the CSS it generates; never edit the CSS                          |
 | `py/`               | `clipserve.py`, the CLIP scoring service. Optional, started by hand              |
 | `browser/`          | the Playwright suite and the page it drives                                      |
@@ -153,7 +155,14 @@ call's prompt is generated from the manifest, so adding an entry needs no code. 
 A `.vox` or `.gpix` dropped on the generate dialog teaches the next batch ahead of the bank, and is
 remembered in `localStorage`. **`MAX_PICKS` is 3 and the measurement says it should be 1** — the
 picking call pads when unsure, so a knight gets `farmer, chicken, dog` and grows the chicken's comb
-on its helmet. See `docs/GEN_RESEARCH.md`, 2026-08-09.
+on its helmet. See `docs/GEN_RESEARCH.md`, 2026-08-09. It stays in `bank.ts` rather than moving to
+`teaching.ts` with the other three rules, because `pickPrompt` writes the cap into the sentence it
+sends the model: the number and the prompt that states it have to move together.
+
+**`veto.ts` costs a second 27B call per candidate whose word did not match** — `couldDescribe` — and
+the only thing that call moves is the `matched` count in a status line. That is a product decision
+(`FEATURESET.md`'s naming brief: the judge names a sprite and does not get to reject it), so it
+stands, but it is the most expensive thing in `src/gen/` per unit of what it changes.
 
 ```bash
 bun run clip          # .venv/bin/python py/clipserve.py — optional, port 8765
@@ -163,9 +172,9 @@ Neither service is required to open the app. With llama-server down the menu ite
 that says so and disables its one button; with `clipserve.py` down the batch ranks on the built-in
 scores.
 
-## Seven seams worth knowing about
+## Nine seams worth knowing about
 
-The app layer is deliberately thin, and seven modules under it hold what would otherwise be spread
+The app layer is deliberately thin, and nine modules under it hold what would otherwise be spread
 through React callbacks and reducer cases. Each one was pulled out because its rules could only be
 tested by mounting something.
 
@@ -174,7 +183,9 @@ tested by mounting something.
   (`AimKey` and `AIMED_AT`) that sat a thousand lines apart; `changedAim` is now the one comparison,
   and `forgetAim()` gives the hover cache an owner. The rule it exists to keep: **the outline cannot
   disagree with the edit** — every branch of `hoverAt` is a branch of `beginStroke` or
-  `beginSelect`.
+  `beginSelect`. `visible(state)` and `slicedFor(state, shown)` are the one derivation of "the grid
+  as the artist sees it": the app used to spell the first half itself and draw from that, so in
+  slice mode the picture was the whole model while the click landed on the sliced one.
 - **`src/gen/batch.ts`** — one generation batch as a value. Stage order, cancellation and the three
   status lines. The measured rules live here: naming sorts nothing, CLIP goes last and the grid
   never waits on it, a dropped model is taught last. `GenerateDialog` holds one `BatchState`.
@@ -183,7 +194,11 @@ tested by mounting something.
   no test could cover the twenty-fifth case nobody had written yet.
 - **`src/doc/files.ts`** — every file read off the artist's disk: the project picker, the palette
   loader and the generate dialog's reference model. `memoryFiles` holds bytes as well as text, so a
-  `.vox` can be driven through it.
+  `.vox` can be driven through it. `open` takes a `ReadFor`, and `remember` is the whole of it: only
+  the project picker asks to become the file Save writes back to, which is why all three readers
+  share one instance. **A `Files` is stateful and must outlive a render** — it used to be a default
+  parameter on `App`, so the re-render caused by saving threw away the handle and every Ctrl-S
+  opened the picker again. `store` and `files` are required props, built once in `main.tsx`.
 - **`src/app/session.ts`** — the open document's lifecycle over that port: New, Open, Save, Save As,
   the palette loader, the picture drop, the snapshot restore, and the guard in front of the three
   that replace the document. Every command is ports and state in, an `AppAction` or `undefined` out,
@@ -199,6 +214,17 @@ tested by mounting something.
   decompose, budget-check, remember, forget. The rules: it is decomposed **at the moment of the
   drop** so the failure has somebody to tell; it is remembered as the example and never as the file;
   and **anything that fails leaves the previous teacher standing.**
+- **`src/gen/teaching.ts`** — which examples teach a batch, in what order, within what budget. The
+  order (closest last) was a `.reverse()` in `library.ts`, the composition (the dropped model goes
+  after the bank) was a lambda in `batch.ts`, and `LINE_BUDGET` was enforced in `reference.ts` and
+  **nowhere else** — so a 200-line model was refused at the drop and accepted from the bank
+  directory. `WorkedExample` is only constructible here, through a call that can fail.
+- **`src/app/overlay.ts`** — the arithmetic behind the viewport overlays: projection, the
+  two-lattice floor with its falloff and its hole, and the ghost's skin, wireframe and shadow. It
+  was 925 lines inside `ViewportOverlay.tsx`, reachable only by rendering SVG and parsing the
+  strings back — `expect(run.moves('outline')).toBe(20)` was a claim about geometry expressed as a
+  count of `M` characters. The components stringify points; nothing in `overlay.ts` knows what SVG
+  is.
 
 Two more things about the app layer that are not modules:
 
@@ -208,10 +234,18 @@ Two more things about the app layer that are not modules:
   prop that stay are the ones that are not state: memoised derivations (`shown`, `drawn`, `sheet`),
   and anything that goes through a port, because a panel must not get to decide which disk a read
   goes through.
-- **`Chrome` in `state.ts`** is what the artist sees and does not ship — nine fields behind one
-  `{type: 'chrome'}` action. `CHROME_IS_NOT_SAVED` makes "never in the save file, never in the undo
-  history" something the compiler checks. The near-misses are worth knowing: `cell`, `padding`,
-  `bounds`, `preset` and `presets` all travel in the `.gpix`, so they are document, not chrome.
+- **`Chrome` in `state.ts`** is what the artist sees and does not ship — eleven fields behind one
+  `{type: 'chrome'}` action, including both list drags: the views strip's camera and the objects
+  panel's row are one gesture, and one of them used to be a `useState` inside the panel.
+  `CHROME_IS_NOT_SAVED` makes "never in the save file, never in the undo history" something the
+  compiler checks.
+- **`output` in `state.ts`** got the same treatment, for the opposite reason: everything in it
+  _does_ travel in the `.gpix`. It **is** `doc/save.ts`'s `SavedOutput`, not a copy — five flattened
+  fields, four `{...state, x: action.x}` cases and five entries in `DOCUMENT_FIELDS` are one field,
+  one `{type: 'output'}` action and one entry now.
+- **`handle.ts` is write-only.** The app imports `publish` and `markDrawn` and cannot reach the
+  reader. `App.tsx` used to read `handle.state` in Save — a real correctness requirement met by a
+  testing singleton, which two mounted apps would have shared. It is a ref now.
 
 ## Testing — nothing waits
 
@@ -232,7 +266,8 @@ no polling, no `@testing-library/user-event`, no animated scrolling, no screensh
   reads one pixel back instead, which really blocks, costs ~0.2 ms, and is what makes the frame
   counter mean anything.
 - The browser suite drives the running app through `src/app/handle.ts` rather than by polling the
-  DOM. It is a deliberate seam and the app only ever writes to it.
+  DOM. It is a deliberate seam and the app only ever writes to it — through `publish`, which is the
+  only thing it imports from there.
 
 `test/preload.ts` registers happy-dom for every test via `bunfig.toml`, so `document` is always
 available.
@@ -240,7 +275,7 @@ available.
 ## Commands
 
 ```bash
-bun run check        # format:check + lint + typecheck + test — the gate, 18 s, no browser
+bun run check        # format:check + lint + typecheck + test — the gate, 14 s, no browser
 bun run test         # bun test — scoped to src/ by bunfig.toml
 bun run build        # deployable app bundle to dist/ (not a package — no .d.ts, no lib entry)
 bun run test:browser # the Playwright suite — separate, does not gate `check`, 1.4 min
@@ -251,18 +286,24 @@ bun run format       # prettier --write
 
 `lint` and `format` are cached (`.eslintcache`, prettier's own).
 
-**Measured 2026-08-09, and the number worth acting on:** `bun test` is 13.1 s for 536 tests, and
-`App.test.tsx` alone is 12.4 s of it. Every other test file in the project — the raycaster, the
-reducer, the gesture module, the 479 other tests — costs 0.7 s put together. The cause is 55
-whole-window mounts at roughly 220 ms each, and **the mount is what costs under happy-dom, not the
-assertions.** So a test that needs a fresh window costs ~220 ms and a test that does not costs about
-one.
+**Measured 2026-08-09:** `bun test` is 9.0 s for 559 tests, and `App.test.tsx` is 7.2 s of it. The
+cost is 32 whole-window mounts at roughly 220 ms each, and **the mount is what costs under
+happy-dom, not the assertions** — mounting one astryx panel is ~50 ms and mounting a bare SVG
+component is ~1 ms. It was 13.1 s for 536 tests and 55 mounts before `test/panel.tsx`.
+
+**`test/panel.tsx` is the harness under the panel seam.** `mountPanel(volume, draw)` puts one panel
+over a real `useReducer(reduce, …)` and hands the test `state()`, `dispatch`, `click` and `act`. A
+panel already took `state` and `dispatch` and nothing else — that _is_ the seam; nothing was using
+it. Nineteen tests moved onto it and cost a fifth of what they did. It is not a mock: the reducer is
+the real one, so the assertion is the same assertion the window made, minus the fourteen panels that
+were not under test. **`App.test.tsx` is for composition** — effects, the keyboard listener, the
+file dialogs, the guard in front of them, and the one live viewport.
 
 Before reaching for a mount, check whether the thing under test has a seam already: `state.ts`,
-`gesture.ts`, `session.ts`, `keys.ts`, `batch.ts`, `reference.ts` and `baked.ts` all answer their
-own questions in single-digit milliseconds, and they exist because the answers used to cost a
-window. `App.test.tsx` should be about _composition_ — does this panel reach the document — and
-nothing else.
+`gesture.ts`, `session.ts`, `keys.ts`, `batch.ts`, `reference.ts`, `teaching.ts`, `overlay.ts`,
+`store.ts`, `export.ts` and `baked.ts` all answer their own questions in single-digit milliseconds,
+and they exist because the answers used to cost a window. If it is one panel and a real reducer,
+that is `test/panel.tsx`.
 
 ## Conventions
 
