@@ -6,6 +6,7 @@ import {Selector} from '@astryxdesign/core/Selector'
 import {Switch} from '@astryxdesign/core/Switch'
 import {Text} from '@astryxdesign/core/Text'
 import type {Dispatch} from 'react'
+import type {Files} from '../doc/files'
 import {SHEET_MAPS, type Sheet, type SheetMap} from '../sheet/sheet'
 import type {Volume} from '../render/volume'
 import {writeSheetMap} from './download'
@@ -47,11 +48,21 @@ const CELL_SIZES = [32, 64, 128]
 export const ExportPanel = ({
     state,
     dispatch,
+    files,
     volume,
     sheet
 }: {
     state: AppState
     dispatch: Dispatch<AppAction>
+    /**
+     * The disk the three menu items write to — see `doc/files.ts`.
+     *
+     * A prop for the reason every port is: this panel must not reach for `document` and build its
+     * own anchor, which is what all three of these used to do three modules down. Unlike Open and
+     * Save it is the port itself rather than a callback, because an export cannot be cancelled and
+     * has no action to come back and dispatch.
+     */
+    files: Files
     /**
      * The grid with hidden objects taken out of it, memoised in `App.tsx`.
      *
@@ -224,7 +235,7 @@ export const ExportPanel = ({
                             // write; the menu says so rather than quietly doing nothing.
                             isDisabled: !sheet?.maps[map],
                             onClick: () => {
-                                if (sheet) void writeSheetMap(sheet, map)
+                                if (sheet) void writeSheetMap(files, sheet, map)
                             }
                         })),
                         {type: 'divider'},
@@ -232,14 +243,14 @@ export const ExportPanel = ({
                             label: 'Download every sprite separately',
                             isDisabled: !sheet,
                             onClick: () => {
-                                void writeSprites(state)
+                                void writeSprites(files, state)
                             }
                         },
                         {
                             label: 'Download metadata JSON',
                             isDisabled: !sheet,
                             onClick: () => {
-                                writeSheetMetadata(state)
+                                void writeSheetMetadata(files, state)
                             }
                         }
                     ]}

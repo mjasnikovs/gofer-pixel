@@ -73,6 +73,20 @@ export interface Files {
      * cancel.
      */
     save: (name: string, text: string, reuse: boolean) => Promise<string | undefined>
+    /**
+     * Hand a finished file to wherever the platform puts downloads. No dialog, no handle, no cancel.
+     *
+     * The other half of this port, and deliberately not `save`. `save` is the *document*: it has a
+     * picker, a remembered handle, and a cancel that must never read like a success. An export has
+     * none of those — it is up to nine files at once, named by what they are, and the artist said
+     * yes on the click that baked them. Folding the two together would put a cancel that cannot
+     * happen in front of the one write that never asks.
+     *
+     * `data` is bytes for a PNG and text for the palette and the metadata JSON, because the two
+     * kinds come off the same click and a port that took only text could not carry the sheet — which
+     * is exactly why every export used to go round this interface straight to an anchor.
+     */
+    write: (name: string, data: string | Uint8Array, type: string) => Promise<void>
     /** Whether `reuse` can really overwrite. False on the download path. */
     readonly overwrites: boolean
     /** Forget the file being written back to, so the next Save asks. `new` calls it. */
@@ -177,14 +191,22 @@ const inputOpen = async (accept: string): Promise<PickedFile | undefined> => {
     return picked(chosen.name, new Uint8Array(await chosen.arrayBuffer()))
 }
 
-const anchorSave = (name: string, text: string): string => {
-    const url = URL.createObjectURL(new Blob([text], {type: PROJECT_TYPE}))
+/**
+ * An anchor with a `download` attribute, created, clicked and dropped — the one way this platform
+ * hands a file to the operating system without a picker.
+ *
+ * One implementation, two callers: the fallback `save` for the browsers that have no
+ * `showSaveFilePicker`, and `write`, which is every export. The export path used to build its own
+ * copy of these six lines in `app/download.ts`, outside this port, which is why the whole of what an
+ * artist actually ships could only be tested by replacing three globals.
+ */
+const anchorDownload = (name: string, data: string | Uint8Array, type: string): void => {
+    const url = URL.createObjectURL(new Blob([data as BlobPart], {type}))
     const anchor = document.createElement('a')
     anchor.href = url
     anchor.download = name
     anchor.click()
     URL.revokeObjectURL(url)
-    return name
 }
 
 export const browserFiles = (): Files => {
@@ -197,6 +219,11 @@ export const browserFiles = (): Files => {
 
         forget: () => {
             held = undefined
+        },
+
+        write: (name, data, type) => {
+            anchorDownload(name, data, type)
+            return Promise.resolve()
         },
 
         open: async (accept, read) => {
@@ -223,7 +250,10 @@ export const browserFiles = (): Files => {
 
         save: async (name, text, reuse) => {
             const showSave = picker.showSaveFilePicker
-            if (!showSave) return anchorSave(name, text)
+            if (!showSave) {
+                anchorDownload(name, text, PROJECT_TYPE)
+                return name
+            }
             try {
                 const handle =
                     reuse && held ? held : (
@@ -266,6 +296,16 @@ export const memoryFiles = (
 
         forget: () => {
             held = undefined
+        },
+
+        /*
+         * Into the same map, under the name the writer chose. The test holds the map, so a claim
+         * about an export is a claim about its bytes — which is what the anchor could never be
+         * asked, because happy-dom hands back an opaque `blob:` handle and nothing can read it.
+         */
+        write: (name, data) => {
+            backing.set(name, data)
+            return Promise.resolve()
         },
 
         open: async (accept, read) => {

@@ -54,7 +54,10 @@ const picking = (name: string, bytes: Uint8Array): Files => ({
     overwrites: true,
     forget: () => undefined,
     open: async () => Promise.resolve({name, bytes, text: new TextDecoder().decode(bytes)}),
-    save: async () => Promise.resolve(name)
+    save: async () => Promise.resolve(name),
+    // Nothing in `session.ts` writes an export. A stub that threw would be a truer claim, but this
+    // port is handed to code under test and a throw would be a failure with no assertion behind it.
+    write: () => Promise.resolve()
 })
 
 /* ── saving ──────────────────────────────────────────────────────────────────────────────────── */

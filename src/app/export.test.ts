@@ -1,4 +1,5 @@
 import {expect, test} from 'bun:test'
+import {memoryFiles} from '../doc/files'
 import {readVox} from '../vox/vox-file'
 import {initialState, reduce, type AppState} from './state'
 import {writeExport, writeSheetMetadata, writeSprites} from './export'
@@ -6,36 +7,23 @@ import {writeExport, writeSheetMetadata, writeSprites} from './export'
 /**
  * The three things an export writes, and the guard in front of all three.
  *
- * That guard is the interesting part — a sheet can be stale, and writing a stale one is silent —
- * and it had no test of its own. What covered it was a whole-window mount that monkey-patched
- * `URL.createObjectURL` and `HTMLAnchorElement.prototype.click`, then filtered the results by
- * filename to dodge a race with the export effect's own `CompressionStream`. The patching is still
- * the only way to watch a download, but nothing here needs a window to do it.
+ * That guard is the interesting part — a sheet can be stale, and writing a stale one is silent.
+ * It used to be watched through three patched globals, which could see that an anchor was clicked
+ * and nothing about what was on it; and because the patches were global, an export another test
+ * file had started could land inside this one's window under the same filenames. Every claim here
+ * had to be softened to a *set* of names to survive that.
+ *
+ * Each test holds its own disk now, so the race is gone and a list can be a list.
  */
 
 const volume = readVox(
     new Uint8Array(await Bun.file(new URL('../assets/car.vox', import.meta.url)).arrayBuffer())
 )
 
-/** Every filename an anchor was asked to download, in order. */
-const downloads = async (run: () => Promise<void> | void): Promise<string[]> => {
-    const written: string[] = []
-    const realCreate = URL.createObjectURL
-    const realRevoke = URL.revokeObjectURL
-    const realClick = HTMLAnchorElement.prototype.click
-    URL.createObjectURL = (): string => 'blob:test'
-    URL.revokeObjectURL = (): void => undefined
-    HTMLAnchorElement.prototype.click = function click(this: HTMLAnchorElement): void {
-        written.push(this.download)
-    }
-    try {
-        await run()
-        return written
-    } finally {
-        URL.createObjectURL = realCreate
-        URL.revokeObjectURL = realRevoke
-        HTMLAnchorElement.prototype.click = realClick
-    }
+/** A disk of this test's own, and every filename that landed on it. */
+const disk = () => {
+    const backing = new Map<string, string | Uint8Array>()
+    return {files: memoryFiles(backing), names: (): string[] => [...backing.keys()]}
 }
 
 /** The document, baked, at the smallest sprite the panel offers — eight PNGs, not eight seconds. */
@@ -48,64 +36,48 @@ const baked = (): AppState => {
 }
 
 test('nothing is written until there is a sheet to cut it from', async () => {
+    const out = disk()
     const fresh = initialState(volume, 'car.vox')
 
-    expect(
-        await downloads(async () => {
-            await writeExport(fresh)
-            await writeSprites(fresh)
-            writeSheetMetadata(fresh)
-        })
-    ).toEqual([])
+    await writeExport(out.files, fresh)
+    await writeSprites(out.files, fresh)
+    await writeSheetMetadata(out.files, fresh)
+
+    expect(out.names()).toEqual([])
 })
 
 test('a stale sheet is no sheet at all, and writes nothing', async () => {
+    const out = disk()
     // Adding a camera changes what the bake would have to have come from — see `sheet/baked.ts`.
     const moved = reduce(baked(), {type: 'capture'})
 
-    expect(
-        await downloads(async () => {
-            await writeSprites(moved)
-            writeSheetMetadata(moved)
-        })
-    ).toEqual([])
+    await writeSprites(out.files, moved)
+    await writeSheetMetadata(out.files, moved)
+
+    expect(out.names()).toEqual([])
 })
 
 test('one PNG per camera, plus the JSON that says where each of them landed', async () => {
+    const out = disk()
     const state = baked()
 
-    const sprites = await downloads(async () => {
-        await writeSprites(state)
-    })
-    expect(sprites).toHaveLength(state.cameras.length)
-    expect(sprites.every(name => name.endsWith('.png'))).toBe(true)
+    await writeSprites(out.files, state)
+    expect(out.names()).toHaveLength(state.cameras.length)
+    expect(out.names().every(name => name.endsWith('.png'))).toBe(true)
 
-    expect(
-        await downloads(() => {
-            writeSheetMetadata(state)
-        })
-    ).toEqual(['sprites.json'])
+    await writeSheetMetadata(out.files, state)
+    expect(out.names().at(-1)).toBe('sprites.json')
 })
 
-/*
- * Compared as a set of names, not as a list. `writeSheet` goes through a `CompressionStream`, which
- * settles on the macrotask queue rather than the microtask queue — so an export another test file
- * started can land inside this one's window, under the same filenames. The claim here is *which
- * maps a preset writes*, and a set says that exactly.
- */
 test('the sheet is written as the preset asks, and no other map', async () => {
+    const two = disk()
+    await writeExport(two.files, baked())
+    expect(two.names().toSorted()).toEqual(['sprites-normal.png', 'sprites.png'])
+
     const every = reduce(baked(), {type: 'output', output: {preset: 'Every map'}})
     // The preset is part of `sheetKey`, so changing it stales the bake — bake again to compare.
-    const rebaked = reduce(every, {type: 'bake'})
-
-    const two = await downloads(async () => {
-        await writeExport(baked())
-    })
-    expect(new Set(two)).toEqual(new Set(['sprites.png', 'sprites-normal.png']))
-
-    const all = await downloads(async () => {
-        await writeExport(rebaked)
-    })
-    expect(new Set(all).size).toBe(8)
-    expect(all).toContain('sprites-depth.png')
+    const all = disk()
+    await writeExport(all.files, reduce(every, {type: 'bake'}))
+    expect(all.names()).toHaveLength(8)
+    expect(all.names()).toContain('sprites-depth.png')
 })

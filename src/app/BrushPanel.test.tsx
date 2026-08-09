@@ -1,6 +1,8 @@
 import {expect, test} from 'bun:test'
 import {readVox} from '../vox/vox-file'
 import {mountPanel, type Panel} from '../../test/panel'
+import {memoryFiles, type Files} from '../doc/files'
+import {fromHexPalette} from '../doc/palette'
 import {BrushPanel} from './BrushPanel'
 import {ToolRail} from './ToolRail'
 import {TOOLS} from './state'
@@ -18,7 +20,7 @@ const volume = readVox(
     new Uint8Array(await Bun.file(new URL('../assets/car.vox', import.meta.url)).arrayBuffer())
 )
 
-const open = (): Promise<Panel> =>
+const open = (files: Files = memoryFiles()): Promise<Panel> =>
     mountPanel(volume, ({state, dispatch}) => (
         <>
             <ToolRail
@@ -29,6 +31,7 @@ const open = (): Promise<Panel> =>
             <BrushPanel
                 state={state}
                 dispatch={dispatch}
+                files={files}
                 onLoad={() => undefined}
             />
         </>
@@ -227,6 +230,31 @@ test('a recent colour loads it back without going hunting in the grid', async ()
     })
 
     expect(panel.state().color).toBe(2)
+
+    await panel.unmount()
+})
+
+/*
+ * The palette export, at the port it goes through.
+ *
+ * It used to build its own anchor, which meant this button could only be watched by a whole-window
+ * mount that replaced `HTMLAnchorElement.prototype.click` — and even then the assertion was that a
+ * file called `palette.hex` had been offered, never that the artist's colours were in it.
+ */
+test('saving the palette writes a .hex of this model’s colours through the port', async () => {
+    const backing = new Map<string, string | Uint8Array>()
+    const panel = await open(memoryFiles(backing))
+
+    await panel.click('Save the palette')
+
+    const written = backing.get('palette.hex')
+    if (typeof written !== 'string') throw new Error('no palette.hex was written')
+    // Entries 1 to 255, one `rrggbb` per line — `toHexPalette`'s own shape.
+    const lines = written.split('\n').filter(line => line !== '')
+    expect(lines).toHaveLength(255)
+    expect(lines.every(line => /^[0-9a-f]{6}$/.test(line))).toBe(true)
+    // And they are *this* model's colours: what came off the disk reads back as what is loaded.
+    expect(fromHexPalette(written, new Uint8Array(256 * 4))).toEqual(panel.state().volume.palette)
 
     await panel.unmount()
 })

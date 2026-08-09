@@ -26,6 +26,7 @@ import {
 } from '../gen/batch'
 import type {Scorer} from '../gen/clip'
 import {randomSeed, type GenerationRecord, type Llama} from '../gen/llama'
+import {asking, FIRST_ASK, MAX_CANDIDATES, showing, startable, starting, type Ask} from '../gen/ask'
 import {clientOf, connect, CONNECTING, type Connection} from '../gen/connect'
 import type {Library} from '../gen/library'
 import type {Veto} from '../gen/veto'
@@ -52,19 +53,7 @@ import {Thumbnail} from './Thumbnail'
  * over one batch. The artist looks at the pictures.
  */
 export type {Ranked}
-
-/** How many candidates can be asked for at once. */
-export const MAX_CANDIDATES = 12
-
-export const DEFAULT_PROMPT = 'a stone tower'
-
-/**
- * Four is the default because generation is *slow*: 7–20 s per candidate against the local
- * Qwen3.6-27B, measured 2026-08-08, sequentially because the server shares both GPUs with nothing
- * else. Four is about a minute, which is a wait somebody will sit through; twelve is four minutes,
- * which is why it is the ceiling rather than the default.
- */
-export const DEFAULT_COUNT = 4
+export {MAX_CANDIDATES}
 
 const percent = (value: number): string => `${String(Math.round(value * 100))}%`
 
@@ -155,17 +144,14 @@ export const GenerateDialog = ({
      */
     onRunning?: (batch: Promise<void>) => void
 }) => {
-    const [prompt, setPrompt] = useState(DEFAULT_PROMPT)
-    const [count, setCount] = useState(DEFAULT_COUNT)
-    /** The batch, whole, as `gen/batch.ts` last published it. */
-    const [batch, setBatch] = useState<BatchState>(() => idleBatch(DEFAULT_COUNT))
     /**
-     * Which order the artist has asked for, or `undefined` to follow the batch.
-     *
-     * The batch decides the *default* — it flips to CLIP once CLIP has actually ranked — and this
-     * only exists so that a click on the segmented control outlives the next thing the batch says.
+     * What is being asked for, as one value — see `gen/ask.ts`. It was four `useState`s and four
+     * rules written inline below, two of them written twice.
      */
-    const [rankBy, setRankBy] = useState<'built-in' | 'clip' | undefined>(undefined)
+    const [ask, setAsk] = useState<Ask>(FIRST_ASK)
+    const {prompt, count, naming} = ask
+    /** The batch, whole, as `gen/batch.ts` last published it. */
+    const [batch, setBatch] = useState<BatchState>(() => idleBatch(FIRST_ASK.count))
     /**
      * How far this dialog has got in reaching the local model — see `gen/connect.ts`.
      *
@@ -174,12 +160,6 @@ export const GenerateDialog = ({
      * combinations that could never happen and no way to test the offline path without a mount.
      */
     const [connection, setConnection] = useState<Connection>(CONNECTING)
-    /**
-     * Off by default. It costs one extra call to the vision model per candidate and the word it
-     * comes back with sorts nothing — it is worth switching on when a batch keeps coming back
-     * wrong and you want to know what the model thinks it drew instead. See `gen/veto.ts`.
-     */
-    const [naming, setNaming] = useState(false)
     /**
      * A model the artist dropped, as the example it teaches with.
      *
@@ -261,7 +241,8 @@ export const GenerateDialog = ({
         if (!client) return
         const controller = new AbortController()
         running.current = controller
-        setRankBy(undefined)
+        // Whatever order was clicked belonged to the last batch — see `starting`.
+        setAsk(starting)
         await runBatch(
             {llama: client, scorer, veto},
             {
@@ -278,6 +259,7 @@ export const GenerateDialog = ({
     }, [connection, reference, scorer, veto, naming, prompt, count])
 
     const busy = batch.stage === 'generating'
+    const ready = startable(connection, batch)
     const pending = pendingSlots(batch)
 
     /** The one way a batch starts, so the button and the Enter key cannot drift apart. */
@@ -288,7 +270,7 @@ export const GenerateDialog = ({
     }
 
     const clipRanked = hasClip(batch)
-    const order = ordered(batch, rankBy ?? batch.rankBy)
+    const order = ordered(batch, showing(ask, batch))
 
     return (
         <Dialog
@@ -317,11 +299,14 @@ export const GenerateDialog = ({
                         size='sm'
                         value={prompt}
                         isDisabled={busy}
-                        onChange={setPrompt}
+                        onChange={value => {
+                            setAsk(held => asking(held, {prompt: value}))
+                        }}
                         // Enter is what a prompt field is for. Guarded rather than unconditional:
-                        // held down mid-batch it would start a second batch over the first.
+                        // held down mid-batch it would start a second batch over the first. The
+                        // guard and the button below are the same call, so they cannot drift.
                         onEnter={() => {
-                            if (!busy && connection.kind === 'ready') start()
+                            if (ready) start()
                         }}
                     />
                     <NumberInput
@@ -332,15 +317,17 @@ export const GenerateDialog = ({
                         step={1}
                         value={count}
                         isDisabled={busy}
+                        // The bound is `asking`'s, not this field's: `min` and `max` are what a
+                        // mouse obeys, and a typed 40 is not a mouse.
                         onChange={value => {
-                            setCount(Math.min(MAX_CANDIDATES, Math.max(1, Math.round(value))))
+                            setAsk(held => asking(held, {count: value}))
                         }}
                     />
                     <Button
                         label={busy ? 'Cancel' : 'Generate'}
                         size='sm'
                         variant={busy ? 'secondary' : 'primary'}
-                        isDisabled={!busy && connection.kind !== 'ready'}
+                        isDisabled={!busy && !ready}
                         tooltip={
                             connection.kind !== 'ready' ?
                                 'llama-server is not answering on :8080'
@@ -409,7 +396,9 @@ export const GenerateDialog = ({
                     size='sm'
                     value={naming}
                     isDisabled={busy}
-                    onChange={setNaming}
+                    onChange={value => {
+                        setAsk(held => asking(held, {naming: value}))
+                    }}
                 />
 
                 {busy && (
@@ -444,9 +433,11 @@ export const GenerateDialog = ({
                         <SegmentedControl
                             label='Rank by'
                             size='sm'
-                            value={rankBy ?? batch.rankBy}
+                            value={showing(ask, batch)}
                             onChange={value => {
-                                setRankBy(value === 'clip' ? 'clip' : 'built-in')
+                                setAsk(held =>
+                                    asking(held, {rankBy: value === 'clip' ? 'clip' : 'built-in'})
+                                )
                             }}
                         >
                             <SegmentedControlItem

@@ -278,6 +278,47 @@ test('without a picker, saving is a download and it says it cannot overwrite', a
 })
 
 /*
+ * `write` is the same anchor, and it is the *only* one an export gets to use.
+ *
+ * Every export used to build its own copy of it in `app/download.ts`, which is why this claim is
+ * here rather than in six test files that each replaced the same three globals. It is a download in
+ * every browser, picker or no picker: there is nothing to overwrite and nothing to cancel.
+ */
+test('an export is a download in every browser, and carries its own bytes and type', async () => {
+    await withPicker(
+        {showSaveFilePicker: () => Promise.reject(new Error('an export must never ask'))},
+        async () => {
+            const clicked: {download: string; type: string}[] = []
+            const pressed = HTMLAnchorElement.prototype.click
+            const realCreate = URL.createObjectURL
+            let last: Blob | undefined
+            URL.createObjectURL = (blob: Blob): string => {
+                last = blob
+                return 'blob:test'
+            }
+            HTMLAnchorElement.prototype.click = function press(this: HTMLAnchorElement) {
+                clicked.push({download: this.download, type: last?.type ?? ''})
+            }
+
+            try {
+                const files = browserFiles()
+                await files.write('sprites.png', Uint8Array.from([0x89, 0x50]), 'image/png')
+                await files.write('palette.hex', 'ff0000\n', 'text/plain')
+
+                expect(clicked).toEqual([
+                    {download: 'sprites.png', type: 'image/png'},
+                    {download: 'palette.hex', type: 'text/plain'}
+                ])
+                expect(await last?.text()).toBe('ff0000\n')
+            } finally {
+                HTMLAnchorElement.prototype.click = pressed
+                URL.createObjectURL = realCreate
+            }
+        }
+    )
+})
+
+/*
  * Firefox and Safari have no `showOpenFilePicker` either, so opening falls back to an
  * `<input type=file>` that is created, clicked and dropped. Never kept in the tree: a hidden input
  * living in the layout is one more node for a bounding-box test to trip over.

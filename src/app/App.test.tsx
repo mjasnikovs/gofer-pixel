@@ -675,72 +675,6 @@ test('the keyboard listener is wired to the table and to the reducer', async () 
 })
 
 /*
- * The selection bar — `FEATURESET.md` §4 and §39. Nine transforms, a duplicate and a delete, and
- * they exist only while something is selected.
- */
-test('the selection bar appears with a selection and its transforms reach the document', async () => {
-    const mounted = await mount()
-    const bar = () => mounted.host.querySelector('[role="toolbar"][aria-label="Selection"]')
-
-    expect(bar()).toBeNull()
-
-    /*
-     * A lopsided little model rather than the car: a transform is only visible if the thing being
-     * transformed is asymmetric, and a rotate that would push the selection off the grid is refused
-     * whole — so the test builds a shape with room to turn in.
-     */
-    const grid = createVolume(8, 8, 8, volume.palette)
-    for (let x = 0; x < 3; x += 1) grid.data[x + 8 * (3 + 8 * 3)] = 1
-    grid.data[1 + 8 * (4 + 8 * 3)] = 1
-    await act(async () => {
-        handle.dispatch?.({
-            type: 'new',
-            volume: grid,
-            objects: initialObjects(grid),
-            name: 'shape.gpix'
-        })
-    })
-    await act(async () => {
-        handle.dispatch?.({type: 'select-color', color: 1})
-    })
-    expect(bar()).not.toBeNull()
-    expect(bar()?.textContent).toContain('4 voxels')
-
-    // Each of the three families moves the voxels somewhere the last two did not.
-    const shapes = new Set<string>()
-    for (const label of ['Rotate 90° about Z', 'Flip X', 'Mirror across Y']) {
-        await act(async () => {
-            control(mounted.host, label).click()
-        })
-        shapes.add((handle.state?.volume.data ?? new Uint8Array()).join(''))
-    }
-    expect(shapes.size).toBe(3)
-
-    const before = handle.state?.volume.data.filter(Boolean).length ?? 0
-    await act(async () => {
-        control(mounted.host, 'Duplicate one voxel up').click()
-    })
-    expect(handle.state?.volume.data.filter(Boolean).length).toBeGreaterThan(before)
-
-    await act(async () => {
-        control(mounted.host, 'Delete selected voxels').click()
-    })
-    expect(handle.state?.selection.size).toBe(0)
-    expect(bar()).toBeNull()
-
-    // And with something chosen again, Deselect takes the bar back off the viewport.
-    await act(async () => {
-        handle.dispatch?.({type: 'select-color', color: 1})
-    })
-    await act(async () => {
-        control(mounted.host, 'Deselect').click()
-    })
-    expect(bar()).toBeNull()
-
-    await unmount(mounted)
-})
-
-/*
  * A picture dropped on the viewport — `FEATURESET.md` §33 and §34, told apart by Shift.
  *
  * The browser's own decoder is the one part of this that cannot exist here: happy-dom's
@@ -857,26 +791,25 @@ test('a .hex file loaded from the picker becomes the palette', async () => {
     await unmount(mounted)
 })
 
-test('the palette writes back out as a .hex file', async () => {
-    const written: string[] = []
-    const realCreate = URL.createObjectURL
-    const realClick = HTMLAnchorElement.prototype.click
-    URL.createObjectURL = (): string => 'blob:test'
-    HTMLAnchorElement.prototype.click = function click(this: HTMLAnchorElement): void {
-        written.push(this.download)
-    }
+/*
+ * The composition claim, not the palette one: the window's own `Files` reaches the panel that
+ * writes. What lands in the file is `BrushPanel.test.tsx`'s, at a fifth of the cost.
+ *
+ * This used to replace `URL.createObjectURL` and `HTMLAnchorElement.prototype.click`, because the
+ * panel built its own anchor and there was no port between it and the browser to stand at.
+ */
+test('the palette writes back out through the window’s own port', async () => {
+    const disk = new Map<string, string | Uint8Array>()
+    const mounted = await mount(memoryStore(), memoryFiles(disk))
 
-    try {
-        const mounted = await mount()
-        await act(async () => {
-            control(mounted.host, 'Save the palette').click()
-        })
-        expect(written).toEqual(['palette.hex'])
-        await unmount(mounted)
-    } finally {
-        URL.createObjectURL = realCreate
-        HTMLAnchorElement.prototype.click = realClick
-    }
+    await act(async () => {
+        control(mounted.host, 'Save the palette').click()
+    })
+    await settled()
+
+    expect([...disk.keys()]).toEqual(['palette.hex'])
+
+    await unmount(mounted)
 })
 
 /*

@@ -1,3 +1,4 @@
+import type {Files} from '../doc/files'
 import {shownVolume} from '../doc/objects'
 import {sheetMetadata} from '../sheet/metadata'
 import {writeMetadata, writeSheet, writeSprite} from './download'
@@ -14,20 +15,26 @@ import {currentSheet, type AppState} from './state'
  *
  * Nothing here re-renders anything. The files are cut out of the sheet the reducer baked, so what
  * lands in the downloads folder is byte-for-byte what the panel was previewing.
+ *
+ * `Files` comes in rather than being reached for, and it is the same port Open, Save and the palette
+ * loader use — see `doc/files.ts`. It used to be an anchor built three modules down, so an export
+ * was the one thing the artist ships that no test could read the bytes of.
  */
 
 /** The sheet's maps, as the current preset asks for them — the Export button. */
-export const writeExport = async (state: AppState): Promise<void> => {
+export const writeExport = async (files: Files, state: AppState): Promise<void> => {
     const sheet = currentSheet(state)
     if (!sheet) return
-    await writeSheet(sheet, presetMaps(state.output, state.output.preset))
+    await writeSheet(files, sheet, presetMaps(state.output, state.output.preset))
 }
 
 /** One PNG per camera, cut out of the sheet — `FEATURESET.md` §17. */
-export const writeSprites = async (state: AppState): Promise<void> => {
+export const writeSprites = async (files: Files, state: AppState): Promise<void> => {
     const sheet = currentSheet(state)
     if (!sheet) return
-    await Promise.all(state.cameras.map((entry, index) => writeSprite(sheet, index, entry.name)))
+    await Promise.all(
+        state.cameras.map((entry, index) => writeSprite(files, sheet, index, entry.name))
+    )
 }
 
 /**
@@ -40,10 +47,11 @@ export const writeSprites = async (state: AppState): Promise<void> => {
  * than about where this code lives. It is an opt-out from `doc/gesture.ts`'s derivation, not a
  * second spelling of it.
  */
-export const writeSheetMetadata = (state: AppState): void => {
+export const writeSheetMetadata = async (files: Files, state: AppState): Promise<void> => {
     const sheet = currentSheet(state)
     if (!sheet) return
-    writeMetadata(
+    await writeMetadata(
+        files,
         sheetMetadata(
             shownVolume(state.volume, state.objects),
             state.cameras,

@@ -1,5 +1,6 @@
-import {afterEach, beforeEach, expect, test} from 'bun:test'
+import {expect, test} from 'bun:test'
 import {eightDirections} from '../doc/cameras'
+import {memoryFiles} from '../doc/files'
 import {encodePng} from '../image/png'
 import {sheetMetadata} from '../sheet/metadata'
 import {renderSheet, type Sheet} from '../sheet/sheet'
@@ -7,60 +8,34 @@ import {createVolume, setVoxel} from '../render/volume'
 import {writeMetadata, writePalette, writeSheet, writeSheetMap, writeSprite} from './download'
 
 /**
- * Every export in the app ends at one anchor click, so that anchor is where the test stands.
+ * Every export goes through `Files.write`, so the test stands at the port and holds the disk.
  *
- * The alternative is asserting on a `blob:` URL, which says nothing: happy-dom hands back an opaque
- * handle and there is no way to read it. Patching `createObjectURL` keeps the `Blob` itself, so a
- * test can ask what the artist would actually have got in their downloads folder — the bytes, not
- * just the fact that something was offered.
+ * It used to stand at the anchor — replacing `URL.createObjectURL`, `URL.revokeObjectURL` and
+ * `HTMLAnchorElement.prototype.click` before every case in this file, because that was the only way
+ * to see a download happen. It could see *that* one happened and never *what* was in it: happy-dom
+ * hands back an opaque `blob:` handle and there is nothing behind it to read.
+ *
+ * A `Map` has the bytes. The anchor is `doc/files.ts`'s now, and `files.test.ts` is where it is
+ * watched — once, for both callers, instead of in every file that writes something.
  */
-interface Written {
-    readonly name: string
-    readonly type: string
-    readonly blob: Blob
+const disk = () => {
+    const backing = new Map<string, string | Uint8Array>()
+    return {
+        files: memoryFiles(backing),
+        names: (): string[] => [...backing.keys()],
+        text: (name: string): string => {
+            const held = backing.get(name)
+            if (typeof held !== 'string') throw new Error(`${name} is not text`)
+            return held
+        },
+        bytes: (name: string): Uint8Array => {
+            const held = backing.get(name)
+            if (held === undefined || typeof held === 'string')
+                throw new Error(`${name} is not bytes`)
+            return held
+        }
+    }
 }
-
-let written: Written[] = []
-let handed: Blob[] = []
-let revoked: string[] = []
-
-const realCreate = URL.createObjectURL
-const realRevoke = URL.revokeObjectURL
-const realClick = HTMLAnchorElement.prototype.click
-
-beforeEach(() => {
-    written = []
-    handed = []
-    revoked = []
-    URL.createObjectURL = (blob: Blob): string => {
-        handed.push(blob)
-        return `blob:test/${String(handed.length)}`
-    }
-    URL.revokeObjectURL = (url: string): void => {
-        revoked.push(url)
-    }
-    HTMLAnchorElement.prototype.click = function click(this: HTMLAnchorElement): void {
-        const blob = handed[handed.length - 1]
-        if (!blob) throw new Error('an anchor clicked with no object URL behind it')
-        written.push({name: this.download, type: blob.type, blob})
-    }
-})
-
-afterEach(() => {
-    URL.createObjectURL = realCreate
-    URL.revokeObjectURL = realRevoke
-    HTMLAnchorElement.prototype.click = realClick
-})
-
-const names = (): string[] => written.map(entry => entry.name)
-
-const only = (): Written => {
-    const [first] = written
-    if (!first || written.length !== 1) throw new Error(`expected one file, got ${names().join()}`)
-    return first
-}
-
-const bytes = async (blob: Blob): Promise<Uint8Array> => new Uint8Array(await blob.arrayBuffer())
 
 const volume = createVolume(8, 8, 8, new Uint8Array(256 * 4))
 for (let x = 0; x < 8; x += 1)
@@ -72,52 +47,52 @@ const cameras = eightDirections(volume)
 const sheet: Sheet = renderSheet(volume, cameras, 8, ['color', 'normal', 'ao'], 2, 4)
 
 test('the palette writes one .hex file with the text in it', async () => {
-    writePalette('ff0000\n00ff00\n')
+    const out = disk()
 
-    expect(only().name).toBe('palette.hex')
-    expect(only().type).toBe('text/plain')
-    expect(await only().blob.text()).toBe('ff0000\n00ff00\n')
+    await writePalette(out.files, 'ff0000\n00ff00\n')
+
+    expect(out.names()).toEqual(['palette.hex'])
+    expect(out.text('palette.hex')).toBe('ff0000\n00ff00\n')
 })
 
 test('the metadata writes one .json file that parses back to what went in', async () => {
+    const out = disk()
     const metadata = sheetMetadata(volume, cameras, sheet, true)
-    writeMetadata(metadata)
 
-    expect(only().name).toBe('sprites.json')
-    expect(only().type).toBe('application/json')
-    expect(JSON.parse(await only().blob.text())).toEqual(JSON.parse(JSON.stringify(metadata)))
+    await writeMetadata(out.files, metadata)
+
+    expect(out.names()).toEqual(['sprites.json'])
+    expect(JSON.parse(out.text('sprites.json'))).toEqual(JSON.parse(JSON.stringify(metadata)))
 })
 
 test('the colour sheet is sprites.png and every other map carries its name', async () => {
-    await writeSheetMap(sheet, 'color')
-    await writeSheetMap(sheet, 'normal')
-    await writeSheetMap(sheet, 'ao')
+    const out = disk()
 
-    expect(names()).toEqual(['sprites.png', 'sprites-normal.png', 'sprites-ao.png'])
-    for (const entry of written) expect(entry.type).toBe('image/png')
+    await writeSheetMap(out.files, sheet, 'color')
+    await writeSheetMap(out.files, sheet, 'normal')
+    await writeSheetMap(out.files, sheet, 'ao')
+
+    expect(out.names()).toEqual(['sprites.png', 'sprites-normal.png', 'sprites-ao.png'])
 })
 
 test('a map the sheet was never baked with writes nothing', async () => {
-    await writeSheetMap(sheet, 'emission')
+    const out = disk()
 
-    expect(written).toEqual([])
+    await writeSheetMap(out.files, sheet, 'emission')
+
+    expect(out.names()).toEqual([])
 })
 
 test('writing a sheet writes one file per map asked for, and skips the ones it lacks', async () => {
-    await writeSheet(sheet, ['color', 'ao', 'depth'])
+    const out = disk()
 
-    expect(names().toSorted()).toEqual(['sprites-ao.png', 'sprites.png'])
-})
+    await writeSheet(out.files, sheet, ['color', 'ao', 'depth'])
 
-test('every object URL handed out is revoked again', async () => {
-    await writeSheet(sheet, ['color', 'normal'])
-    writePalette('ffffff')
-
-    expect(revoked.length).toBe(handed.length)
-    expect(revoked.toSorted()).toEqual(['blob:test/1', 'blob:test/2', 'blob:test/3'])
+    expect(out.names().toSorted()).toEqual(['sprites-ao.png', 'sprites.png'])
 })
 
 test('one sprite is the cell out of the baked sheet, byte for byte', async () => {
+    const out = disk()
     const plane = sheet.maps.color
     if (!plane) throw new Error('the colour map is always baked')
 
@@ -132,23 +107,25 @@ test('one sprite is the cell out of the baked sheet, byte for byte', async () =>
         cut.set(plane.subarray(from, from + sheet.cell * 4), row * sheet.cell * 4)
     }
 
-    await writeSprite(sheet, index, 'Front Left')
+    await writeSprite(out.files, sheet, index, 'Front Left')
 
-    expect(only().name).toBe('front-left.png')
-    expect(await bytes(only().blob)).toEqual(await encodePng(sheet.cell, sheet.cell, cut))
+    expect(out.names()).toEqual(['front-left.png'])
+    expect(out.bytes('front-left.png')).toEqual(await encodePng(sheet.cell, sheet.cell, cut))
 })
 
 test('a sprite cut from a different cell is different pixels', async () => {
-    await writeSprite(sheet, 0, 'front')
-    await writeSprite(sheet, 3, 'back')
+    const out = disk()
 
-    const [front, back] = written
-    if (!front || !back) throw new Error('two sprites should have been written')
-    expect(await bytes(front.blob)).not.toEqual(await bytes(back.blob))
+    await writeSprite(out.files, sheet, 0, 'front')
+    await writeSprite(out.files, sheet, 3, 'back')
+
+    expect(out.bytes('front.png')).not.toEqual(out.bytes('back.png'))
 })
 
 test('a sheet with no colour map writes no sprite', async () => {
-    await writeSprite({...sheet, maps: {}}, 0, 'front')
+    const out = disk()
 
-    expect(written).toEqual([])
+    await writeSprite(out.files, {...sheet, maps: {}}, 0, 'front')
+
+    expect(out.names()).toEqual([])
 })

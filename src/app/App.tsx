@@ -1,5 +1,5 @@
 import {useCallback, useEffect, useMemo, useReducer, useRef, useState} from 'react'
-import {objectAt, shownVolume} from '../doc/objects'
+import {shownVolume} from '../doc/objects'
 import {saveDocument} from '../doc/save'
 import type {Files} from '../doc/files'
 import {clearSnapshots, putSnapshot, snapshots, type Store} from '../doc/store'
@@ -7,29 +7,21 @@ import {browserScorer, type Scorer} from '../gen/clip'
 import type {Llama} from '../gen/llama'
 import {defaultLibrary, type Library} from '../gen/library'
 import {browserVeto, type Veto} from '../gen/veto'
-import {selectionBounds} from '../doc/selection'
-import type {Raycaster} from '../render/gl'
 import type {Volume} from '../render/volume'
-import {Viewport} from '../viewport/Viewport'
-import type {OrbitEvent, ViewportPointer} from '../viewport/orbit'
 import {BrushPanel} from './BrushPanel'
-import {TOOL_CURSORS} from './cursors'
 import {writeExport} from './export'
 import {ExportPanel} from './ExportPanel'
 import {Header} from './Header'
 import {ObjectsPanel} from './ObjectsPanel'
-import {ReferenceLayer} from './ReferenceLayer'
 import {RendersPanel} from './RendersPanel'
-import {SelectionBar} from './SelectionBar'
+import {Stage} from './Stage'
 // import {Timeline} from './Timeline' — see the commented bar at the end of the layout
 import {GridPanel, ToolRail} from './ToolRail'
-import {AxisGizmo, BrushGhost, GroundGrid, HintBar, SelectionBox, ViewCube} from './ViewportOverlay'
 import {ViewsStrip} from './ViewsStrip'
 import {
     asDocument,
     currentSheet,
     initialState,
-    previewVolume,
     reduce,
     slicedFor,
     TOOLS,
@@ -39,7 +31,7 @@ import {
 import {GenerateDialog} from './GenerateDialog'
 import {NewProjectDialog} from './NewProjectDialog'
 import {UnsavedDialog} from './UnsavedDialog'
-import {markDrawn, publish} from './handle'
+import {publish} from './handle'
 import {keyAction, pressOf} from './keys'
 import {
     closed,
@@ -75,12 +67,20 @@ import {
  *
  * The exceptions are the two kinds of prop that genuinely are not state:
  *
- * - **Memoised derivations.** `shown`, `drawn` and `sheet` are computed once here and passed down,
- *   because recomputing `shownVolume` inside a panel of switches would rebuild a whole grid on every
- *   render of it.
+ * - **Memoised derivations.** `shown` and `sheet` are computed once here and passed down, because
+ *   recomputing `shownVolume` inside a panel of switches would rebuild a whole grid on every render
+ *   of it.
  * - **Anything that goes through a port.** Open, Save, the palette loader and the snapshots can be
  *   cancelled and belong to the app, so they stay callbacks — a panel must not get to decide which
- *   disk a read goes through. All of them are `session.ts`.
+ *   disk a read goes through. All of them are `session.ts`. The two panels that *write* take the
+ *   `Files` itself instead, because an export has no cancel and nothing to come back and dispatch:
+ *   the panel does not choose the disk, it is handed one. What it must never do is reach for a
+ *   global, which is exactly what every export did before `Files.write` existed.
+ *
+ * That rule reaches the middle of the window too. The viewport and the eight things drawn over it
+ * are `Stage.tsx`, which takes the same three props a panel does. They used to be nine children
+ * threaded by hand from here, plus two derivations — the box round the selection and the name of the
+ * locked object — that nothing outside them ever read.
  *
  * The keyboard is `keys.ts`; what a key means is a table, and what is here is the listener.
  */
@@ -165,10 +165,6 @@ export const App = ({
      */
     const shown = useMemo(() => slicedFor(state, hidden), [state, hidden])
 
-    // What the viewport draws — see `previewVolume`. Erase shows its hole and Fill its new paint
-    // before the press, because neither change is visible from the outside of a block.
-    const drawn = useMemo(() => previewVolume(state, shown), [state, shown])
-
     /*
      * The sheet the last export baked, if it is still the sheet for this document.
      *
@@ -176,30 +172,6 @@ export const App = ({
      * `currentSheet` compares what it was baked from against what is there now. See `sheet/baked.ts`.
      */
     const sheet = useMemo(() => currentSheet(state), [state])
-
-    const onOrbit = useCallback((event: OrbitEvent, height: number) => {
-        dispatch({type: 'orbit', event, height})
-    }, [])
-
-    const onPointer = useCallback((event: ViewportPointer) => {
-        dispatch({type: 'pointer', event})
-    }, [])
-
-    const onLeave = useCallback(() => {
-        dispatch({type: 'unaim'})
-    }, [])
-
-    const onReady = useCallback((raycaster: Raycaster) => {
-        publish({raycaster})
-    }, [])
-
-    const onFrame = useCallback(() => {
-        markDrawn()
-    }, [])
-
-    const capture = useCallback(() => {
-        dispatch({type: 'capture'})
-    }, [])
 
     /*
      * The file menu, the palette loader and the viewport's drop — every path that reads or writes
@@ -271,7 +243,7 @@ export const App = ({
     useEffect(() => {
         if (state.exporting) {
             dispatch({type: 'written'})
-            void writeExport(state)
+            void writeExport(files, state)
         }
         // `exporting` alone: it is set by the one action that also bakes, so a sheet is always there
         // when it is true, and re-running on every field the writer reads would write twice.
@@ -353,22 +325,6 @@ export const App = ({
         [state.cameras, state.previewed]
     )
 
-    const bounds = useMemo(
-        () => selectionBounds(volume, state.selection),
-        [volume, state.selection]
-    )
-
-    /*
-     * The locked object standing between the cursor and the edit — the one thing the artist can act
-     * on when a press is about to be silent. It goes to the hint bar as a name and to the object
-     * list as a row to light up, so "why did nothing happen" and "here is the switch" are the same
-     * answer seen twice.
-     */
-    const blockingId =
-        state.hover?.blocked?.reason === 'locked' ? state.hover.blocked.object : undefined
-    const blocking =
-        blockingId === undefined ? undefined : objectAt(state.objects, blockingId)?.name
-
     return (
         <div className='app'>
             <Header
@@ -413,90 +369,21 @@ export const App = ({
                     <BrushPanel
                         state={state}
                         dispatch={dispatch}
+                        files={files}
                         onLoad={loadPalette}
                     />
                 </div>
 
-                <div
-                    className='stage'
-                    onDragOver={event => {
-                        event.preventDefault()
-                    }}
-                    onDrop={event => {
-                        event.preventDefault()
+                <Stage
+                    state={state}
+                    dispatch={dispatch}
+                    volume={shown}
+                    onPicture={(file, asVoxels) => {
                         // Onto the locked drawing plane if there is one, and Front otherwise —
                         // the artist who locked a plane is working on it.
-                        apply(
-                            dropPicture(
-                                event.dataTransfer.files[0],
-                                event.shiftKey,
-                                state.plane ?? 1
-                            )
-                        )
+                        apply(dropPicture(file, asVoxels, state.plane ?? 1))
                     }}
-                >
-                    <ReferenceLayer
-                        volume={shown}
-                        camera={state.orbit.camera}
-                        references={state.references}
-                    />
-                    <Viewport
-                        volume={drawn}
-                        camera={state.orbit.camera}
-                        map={state.map}
-                        edges={state.edges}
-                        cursor={TOOL_CURSORS[state.tool]}
-                        isMovingCamera={state.orbit.gesture !== undefined}
-                        onOrbit={onOrbit}
-                        onPointer={onPointer}
-                        onLeave={onLeave}
-                        onReady={onReady}
-                        onFrame={onFrame}
-                    />
-                    {state.grid ?
-                        <GroundGrid
-                            volume={volume}
-                            camera={state.orbit.camera}
-                        />
-                    :   undefined}
-                    <BrushGhost
-                        volume={shown}
-                        camera={state.orbit.camera}
-                        hover={state.hover}
-                    />
-                    <SelectionBox
-                        volume={shown}
-                        camera={state.orbit.camera}
-                        bounds={bounds}
-                        band={state.band}
-                        losing={state.losing}
-                    />
-                    <AxisGizmo
-                        volume={shown}
-                        camera={state.orbit.camera}
-                    />
-                    <ViewCube
-                        volume={shown}
-                        camera={state.orbit.camera}
-                    />
-                    <SelectionBar
-                        count={state.selection.size}
-                        onTransform={op => {
-                            dispatch({type: 'transform', op})
-                        }}
-                        onClear={() => {
-                            dispatch({type: 'clear-selection'})
-                        }}
-                    />
-                    <HintBar
-                        tool={`${(state.tool[0] ?? '').toUpperCase()}${state.tool.slice(1)}`}
-                        hover={state.hover}
-                        blocking={blocking}
-                        height={volume.sz}
-                        losing={state.losing}
-                        onCapture={capture}
-                    />
-                </div>
+                />
 
                 <div className='snap-column'>
                     <GridPanel
@@ -525,6 +412,7 @@ export const App = ({
                     <ExportPanel
                         state={state}
                         dispatch={dispatch}
+                        files={files}
                         volume={shown}
                         sheet={sheet}
                     />

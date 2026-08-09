@@ -2,6 +2,7 @@ import {IconButton} from '@astryxdesign/core/IconButton'
 import {Switch} from '@astryxdesign/core/Switch'
 import {Text} from '@astryxdesign/core/Text'
 import type {Dispatch, ReactNode} from 'react'
+import type {Files} from '../doc/files'
 import {colorCss, projectPalette, SWATCH_COLUMNS, toHexPalette, type Swatch} from '../doc/palette'
 import {
     CircleIcon,
@@ -147,15 +148,24 @@ const idleReason = (tool: Tool): string =>
 export const BrushPanel = ({
     state,
     dispatch,
+    files,
     onLoad
 }: {
     state: AppState
     dispatch: Dispatch<AppAction>
     /**
+     * The disk the palette is written back to — see `doc/files.ts`.
+     *
+     * The port itself rather than a callback, unlike `onLoad`: a write has no picker and no cancel,
+     * so there is nothing to come back and dispatch. It used to be an anchor this panel built for
+     * itself, which is the one thing a panel must not do.
+     */
+    files: Files
+    /**
      * Loading a palette off the disk — the one control in this panel that is not a dispatch.
      *
-     * A prop because it needs the `Files` port, which the app owns: this panel must not be able to
-     * decide *which* port a read goes through. See `app/session.ts`.
+     * A callback rather than the port, because a read *can* be cancelled and what comes back is an
+     * `AppAction` the app has to dispatch. See `app/session.ts`.
      */
     onLoad: () => void
 }) => {
@@ -332,7 +342,7 @@ export const BrushPanel = ({
                         size='sm'
                         variant='ghost'
                         onClick={() => {
-                            writePalette(toHexPalette(volume.palette))
+                            void writePalette(files, toHexPalette(volume.palette))
                         }}
                     />
                 </SectionHead>

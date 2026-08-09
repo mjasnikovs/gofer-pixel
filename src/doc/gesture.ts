@@ -1,15 +1,7 @@
 import {faceAxis, type Axis, type Brush, type Offset} from './brush'
-import {
-    beginEdit,
-    commitEdit,
-    connected,
-    fillRegion,
-    strokeCells,
-    writeCells,
-    type Draft
-} from './edits'
+import {beginEdit, connected, fillRegion, strokeCells, writeCells, type Draft} from './edits'
 import {figureCells} from './figures'
-import {record, type History} from './history'
+import {commit, type History} from './history'
 import {lockedIds, objectCells, ownerAt, shownVolume, type Objects} from './objects'
 import {remember} from './palette'
 import {
@@ -843,9 +835,8 @@ export const beginStroke = <S extends Gesture>(state: S, event: ViewportPointer)
     if (tool === 'fill') {
         const draft = openDraft(state)
         fillRegion(draft, hit.x, hit.y, hit.z, color)
-        const edit = commitEdit(draft)
-        if (!edit) return state
-        return changed(state, {volume: draft.volume, history: record(state.history, edit)})
+        const landed = commit(state, draft)
+        return landed ? changed(state, landed) : state
     }
 
     /*
@@ -1211,12 +1202,13 @@ export const endDrag = <S extends Gesture>(state: S): S => {
         draft.before.set(i, was)
         draft.beforeOwner.set(i, owned)
     }
-    const edit = commitEdit(draft)
     return changed(state, {
         drag: undefined,
         // The warning was about a drop that had not happened yet. It has now.
         losing: 0,
-        history: edit ? record(state.history, edit) : state.history
+        // `undefined` spreads to nothing, which is the right answer for a drag that moved a voxel
+        // out and back again: the drop still ends, and the history is left where it was.
+        ...commit(state, draft)
     })
 }
 
@@ -1236,11 +1228,7 @@ export const endBand = <S extends Gesture>(state: S): S => {
 export const endStroke = <S extends Gesture>(state: S): S => {
     const {stroke} = state
     if (!stroke) return state
-    const edit = commitEdit(stroke.draft)
-    return changed(state, {
-        stroke: undefined,
-        history: edit ? record(state.history, edit) : state.history
-    })
+    return changed(state, {stroke: undefined, ...commit(state, stroke.draft)})
 }
 
 /**

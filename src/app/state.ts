@@ -11,7 +11,7 @@ import {
     viewNamed,
     type Views
 } from '../doc/views'
-import {beginEdit, commitEdit, NO_CELLS, writeCells, writeOwned, type Draft} from '../doc/edits'
+import {beginEdit, writeCells, writeOwned, type Draft} from '../doc/edits'
 import type {GenerationRecord} from '../gen/llama'
 import {drop, fade, lock, place, type Reference} from '../doc/reference'
 import {DEFAULT_OUTPUT, type Document, type SavedOutput} from '../doc/save'
@@ -31,7 +31,7 @@ import {
     soloObject,
     type Objects
 } from '../doc/objects'
-import {EMPTY_HISTORY, record, redo, undo, type Step as HistoryStep} from '../doc/history'
+import {commit, EMPTY_HISTORY, redo, undo, type Step as HistoryStep} from '../doc/history'
 import {
     firstColor,
     freeSlot,
@@ -652,14 +652,8 @@ const step = (state: AppState, action: AppAction): AppState => {
              * additive and may legitimately clip.
              */
             if (KEEPS_COUNT.has(op.kind) && selection.size !== state.selection.size) return state
-            const edit = commitEdit(draft)
-            if (!edit) return state
-            return {
-                ...state,
-                volume: draft.volume,
-                selection,
-                history: record(state.history, edit)
-            }
+            const landed = commit(state, draft, {selection})
+            return landed ? {...state, ...landed} : state
         }
 
         case 'plane':
@@ -714,14 +708,8 @@ const step = (state: AppState, action: AppAction): AppState => {
                 clipboard.at[1],
                 clipboard.at[2] + 1
             ])
-            const edit = commitEdit(draft)
-            if (!edit) return state
-            return {
-                ...state,
-                volume: draft.volume,
-                selection,
-                history: record(state.history, edit)
-            }
+            const landed = commit(state, draft, {selection})
+            return landed ? {...state, ...landed} : state
         }
 
         /*
@@ -756,17 +744,9 @@ const step = (state: AppState, action: AppAction): AppState => {
                         const value = voxelAt(state.volume, x, y, z)
                         writeOwned(draft, x + dx, y + dy, z + dz, value, added.active)
                     }
-                    const edit = commitEdit(draft) ?? NO_CELLS
-                    return {
-                        ...state,
-                        objects: added,
-                        volume: draft.volume,
-                        selection: EMPTY_SELECTION,
-                        history: record(state.history, {
-                            ...edit,
-                            objects: {from: objects, to: added}
-                        })
-                    }
+                    // The list moved, so this is an edit whether or not a cell did — see `commit`.
+                    const landed = commit(state, draft, {objects: added})
+                    return landed ? {...state, ...landed} : state
                 }
                 case 'active':
                     return {...state, objects: {...objects, active: op.id}}
@@ -796,21 +776,12 @@ const step = (state: AppState, action: AppAction): AppState => {
                         writeCells(draft, [[x, y, z]], 0)
                     }
                     /*
-                     * An empty object has no cells to commit, so `commitEdit` hands back nothing
-                     * — and the delete still has to be undoable, because losing a name is a loss.
-                     * `NO_CELLS` is the edit that says "the list changed and the grid did not".
+                     * An empty object has no cells to commit, and the delete still has to be
+                     * undoable — losing a name is a loss. Passing `objects` is what says "the list
+                     * changed and the grid did not"; see `commit` and `NO_CELLS`.
                      */
-                    const edit = commitEdit(draft) ?? NO_CELLS
-                    return {
-                        ...state,
-                        objects: list,
-                        volume: draft.volume,
-                        selection: EMPTY_SELECTION,
-                        history: record(state.history, {
-                            ...edit,
-                            objects: {from: objects, to: list}
-                        })
-                    }
+                    const landed = commit(state, draft, {objects: list})
+                    return landed ? {...state, ...landed} : state
                 }
             }
             return state
@@ -1058,14 +1029,13 @@ const step = (state: AppState, action: AppAction): AppState => {
         case 'replace-color': {
             const draft = openDraft(state)
             if (remapColor(draft, action.from, action.to) === 0) return state
-            const edit = commitEdit(draft)
-            if (!edit) return state
+            const landed = commit(state, draft)
+            if (!landed) return state
             return {
                 ...state,
-                volume: draft.volume,
+                ...landed,
                 color: action.to,
-                recent: remember(state.recent, action.to),
-                history: record(state.history, edit)
+                recent: remember(state.recent, action.to)
             }
         }
 

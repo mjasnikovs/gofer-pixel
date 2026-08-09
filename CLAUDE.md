@@ -172,12 +172,11 @@ Neither service is required to open the app. With llama-server down the menu ite
 that says so and disables its one button; with `clipserve.py` down the batch ranks on the built-in
 scores.
 
-## Thirteen seams worth knowing about
+## Sixteen seams worth knowing about
 
-The app layer is deliberately thin, and thirteen modules under it hold what would otherwise be
-spread through React callbacks and reducer cases. Each one was pulled out because its rules could
-only be tested by mounting something, or by building a whole `AppState` to ask a question about four
-fields.
+The app layer is deliberately thin, and sixteen modules under it hold what would otherwise be spread
+through React callbacks and reducer cases. Each one was pulled out because its rules could only be
+tested by mounting something, or by building a whole `AppState` to ask a question about four fields.
 
 - **`src/doc/gesture.ts`** — every pointer gesture, over a `Gesture` interface that `AppState`
   extends. Eighteen fields, not fifty. It replaces two hand-written lists of the same field names
@@ -221,6 +220,11 @@ fields.
   share one instance. **A `Files` is stateful and must outlive a render** — it used to be a default
   parameter on `App`, so the re-render caused by saving threw away the handle and every Ctrl-S
   opened the picker again. `store` and `files` are required props, built once in `main.tsx`.
+  **`write` is the other half of it**: no picker, no handle, no cancel, bytes or text. Every export
+  used to build its own `document.createElement('a')` in `app/download.ts`, three lines from the
+  identical anchor in here — two disk seams, and the one with no adapter under it was the whole of
+  what the artist ships. Its tests replaced three globals per file and still could not read a byte,
+  because happy-dom's `blob:` handle is opaque.
 - **`src/app/session.ts`** — the open document's lifecycle over that port: New, Open, Save, Save As,
   the palette loader, the picture drop, the snapshot restore, and the guard in front of the three
   that replace the document. Every command is ports and state in, an `AppAction` or `undefined` out,
@@ -249,6 +253,25 @@ fields.
   strings back — `expect(run.moves('outline')).toBe(20)` was a claim about geometry expressed as a
   count of `M` characters. The components stringify points; nothing in `overlay.ts` knows what SVG
   is.
+
+- **`src/doc/history.ts`** — `commit(state, draft, also?)`: how a draft becomes an entry in the
+  history, which is the inverse of `undo`/`redo` and therefore lives with them rather than in
+  `edits.ts`, which cannot import `record` without a cycle. It was written out eight times — five
+  reducer cases and three gestures — with **three different answers to "the draft changed nothing"**
+  and only the two that had to remembering to stamp the object list onto the edit. That omission is
+  commit `eaa7b23`. `undefined` back means nothing happened and the caller hands back what it was
+  given, which matters beyond the history: `draft.volume` is a fresh object, so a caller that
+  returned it anyway would mark the document dirty over an edit that moved no cell.
+- **`src/app/Stage.tsx`** — the viewport and the eight things drawn over it, behind the same three
+  props a panel takes. `App.tsx` used to thread `volume` and `camera` into nine children by hand and
+  compute two derivations nothing else read: the box round the selection, and the name of the locked
+  object the hint bar reports. The second had no test at all. The picture drop stays a callback,
+  because it goes through `Files` and comes back as an action somebody has to dispatch.
+- **`src/gen/ask.ts`** — what the artist is asking the model for: prompt, count, naming, and the
+  rank order they clicked. Four `useState`s and four rules written inline in JSX, **two of them
+  written twice** — the count's bound as both a field `max` and a clamp, and the start guard as
+  `!busy && connection.kind === 'ready'` on Enter and `!busy && connection.kind !== 'ready'` on the
+  button. `startable` is the one call both now make.
 
 Two more things about the app layer that are not modules:
 
@@ -325,9 +348,11 @@ file dialogs, the guard in front of them, and the one live viewport.
 
 Before reaching for a mount, check whether the thing under test has a seam already: `state.ts`,
 `gesture.ts`, `session.ts`, `keys.ts`, `batch.ts`, `connect.ts`, `doc/reference.ts`,
-`gen/reference.ts`, `teaching.ts`, `overlay.ts`, `views.ts`, `presets.ts`, `store.ts`, `export.ts`
-and `baked.ts` all answer their own questions in single-digit milliseconds, and they exist because
-the answers used to cost a window. If it is one panel and a real reducer, that is `test/panel.tsx`.
+`gen/reference.ts`, `teaching.ts`, `overlay.ts`, `views.ts`, `presets.ts`, `store.ts`, `export.ts`,
+`history.ts`, `ask.ts` and `baked.ts` all answer their own questions in single-digit milliseconds,
+and they exist because the answers used to cost a window. If it is one panel and a real reducer,
+that is `test/panel.tsx` — and the stage is a panel by that definition, so `Stage.test.tsx` mounts
+it there rather than mounting a window.
 
 ## Conventions
 
