@@ -283,12 +283,6 @@ export const SunIcon = () => (
     </Svg>
 )
 
-export const ChevronIcon = () => (
-    <Svg>
-        <path d='M4.5 6.5 8 10l3.5-3.5' />
-    </Svg>
-)
-
 export const MenuIcon = () => (
     <Svg>
         <path d='M2.5 4h11M2.5 8h11M2.5 12h11' />

@@ -5,7 +5,7 @@ import type {Dispatch} from 'react'
 import {canRedo, canUndo} from '../doc/history'
 import {countVoxels} from '../vox/vox-file'
 import {MoreMenu} from '@astryxdesign/core/MoreMenu'
-import {ChevronIcon, CubeIcon, RedoIcon, SlidersIcon, SunIcon, UndoIcon} from './icons'
+import {RedoIcon, SlidersIcon, SunIcon, UndoIcon} from './icons'
 import type {AppAction, AppState} from './state'
 
 /**
@@ -27,9 +27,12 @@ import type {AppAction, AppState} from './state'
  * lighting to the game engine, which is right about a point light and wrong about a directional
  * one. See the comment on the button.
  *
- * The rest of this row genuinely does nothing yet and stays disabled, each saying so in its own
- * tooltip. A greyed button that names what it would do is a promise; an enabled one that swallows
- * the click is a bug report.
+ * Nothing in this row is disabled any more. A Shading button and a Scene options chevron sat right
+ * of the sun, drawn from the mockup and wired to nothing. The renderer does have eight modes and the
+ * viewport is pinned to colour, so the button had a real meaning available to it — but the export
+ * dialog already previews all eight, so the only thing it would have added is orbiting while you
+ * look at one. That is not worth a control in the title bar, and a promise nobody is keeping reads
+ * as a missing feature rather than a postponed one.
  */
 /**
  * Restore-point labels, guaranteed distinct.
@@ -194,22 +197,6 @@ export const Header = ({
                 onClick={() => {
                     dispatch({type: 'lighting', lighting: {on: !state.lighting.on}})
                 }}
-            />
-            <IconButton
-                label='Shading'
-                tooltip='Shading modes'
-                icon={<CubeIcon />}
-                size='sm'
-                variant='ghost'
-                isDisabled
-            />
-            <IconButton
-                label='Scene options'
-                tooltip='Scene options'
-                icon={<ChevronIcon />}
-                size='sm'
-                variant='ghost'
-                isDisabled
             />
             {/*
              * Opens the export dialog rather than writing straight to disk.
