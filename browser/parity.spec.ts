@@ -253,3 +253,122 @@ test('the GPU is the GPU — a 512x512 frame through 32³ costs a fraction of a 
     const renderer = await page.evaluate(() => window.gofer.gpuInfo())
     expect(perFrame, `${perFrame.toFixed(3)} ms per frame on ${renderer}`).toBeLessThan(10)
 })
+
+/**
+ * The other half of "the outer layer does not render, and you can see inside the voxels."
+ *
+ * `raycast.test.ts` sweeps the orbit and proves the algorithm never walks through a solid voxel.
+ * That is a claim about a function; the artist's claim is about the window. Everything between the
+ * two is what this covers — the volume the app actually uploaded, at the camera the app actually
+ * holds, into the canvas at the size the layout actually gave it.
+ *
+ * The block is painted so that seeing inside it is a colour rather than an inference: the shell is
+ * light, the core is darker than the darkest lit shell face, so one dark pixel is one layer that
+ * did not draw. The comparison against the CPU raycast is the stronger statement and comes first;
+ * the buried count is what names the fault when it fails.
+ *
+ * The lattice goes off for the duration. It is the one thing the shader draws that the exporter
+ * does not, so with it on the two pictures are *supposed* to differ.
+ */
+test('the running viewport shows no voxel that is buried inside a solid block', async ({page}) => {
+    const N2 = 16
+    const block = createVolume(N2, N2, N2, new Uint8Array(256 * 4))
+    block.palette.set([200, 200, 200, 255], 1 * 4)
+    block.palette.set([40, 40, 40, 255], 2 * 4)
+    const lo = 3
+    const hi = 12
+    for (let z = lo; z <= hi; z += 1) {
+        for (let y = lo; y <= hi; y += 1) {
+            for (let x = lo; x <= hi; x += 1) {
+                const shell = [x, y, z].some(v => v === lo || v === hi)
+                setVoxel(block, x, y, z, shell ? 1 : 2)
+            }
+        }
+    }
+
+    await page.addInitScript(() => {
+        try {
+            localStorage.clear()
+        } catch {
+            // No store in this context, which is the state the clear was after anyway.
+        }
+    })
+    await page.goto('/')
+    await page.evaluate(() => window.goferPixel.firstFrame)
+
+    await page.evaluate(
+        ([size, data, palette]) => {
+            const grid = new Uint8Array(data as number[])
+            window.goferPixel.dispatch({
+                type: 'open',
+                document: {
+                    name: 'block',
+                    volume: {
+                        sx: size as number,
+                        sy: size as number,
+                        sz: size as number,
+                        data: grid,
+                        palette: new Uint8Array(palette as number[]),
+                        emissive: new Uint8Array(256),
+                        owner: new Uint8Array(grid.length)
+                    },
+                    objects: {list: [], active: 0},
+                    cameras: [],
+                    references: [],
+                    symmetry: undefined,
+                    output: undefined,
+                    origin: undefined
+                }
+            })
+        },
+        [N2, Array.from(block.data), Array.from(block.palette)] as unknown[]
+    )
+
+    const view = await page.evaluate(() => {
+        const canvas = document.querySelector('.viewport canvas')
+        if (!(canvas instanceof HTMLCanvasElement)) throw new Error('no viewport canvas')
+        const {state} = window.goferPixel as unknown as {state: {orbit: {camera: Camera}}}
+        return {camera: state.orbit.camera, width: canvas.width, height: canvas.height}
+    })
+    // The same call `Viewport.tsx` makes, at the size the layout gave the canvas.
+    const basis = basisFor(view.camera, block, view.height)
+    const shown = await page.evaluate(
+        async ([b]) => {
+            const h = window.goferPixel as unknown as {
+                raycaster: {
+                    renderNow: (b: unknown, m?: number, e?: boolean) => Promise<number>
+                    readPixels: () => Uint8Array
+                }
+            }
+            await h.raycaster.renderNow(b, 0, false)
+            return Array.from(h.raycaster.readPixels())
+        },
+        [basis] as unknown[]
+    )
+
+    const cpu = render(block, basis, view.width, view.height)
+    let opaque = 0
+    let differs = 0
+    let buried = 0
+    for (let row = 0; row < view.height; row += 1) {
+        for (let px = 0; px < view.width; px += 1) {
+            const here = row * view.width + px
+            // The framebuffer's row 0 is the bottom; a RenderTarget's row 0 is the top.
+            const there = (view.height - 1 - row) * view.width + px
+            if ((shown[there * 4 + 3] ?? 0) === 0) continue
+            opaque += 1
+            for (let byte = 0; byte < 4; byte += 1) {
+                if (cpu.color[here * 4 + byte] !== shown[there * 4 + byte]) {
+                    differs += 1
+                    break
+                }
+            }
+            // 40 is the core's own colour, and the darkest a lit shell face can be is 75.
+            if ((shown[there * 4] ?? 255) <= 40) buried += 1
+        }
+    }
+
+    expect(opaque).toBeGreaterThan(view.width * view.height * 0.05)
+    expect(buried).toBe(0)
+    expect(differs).toBe(0)
+})

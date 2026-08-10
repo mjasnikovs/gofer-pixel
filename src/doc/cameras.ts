@@ -14,9 +14,37 @@ export interface NamedCamera {
 
 /**
  * Three-quarters down the isometric diagonal: `atan(1 / √2)`, 35.26°, the pitch at which a cube's
- * three visible faces come out the same area. It is the angle voxel art is drawn at.
+ * three visible faces come out the same area. It is the angle voxel art is *modelled* at.
+ *
+ * It is not the angle it is drawn at, and that is worth knowing before reaching for it: at yaw 45°
+ * a voxel's x edge moves `1/√3` down the screen for every 1 across, so a staircase off it is never
+ * even and no zoom makes it so. See `DIMETRIC_PITCH` below and `render/perfect.ts`.
  */
 export const ISOMETRIC_PITCH = Math.atan(Math.SQRT1_2)
+
+/**
+ * The 2:1 that everybody calls isometric and nobody means: `asin(1/2)`, 30° of elevation.
+ *
+ * At yaw 45° a voxel's x edge moves exactly 1 pixel down for every 2 across — the even staircase
+ * pixel artists draw by hand, and the reason 2:1 is the convention rather than 35.26°. Blender's
+ * (60, 0, 45) is this angle; the 26.57° figure quoted alongside it is the *screen* slope of the
+ * line, `atan(1/2)`, not the camera.
+ *
+ * Its vertical edge is `√1.5` times the horizontal half-step, so a cube still does not close on
+ * the grid. Hand-drawn 2:1 art squashes the height to make it and a real orthographic camera
+ * cannot, so this is the closest an honest camera gets — and it is the default the app opens on,
+ * because the horizontal staircase is the one the eye reads along a silhouette.
+ *
+ * **`asin(1/3)`, 19.47°, is the only three-quarter elevation where a whole voxel closes** — 3
+ * pixels across, 1 down, 4 tall, every component of `voxelSteps` whole. It is deliberately not
+ * offered, and this is the record of that decision so nobody adds it back on the arithmetic alone.
+ * Measured on a solid cube at one scale, the top face is 33% of the sprite at true isometric, 29%
+ * at 2:1 and 20% at 19.47° — a third less of the roofs, shoulders and table tops that carry the
+ * shape. Against that, every tileset and asset pack in existence is 2:1, so a sheet built at 19.47°
+ * lines up with nothing. Even stairs are not worth a sprite that matches nothing and shows less.
+ * `render/perfect.test.ts` keeps the arithmetic alive; only the button is gone.
+ */
+export const DIMETRIC_PITCH = Math.asin(0.5)
 
 /** Yaw 0 looks along `-y`, so the model's `-y` side is its front, and yaw turns anticlockwise. */
 const DIRECTION_NAMES = [
@@ -34,17 +62,42 @@ const DIRECTION_NAMES = [
 export const DIRECTION_COUNTS = [4, 8] as const
 
 /**
- * The two pitches a ring is built at. A ring is a count *and* a pitch, and the count was the only
- * one of the two the strip could say.
+ * The pitches a ring is built at. A ring is a count *and* a pitch, and the count was the only one
+ * of the two the strip could say.
  *
- * `flat` is exactly zero, which is a straight-on elevation: the view a side-on character sheet is
- * drawn at, and the same stop `alignCamera` snaps to. `views.ts`'s `opening` calls a flat view the
- * wrong one to open a 3D tool on, and that is still true — it is not the wrong one to *export*,
- * which is the whole distinction between looking at a model and shipping a sprite of it.
+ * They are in order of how much top face they show, because that is the axis an artist is actually
+ * choosing along, and the button cycles them in that order. What separates them is how evenly the
+ * result staircases, which nothing about looking at the viewport reveals:
+ *
+ * - `dimetric` — 30°, the 2:1 everyone draws. Slope exactly 1/2. **The default.**
+ * - `iso` — 35.26°, the modelling angle. Slope `1/√3`. Never even, at any zoom.
+ * - `flat` — exactly zero, a straight-on elevation. Whole on every axis whenever the sprite size
+ *   divides by the zoom, which makes it the easy case rather than a lesser one.
+ *
+ * `dimetric` leads because it is what the artist wants by default: 2:1 is the convention every
+ * tileset and asset pack is drawn to, so it is the one whose sheets line up with the rest of a
+ * project. `iso` used to lead, and it is the *modelling* angle rather than the drawing one.
+ *
+ * `flat` is the view a side-on character sheet is drawn at, and the same stop `alignCamera` snaps
+ * to. `views.ts`'s `opening` calls it the wrong one to open a 3D tool on, and that is still true —
+ * it is not the wrong one to *export*, which is the whole distinction between looking at a model
+ * and shipping a sprite of it.
  */
-export const RING_PITCHES = {iso: ISOMETRIC_PITCH, flat: 0} as const
+export const RING_PITCHES = {
+    dimetric: DIMETRIC_PITCH,
+    iso: ISOMETRIC_PITCH,
+    flat: 0
+} as const
 
 export type RingPitch = keyof typeof RING_PITCHES
+
+/** The order the pitch button cycles, starting from the default. */
+export const RING_PITCH_ORDER = ['dimetric', 'iso', 'flat'] as const
+
+export const nextRingPitch = (pitch: RingPitch): RingPitch => {
+    const at = RING_PITCH_ORDER.indexOf(pitch)
+    return RING_PITCH_ORDER[(at + 1) % RING_PITCH_ORDER.length] ?? 'dimetric'
+}
 
 /**
  * A ring of cameras around one pivot, at one click — `FEATURESET.md` §13.
@@ -55,7 +108,7 @@ export type RingPitch = keyof typeof RING_PITCHES
  *
  * Four directions are named from the eight, taking every other one, so Front is Front in both.
  */
-export const directions = (volume: Volume, count = 8, pitch = ISOMETRIC_PITCH): NamedCamera[] => {
+export const directions = (volume: Volume, count = 8, pitch = DIMETRIC_PITCH): NamedCamera[] => {
     const step = 8 / Math.max(1, count)
     return Array.from({length: count}, (_unused, i) => {
         const eighth = Math.round(i * step) % 8
@@ -73,7 +126,7 @@ export const directions = (volume: Volume, count = 8, pitch = ISOMETRIC_PITCH): 
     })
 }
 
-export const eightDirections = (volume: Volume, pitch = ISOMETRIC_PITCH): NamedCamera[] =>
+export const eightDirections = (volume: Volume, pitch = DIMETRIC_PITCH): NamedCamera[] =>
     directions(volume, 8, pitch)
 
 /**
@@ -98,7 +151,15 @@ export const ringCount = (cameras: readonly NamedCamera[]): number | undefined =
  * than jumping to a named view: an artist who has orbited to roughly three-quarters-left wants
  * exactly three-quarters-left, not Front.
  */
-export const PITCH_STOPS = [0, ISOMETRIC_PITCH, Math.PI / 2, -ISOMETRIC_PITCH, -Math.PI / 2]
+export const PITCH_STOPS = [
+    0,
+    DIMETRIC_PITCH,
+    ISOMETRIC_PITCH,
+    Math.PI / 2,
+    -DIMETRIC_PITCH,
+    -ISOMETRIC_PITCH,
+    -Math.PI / 2
+]
 
 export const alignCamera = (camera: Camera): Camera => {
     const eighth = Math.PI / 4

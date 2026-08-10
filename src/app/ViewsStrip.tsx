@@ -1,7 +1,7 @@
 import type {Dispatch} from 'react'
 import {IconButton} from '@astryxdesign/core/IconButton'
 import {Text} from '@astryxdesign/core/Text'
-import {DIRECTION_COUNTS} from '../doc/cameras'
+import {DIRECTION_COUNTS, nextRingPitch, type RingPitch} from '../doc/cameras'
 import type {Volume} from '../render/volume'
 import {CameraIcon, CopyIcon, PlusIcon, TrashIcon} from './icons'
 import {SectionHead} from './SectionHead'
@@ -28,6 +28,31 @@ import type {AppAction, AppState} from './state'
  * drag-and-drop. A tile moves the moment the cursor is over it, so the strip is the preview, and
  * the whole gesture is two handlers dispatching one action the reducer already had.
  */
+/**
+ * What the pitch button says it is on, in the terms an artist picks between.
+ *
+ * The label is the screen slope rather than the elevation, because the slope is what the sprite
+ * shows: 2:1 is two pixels across for one down and it staircases evenly, ISO is `1/√3` and never
+ * does. The hint carries the part the label cannot — see `RING_PITCHES` and `render/perfect.ts`.
+ */
+const PITCH_MARKS: Readonly<Record<RingPitch, {label: string; name: string; hint: string}>> = {
+    dimetric: {
+        label: '2:1',
+        name: 'the 2:1 dimetric',
+        hint: 'Rings are built at 30°, the 2:1 pixel angle. Two across, one down, exactly.'
+    },
+    iso: {
+        label: 'ISO',
+        name: 'the isometric angle',
+        hint: 'Rings are built at 35.26°, the modelling angle. Its staircase is never even.'
+    },
+    flat: {
+        label: '▱',
+        name: 'level side views',
+        hint: 'Rings are built level — straight-on elevations, and always on the grid.'
+    }
+}
+
 export const ViewsStrip = ({
     state,
     dispatch,
@@ -39,7 +64,6 @@ export const ViewsStrip = ({
     volume: Volume
 }) => {
     const {cameras, selected, ringPitch, draggingCamera: dragging} = state
-    const flat = ringPitch === 'flat'
     const onCapture = (): void => {
         dispatch({type: 'capture'})
     }
@@ -66,29 +90,28 @@ export const ViewsStrip = ({
                 ))}
                 {/*
                  * A ring is a count and a pitch, and until this button the strip could only say the
-                 * count. Pressed is flat — a straight-on elevation, which is what a side-on
-                 * character sheet is drawn at — and unpressed is the isometric three-quarter.
+                 * count. It cycles rather than toggles, because there turned out to be three
+                 * answers and not two — see `RING_PITCHES`. The label is the pitch's screen slope,
+                 * which is the thing that actually differs between them: 2:1 staircases evenly
+                 * across and ISO does not, and nothing about looking at the viewport says so.
                  *
-                 * It is a mode rather than two more buttons because it multiplies: four flat and
-                 * eight flat are both wanted, and 4/8/4-flat/8-flat is a head of five buttons
-                 * before the icons even start.
+                 * It is a mode rather than three more buttons because it multiplies: four flat and
+                 * eight flat are both wanted, and a button per combination is a head of seven.
+                 *
+                 * Unlit on 2:1, because that is the default now and the rail's rule is that the
+                 * resting state is never the loudest thing in it.
                  */}
                 <button
                     type='button'
                     className='symmetry-axis'
-                    aria-label='Build direction rings flat'
-                    aria-pressed={flat}
-                    data-on={flat || undefined}
-                    title={
-                        flat ?
-                            'Rings are built level — straight-on side views. Click for isometric.'
-                        :   'Rings are built at the isometric angle. Click for level side views.'
-                    }
+                    aria-label={`Build direction rings at ${PITCH_MARKS[ringPitch].name}`}
+                    data-on={ringPitch === 'dimetric' ? undefined : true}
+                    title={`${PITCH_MARKS[ringPitch].hint} Click for ${PITCH_MARKS[nextRingPitch(ringPitch)].name}.`}
                     onClick={() => {
-                        dispatch({type: 'ring-pitch', pitch: flat ? 'iso' : 'flat'})
+                        dispatch({type: 'ring-pitch', pitch: nextRingPitch(ringPitch)})
                     }}
                 >
-                    ▱
+                    {PITCH_MARKS[ringPitch].label}
                 </button>
                 <button
                     type='button'

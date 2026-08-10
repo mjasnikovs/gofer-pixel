@@ -149,9 +149,24 @@ The three groups postponed on 2026-08-07, and why:
     - Orthographic by default for sprites.
     - Fixed sprite resolution.
     - Pixel snapping.
-    - Integer zoom.
+    - ~~Integer zoom.~~ **Wrong invariant — corrected 2026-08-10.** Zoom is how many voxels tall the
+      frame is; what lands on the pixel grid is `cell / zoom`, how many pixels tall a voxel is.
+      Rounding the first does nothing for the second: the camera every new 16³ document opens on is
+      zoom 31, an integer, and 64 / 31 is 2.06, so a row of voxels exports `3 2 2 2 2 2 2 2 3`. SNAP
+      walks the zooms at which a voxel is whole, and the rule is in `src/render/perfect.ts`.
     - Camera alignment tools.
     - Consistent object scale between camera views.
+    - **The default ring pitch is the 2:1 dimetric, `asin(1/2)`, not true isometric.** Measured:
+      true isometric, `atan(1/√2)`, has a screen slope of `1/√3` and no whole-pixel zoom at any zoom
+      at all. 2:1 has an exact 0.5 slope, which is the even staircase pixel artists draw by hand,
+      and a vertical edge of `√1.5` that still does not close — hand-drawn 2:1 squashes that by eye
+      and an orthographic camera cannot. It is the closest an honest camera gets, and it is what
+      every tileset and asset pack is drawn to.
+    - `asin(1/3)`, 19.47°, is the _only_ three-quarter angle where a whole voxel closes — 3 across,
+      1 down, 4 tall. **It is deliberately not offered.** It shows 20% top face against 2:1's 29%,
+      and lines up with no existing art. See `src/doc/cameras.ts`.
+    - **Sprite cells are not required to be square** — `cellW` and `cellH`. The height sets the
+      scale; the width only says how far the frame reaches either side of the pivot.
 
 15. **Live sprite preview**
 

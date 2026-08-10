@@ -1,6 +1,5 @@
 import {Button} from '@astryxdesign/core/Button'
 import {IconButton} from '@astryxdesign/core/IconButton'
-import {SegmentedControl, SegmentedControlItem} from '@astryxdesign/core/SegmentedControl'
 import {Text} from '@astryxdesign/core/Text'
 import type {Dispatch} from 'react'
 import {canRedo, canUndo} from '../doc/history'
@@ -10,8 +9,13 @@ import {ChevronIcon, CubeIcon, RedoIcon, SlidersIcon, SunIcon, UndoIcon} from '.
 import type {AppAction, AppState} from './state'
 
 /**
- * The title bar of `docs/editor.png`: what is open on the left, which workspace on the centre line,
- * and the one coloured button in the window on the right.
+ * The title bar of `docs/editor.png`: what is open on the left, and the one coloured button in the
+ * window on the right.
+ *
+ * The mockup's Model/Render workspace switch is gone. It moved a flag and changed nothing on screen,
+ * because the workspace it named — `FEATURESET.md` §16, the sprite sheet — shipped as
+ * `ExportDialog.tsx` instead. A disabled control that names a layout the artist cannot find is worse
+ * than no control, and there is no layout left for it to name.
  *
  * Undo and redo are wired to the history and greyed only when their half of it is empty. They were
  * hardcoded disabled with a tooltip saying this build does not edit voxels, which stopped being true
@@ -104,35 +108,6 @@ export const Header = ({
                 {countVoxels(state.volume)} voxels · {savedLabel(state.doc)}
             </Text>
         </div>
-
-        {/*
-         * The mockup's two workspaces. Switching them moved a flag in the state and changed nothing
-         * on screen, because there is no second layout to switch to — the render controls live in
-         * the rail on the right and are visible in both. So it is disabled rather than left working:
-         * a control that responds by highlighting itself and doing nothing is the most expensive
-         * kind of dead, because the artist assumes the layout they wanted is one they cannot find.
-         */}
-        <SegmentedControl
-            label='Workspace'
-            value={state.workspace}
-            isDisabled
-            disabledMessage='One workspace for now — the render controls are in the right-hand rail'
-            onChange={value => {
-                dispatch({
-                    type: 'chrome',
-                    chrome: {workspace: value === 'render' ? 'render' : 'model'}
-                })
-            }}
-        >
-            <SegmentedControlItem
-                value='model'
-                label='Model'
-            />
-            <SegmentedControlItem
-                value='render'
-                label='Render'
-            />
-        </SegmentedControl>
 
         <div className='header-group header-end'>
             <IconButton

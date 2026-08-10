@@ -199,3 +199,122 @@ test('depth grows with distance along the ray', () => {
     expect(near).toBeGreaterThan(0)
     expect(far).toBeGreaterThan(near)
 })
+
+/**
+ * A solid block, with its shell and its inside painted different palette entries.
+ *
+ * `SHELL` is every cell with a face on the outside of the block; `CORE` is everything the artist
+ * can never see. The block is deliberately not a cube and not centred, so a bug that only shows up
+ * when `sx`, `sy` and `sz` differ has somewhere to land.
+ */
+const SHELL = 1
+const CORE = 2
+const BLOCK = {x0: 3, x1: 20, y0: 2, y1: 6, z0: 2, z1: 10}
+const solidBlock = (): Volume => {
+    const volume = createVolume(24, 9, 13, new Uint8Array(256 * 4))
+    volume.palette.set([200, 200, 200, 255], SHELL * 4)
+    volume.palette.set([40, 40, 40, 255], CORE * 4)
+    const {x0, x1, y0, y1, z0, z1} = BLOCK
+    for (let z = z0; z <= z1; z += 1) {
+        for (let y = y0; y <= y1; y += 1) {
+            for (let x = x0; x <= x1; x += 1) {
+                const onShell = x === x0 || x === x1 || y === y0 || y === y1 || z === z0 || z === z1
+                setVoxel(volume, x, y, z, onShell ? SHELL : CORE)
+            }
+        }
+    }
+    return volume
+}
+
+/**
+ * How many pixels of a render show a cell that is buried inside the block.
+ *
+ * The whole measurement, and it is the reported symptom stated as a number: there is no camera from
+ * which a `CORE` cell is the first voxel along the ray, so one such pixel is one layer that did not
+ * render. The colour map is read as well as the id, because the two are written from the same hit
+ * and a bug that moved one without the other would be worse, not better.
+ *
+ * The obvious second reading — a face pointing along the ray rather than back down it — is not
+ * used, and that is worth writing down: `faces.ts` assigns a face from the axis the DDA stepped
+ * along, so the face always points back at the camera whatever the ray walked through. It cannot
+ * fail, which makes it a tautology rather than a check.
+ */
+const buriedPixels = (
+    volume: Volume,
+    camera: Camera,
+    size: number
+): {core: number; hits: number} => {
+    const target = render(volume, basisFor(camera, volume, size), size, size)
+    const core = volume.palette[CORE * 4] ?? 0
+    let buried = 0
+    let hits = 0
+    for (let i = 0; i < size * size; i += 1) {
+        const value = target.id[i] ?? 0
+        if (value === 0) continue
+        hits += 1
+        // Every face light is a fraction of 256, so a `CORE` pixel is darker than the darkest
+        // `SHELL` one whatever face it was struck on.
+        if (value === CORE || (target.color[i * 4] ?? 255) <= core) buried += 1
+    }
+    return {core: buried, hits}
+}
+
+/**
+ * The bug this is here for: "the outer layer does not render, and you can see inside the voxels."
+ *
+ * Reported against the viewport, so the browser suite carries the other half — that the shader and
+ * this raycaster draw the running document identically. What is checked here is the algorithm: over
+ * a sweep of the whole orbit, no ray may walk through a solid voxel and report the one behind it.
+ *
+ * The sweep is the point. The existing axial test covers 0/90/180/270°, which is where the last
+ * defect of this shape lived; a layer lost at one oblique angle would sit between its four samples
+ * and never show. The pitch range stops short of ±π/2 on purpose — straight down is an axial case
+ * and it has its own test above.
+ */
+test('no camera can see inside a solid block: the near layer is never walked through', () => {
+    const volume = solidBlock()
+    const failures: string[] = []
+    let total = 0
+    for (let iy = 0; iy < 24; iy += 1) {
+        for (let ip = -5; ip <= 5; ip += 1) {
+            const camera: Camera = {
+                yaw: (iy / 24) * Math.PI * 2,
+                pitch: (ip / 5) * 1.3,
+                zoom: 30,
+                panX: 0,
+                panY: 0
+            }
+            const {core, hits} = buriedPixels(volume, camera, 64)
+            total += hits
+            if (core > 0) {
+                failures.push(
+                    `yaw ${camera.yaw.toFixed(3)} pitch ${camera.pitch.toFixed(3)}: `
+                        + `${String(core)} pixels show a buried voxel`
+                )
+            }
+        }
+    }
+    expect(failures.slice(0, 5)).toEqual([])
+    // A sweep that rendered nothing would pass every line above.
+    expect(total).toBeGreaterThan(24 * 11 * 64 * 64 * 0.15)
+})
+
+/**
+ * The reported fault, built on purpose, so the sweep above is known to be able to see it.
+ *
+ * Take the near shell layer away by hand — which is exactly "the outer layer does not render" — and
+ * the same measurement fills with buried voxels. A check that only ever returns zero cannot tell a
+ * working renderer from a measurement that was never looking.
+ */
+test('the fault the sweep is watching for, built by hand, is caught', () => {
+    // Looking back along `+y`, so the wall removed below is the near one.
+    const camera: Camera = {yaw: Math.PI, pitch: 0.35, zoom: 30, panX: 0, panY: 0}
+    const volume = solidBlock()
+    for (let z = BLOCK.z0; z <= BLOCK.z1; z += 1) {
+        for (let x = BLOCK.x0; x <= BLOCK.x1; x += 1) setVoxel(volume, x, BLOCK.y0, z, 0)
+    }
+    const {core, hits} = buriedPixels(volume, camera, 64)
+
+    expect(hits).toBeGreaterThan(0)
+    expect(core).toBeGreaterThan(0)
+})

@@ -8,7 +8,7 @@ import {
     objectCells,
     shownVolume
 } from '../doc/objects'
-import {ISOMETRIC_PITCH} from '../doc/cameras'
+import {DIMETRIC_PITCH} from '../doc/cameras'
 import {visible} from '../doc/gesture'
 import {renderSheet, SHEET_MAPS} from '../sheet/sheet'
 import {basisFor} from '../render/camera'
@@ -175,9 +175,15 @@ test('a ring of directions replaces the list rather than appending to it', () =>
     expect(new Set(four.cameras.map(({camera}) => camera.zoom)).size).toBe(1)
 })
 
-test('the flat toggle decides the pitch of every ring built after it', () => {
+/*
+ * A document opens on the 2:1 dimetric, not on true isometric. 2:1 is what every tileset and asset
+ * pack is drawn to, and it is the only three-quarter angle whose staircase is even across — see
+ * `DIMETRIC_PITCH`.
+ */
+test('the pitch button decides the pitch of every ring built after it', () => {
     const iso = reduce(fresh(), {type: 'directions', count: 4})
-    expect(iso.cameras.every(({camera}) => camera.pitch === ISOMETRIC_PITCH)).toBe(true)
+    expect(iso.ringPitch).toBe('dimetric')
+    expect(iso.cameras.every(({camera}) => camera.pitch === DIMETRIC_PITCH)).toBe(true)
 
     // The ring on screen goes flat on the press, and so does the view through it. A toggle whose
     // effect only appears the next time some other button is pressed cannot be read.
@@ -222,14 +228,29 @@ test('aligning turns the view to the nearest stop rather than to a named view', 
     expect(aligned.selected).toBeUndefined()
 })
 
-test('snap makes the zoom whole and the pan land on voxels', () => {
-    const loose = reduce(fresh(), {type: 'chrome', chrome: {snap: false}})
-    const tight = reduce(fresh(), {type: 'chrome', chrome: {snap: true}})
+/*
+ * This used to assert an integer zoom, which is how `FEATURESET.md` §14 words it and is the wrong
+ * invariant — `cell / zoom` is what lands on the pixel grid, and rounding the zoom does nothing for
+ * it. A 16³ document opens on zoom 31, an integer, and exports `3 2 2 2 2 2 2 2 3`. The camera is
+ * turned to a front view here because the opening one is isometric, and an isometric camera has no
+ * whole-pixel zoom at all — see `render/perfect.ts`.
+ */
+test('snap makes a voxel a whole number of pixels and the pan land on voxels', () => {
+    const front = (state: AppState): AppState =>
+        reduce(state, {
+            type: 'orbit',
+            event: {type: 'camera', camera: {yaw: 0, pitch: 0, zoom: 31, panX: 0, panY: 0}},
+            height: 400
+        })
+    const loose = front(reduce(fresh(), {type: 'chrome', chrome: {snap: false}}))
+    const tight = front(reduce(fresh(), {type: 'chrome', chrome: {snap: true}}))
     const wheel = {type: 'orbit', event: {type: 'wheel', delta: 40}, height: 400} as const
+    const whole = (state: AppState): boolean =>
+        Number.isInteger(state.output.cell / state.orbit.camera.zoom)
 
-    expect(Number.isInteger(reduce(loose, wheel).orbit.camera.zoom)).toBe(false)
-    expect(Number.isInteger(reduce(tight, wheel).orbit.camera.zoom)).toBe(true)
-    // A notch always moves, even when the zoom is already sitting on an integer.
+    expect(whole(reduce(loose, wheel))).toBe(false)
+    expect(whole(reduce(tight, wheel))).toBe(true)
+    // A notch always moves, even when the zoom is already sitting on a stop.
     expect(reduce(tight, wheel).orbit.camera.zoom).toBeGreaterThan(tight.orbit.camera.zoom)
 
     const pan = (state: AppState): AppState =>
@@ -1360,7 +1381,7 @@ test('the chrome settings move without touching the render or the document', () 
             }),
             {type: 'chrome', chrome: {edges: false}}
         ),
-        {type: 'chrome', chrome: {workspace: 'render'}}
+        {type: 'chrome', chrome: {invert: true}}
     )
     expect(after.tool).toBe('move')
     expect(after.grid).toBe(false)
@@ -1369,7 +1390,7 @@ test('the chrome settings move without touching the render or the document', () 
     expect(after.edges).toBe(false)
     expect(after.volume).toBe(baked.volume)
     expect(after.history).toBe(baked.history)
-    expect(after.workspace).toBe('render')
+    expect(after.invert).toBe(true)
     expect(after.orbit).toBe(baked.orbit)
 })
 
@@ -1808,12 +1829,11 @@ test('nothing in the chrome makes a document dirty', () => {
         {edges: false},
         {snap: false},
         {invert: true},
-        {workspace: 'render'},
         {fps: 12}
     ]
-    // One per field, so a tenth field added to `Chrome` without a case here is visible.
+    // One per field, so a ninth field added to `Chrome` without a case here is visible.
     const named = new Set(every.flatMap(entry => Object.keys(entry)))
-    expect(named.size).toBe(9)
+    expect(named.size).toBe(8)
 
     for (const chrome of every) {
         const next = reduce(baked, {type: 'chrome', chrome})
@@ -1824,8 +1844,8 @@ test('nothing in the chrome makes a document dirty', () => {
     }
 
     // Several at once is one action, which is most of the point of folding them.
-    const both = reduce(baked, {type: 'chrome', chrome: {grid: false, workspace: 'render'}})
-    expect([both.grid, both.workspace]).toEqual([false, 'render'])
+    const both = reduce(baked, {type: 'chrome', chrome: {grid: false, fps: 12}})
+    expect([both.grid, both.fps]).toEqual([false, 12])
 })
 
 test('saving clears the flag and names the file; the next edit sets it again', () => {
@@ -1880,7 +1900,7 @@ test('opening a document takes its references and presets, not the ones already 
                 {plane: 2, url: 'data:image/png;base64,theirs', opacity: 0.3, locked: false}
             ],
             symmetry: {x: true, y: false, z: false, radial: false},
-            output: {cell: 16, padding: 4, bounds: true, preset: '', presets: []},
+            output: {cell: 16, cellH: 16, padding: 4, bounds: true, preset: '', presets: []},
             origin: undefined
         }
     })

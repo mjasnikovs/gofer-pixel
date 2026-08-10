@@ -2,6 +2,7 @@ import {useCallback, useMemo, type Dispatch} from 'react'
 import {objectAt} from '../doc/objects'
 import {selectionBounds} from '../doc/selection'
 import type {Raycaster} from '../render/gl'
+import {isPerfect, pixelsPerVoxel} from '../render/perfect'
 import type {Volume} from '../render/volume'
 import {Viewport} from '../viewport/Viewport'
 import type {OrbitEvent, ViewportPointer} from '../viewport/orbit'
@@ -75,6 +76,23 @@ export const Stage = ({
         state.hover?.blocked?.reason === 'locked' ? state.hover.blocked.object : undefined
     const blocking =
         blockingId === undefined ? undefined : objectAt(state.objects, blockingId)?.name
+
+    /*
+     * What a pixel means at this zoom — the hint bar's last hint, and the one derivation on this
+     * side of the seam that is about the export rather than the picture.
+     *
+     * The whole grid, not `shown`: `isPerfect` only needs a volume to build a basis against and the
+     * answer does not depend on its size, so hiding an object must not change the number. `cellH` is
+     * the height alone, because that is the edge `basisFor` takes its scale from.
+     */
+    const voxel = useMemo(
+        () => ({
+            pixels: pixelsPerVoxel(orbit.camera, state.output.cellH),
+            even: isPerfect(orbit.camera, volume, state.output.cellH),
+            cell: state.output.cellH
+        }),
+        [orbit.camera, volume, state.output.cellH]
+    )
 
     const onOrbit = useCallback(
         (event: OrbitEvent, height: number) => {
@@ -178,6 +196,7 @@ export const Stage = ({
                 blocking={blocking}
                 height={volume.sz}
                 losing={state.losing}
+                voxel={voxel}
                 onCapture={capture}
             />
         </div>

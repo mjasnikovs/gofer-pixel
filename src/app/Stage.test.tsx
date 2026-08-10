@@ -143,3 +143,28 @@ test('a press that a lock would swallow names the object standing in the way', a
 
     await panel.unmount()
 })
+
+/*
+ * The voxel size reads the *orbit* camera and the export's `cellH`, and neither is obvious from the
+ * bar it appears in. It lived in the brush column before, where it was next to nothing it depended
+ * on; the thing worth holding down here is which two numbers it is made of.
+ */
+test('the voxel size is the orbit camera against the export size, and both halves move it', async () => {
+    const panel = await open(volume, state => ({
+        ...state,
+        output: {...state.output, cell: 64, cellH: 64},
+        orbit: {...state.orbit, camera: {...state.orbit.camera, yaw: 0, pitch: 0, zoom: 32}}
+    }))
+    const hinted = (): Element | null => panel.host.querySelector('.hint-voxel')
+    const said = (): string => hinted()?.textContent ?? ''
+
+    expect(said()).toContain('2 px')
+    expect(hinted()?.getAttribute('title')).toContain('64 px sprite')
+
+    // The sprite size alone, with the camera untouched.
+    await panel.dispatch({type: 'output', output: {cellH: 128}})
+    expect(said()).toContain('4 px')
+    expect(hinted()?.getAttribute('title')).toContain('128 px sprite')
+
+    await panel.unmount()
+})

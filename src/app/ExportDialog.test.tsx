@@ -69,7 +69,7 @@ const open = (files: Files = memoryFiles()): Promise<Panel> =>
         ),
         // The smallest sprite on offer. What is under test is which files land and what is in them;
         // eight PNG encodes of a 256 px sheet cost a second and prove none of it.
-        state => ({...state, output: {...state.output, cell: 32}})
+        state => ({...state, output: {...state.output, cell: 32, cellH: 32}})
     )
 
 /**
@@ -95,6 +95,19 @@ const press = (label: string): HTMLElement =>
     last<HTMLElement>(
         'button, input',
         node => node.getAttribute('aria-label') === label || node.textContent.trim() === label
+    )
+
+/**
+ * One option of one segmented control, named by its group.
+ *
+ * Sprite width and sprite height offer the same three labels, so `press('128 px')` is ambiguous
+ * between them — and a plain last-match would always land on the width, which is the control that
+ * does *not* set the scale.
+ */
+const sizeOption = (group: string, label: string): HTMLElement =>
+    last<HTMLElement>(
+        `[role="radiogroup"][aria-label="${group}"] [role="radio"]`,
+        node => node.textContent.trim() === label
     )
 
 const menuItem = (label: string): HTMLElement =>
@@ -132,8 +145,15 @@ test('there is one cell per camera, at the sprite’s own size', async () => {
     expect(cells).toHaveLength(panel.state().cameras.length)
     expect(cells[0]?.getAttribute('data-pixels')).toBe('32x32')
 
+    // Two controls now, and they offer the same three labels — the height is the one that sets
+    // the scale, so a query that cannot tell them apart is testing the wrong half.
     await panel.act(() => {
-        press('128 px').click()
+        sizeOption('Sprite height', '128 px').click()
+    })
+    expect(inside('.export-sprite').getAttribute('data-pixels')).toBe('32x128')
+
+    await panel.act(() => {
+        sizeOption('Sprite width', '128 px').click()
     })
     expect(inside('.export-sprite').getAttribute('data-pixels')).toBe('128x128')
 
@@ -300,4 +320,87 @@ test('saving a preset saves the ticks, and a cancelled prompt saves nothing', as
     } finally {
         globalThis.prompt = realPrompt
     }
+})
+
+/*
+ * The pixel-grid note — `render/perfect.ts`.
+ *
+ * Everything else in this dialog was happy to write an uneven staircase without saying so. A cell
+ * that does not divide by a camera's zoom exports voxels of two different widths, and the one
+ * panel whose job is to show what lands on disk showed it correctly and silently.
+ */
+
+const withCameras = (
+    cameras: readonly {yaw: number; pitch: number; zoom: number}[],
+    cell: number
+): Promise<Panel> =>
+    mountPanel(
+        volume,
+        ({state, dispatch}) => (
+            <ExportDialog
+                state={state}
+                dispatch={dispatch}
+                files={memoryFiles()}
+                volume={slicedFor(state, shownVolume(state.volume, state.objects))}
+                onClose={() => undefined}
+            />
+        ),
+        state => ({
+            ...state,
+            output: {...state.output, cell, cellH: cell},
+            cameras: cameras.map((camera, index) => ({
+                id: `dir-${String(index)}`,
+                name: `View ${String(index)}`,
+                camera: {...camera, panX: 0, panY: 0}
+            }))
+        })
+    )
+
+const note = (): string => {
+    const found = [...global.document.querySelectorAll<HTMLElement>('.export-uneven')].at(-1)
+    return found?.textContent.trim() ?? ''
+}
+
+const flat = (zoom: number) => ({yaw: 0, pitch: 0, zoom})
+const iso = (zoom: number) => ({yaw: Math.PI / 4, pitch: Math.atan(Math.SQRT1_2), zoom})
+
+test('a sheet that lands on whole pixels says nothing at all', async () => {
+    const panel = await withCameras([flat(16), flat(16)], 32)
+    expect(note()).toBe('')
+    await panel.unmount()
+})
+
+test('a sheet that does not land on whole pixels says so before the download', async () => {
+    const panel = await withCameras([flat(31), flat(31)], 64)
+    expect(note()).toContain('64 px')
+    expect(note()).toContain('staircase')
+    await panel.unmount()
+})
+
+test('one bad camera out of several is counted rather than generalised', async () => {
+    const panel = await withCameras([flat(16), flat(16), iso(16)], 32)
+    expect(note()).toContain('1 of 3')
+    await panel.unmount()
+})
+
+/*
+ * The repair that leaves the composed view alone. Only offered when it fixes the *whole* sheet: an
+ * artist told "use 128 px" has been promised every cell, not five of eight.
+ */
+test('a sprite size that would fix the whole sheet is offered as a button', async () => {
+    const panel = await withCameras([flat(128 / 3), flat(128 / 3)], 64)
+    expect(press('Use 128 px tall')).toBeDefined()
+
+    await panel.act(() => {
+        press('Use 128 px tall').click()
+    })
+    expect(panel.state().output.cellH).toBe(128)
+    expect(note()).toBe('')
+    await panel.unmount()
+})
+
+test('no sprite size fixes an isometric ring, so none is offered', async () => {
+    const panel = await withCameras([iso(16), iso(16)], 32)
+    expect(note()).not.toContain('Use')
+    await panel.unmount()
 })

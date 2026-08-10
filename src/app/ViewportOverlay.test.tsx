@@ -84,6 +84,7 @@ const hintText = async (
                 blocking={blocking}
                 height={8}
                 losing={0}
+                voxel={{pixels: 2, even: true, cell: 64}}
                 onCapture={() => undefined}
             />
         )
@@ -115,6 +116,82 @@ test('the hint bar says which silence this is, and names the object when there i
     // A press that will land says nothing at all. A bar with a permanent slot for "fine" is a bar
     // the artist stops reading.
     expect(await hintText(undefined, undefined)).toBe(': ')
+})
+
+/**
+ * The one place the app says what a pixel means — moved here off the brush column, where it sat in
+ * the one column that has nothing to do with the camera.
+ *
+ * It reported `Math.round(cell / zoom)` for a while, so on the camera every new 16³ document opens
+ * at — zoom 31, a 64 px cell — it said "2 px" about a ratio of 2.06 and the export staircased
+ * `3 2 2 2 2 2 2 2 3`. Rounding the answer to the thing being checked for.
+ */
+const voxelHint = async (voxel: {
+    pixels: number
+    even: boolean
+    cell: number
+}): Promise<{text: string; uneven: boolean; title: string}> => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const root = createRoot(host)
+    await act(async () => {
+        root.render(
+            <HintBar
+                tool='Draw'
+                hover={undefined}
+                blocking={undefined}
+                height={8}
+                losing={0}
+                voxel={voxel}
+                onCapture={() => undefined}
+            />
+        )
+    })
+    const found = host.querySelector('.hint-voxel')
+    const read = {
+        text: found?.textContent ?? '',
+        uneven: found?.getAttribute('data-uneven') !== null,
+        title: found?.getAttribute('title') ?? ''
+    }
+    await act(async () => {
+        root.unmount()
+    })
+    host.remove()
+    return read
+}
+
+test('a whole number of pixels is reported as a whole number, and is not marked', async () => {
+    const said = await voxelHint({pixels: 2, even: true, cell: 64})
+
+    expect(said.text).toBe('Voxel2 px')
+    expect(said.uneven).toBe(false)
+})
+
+/*
+ * Off the axes there is usually no zoom at all that closes on the pixel grid, so an artist cannot
+ * fix this by nudging the wheel. Saying "2 px" about it was the worse of the two failures.
+ *
+ * The `≈` carries it and nothing is coloured. An amber number would be lit for the whole of every
+ * session spent at a three-quarter angle, which is a warning about nothing the artist can act on.
+ */
+test('a ratio that is not whole is reported as the ratio, not rounded to it', async () => {
+    const said = await voxelHint({pixels: 64 / 31, even: false, cell: 64})
+
+    expect(said.text).toContain('≈2.06')
+    expect(said.text).not.toContain('2 px')
+    expect(said.uneven).toBe(true)
+})
+
+/*
+ * The sprite height is the other half of the question and it is in the tooltip, not on the face of
+ * the bar. The bar is `nowrap` inside an `overflow: hidden` stage: `Voxel ≈2.78 px at 64` costs
+ * 146 px and took the whole bar past the stage at every window under 1600. Measured.
+ */
+test('the sprite size it measured against is in the tooltip, not in the bar', async () => {
+    const said = await voxelHint({pixels: 4, even: true, cell: 128})
+
+    expect(said.text).not.toContain('128')
+    expect(said.title).toContain('128 px sprite')
 })
 
 /*
@@ -364,6 +441,7 @@ test('the hint bar counts the voxels a drag would destroy, and says voxel once',
                     blocking={undefined}
                     height={8}
                     losing={losing}
+                    voxel={{pixels: 2, even: true, cell: 64}}
                     onCapture={() => undefined}
                 />
             )

@@ -173,9 +173,9 @@ Neither service is required to open the app. With llama-server down the menu ite
 that says so and disables its one button; with `clipserve.py` down the batch ranks on the built-in
 scores.
 
-## Eighteen seams worth knowing about
+## Nineteen seams worth knowing about
 
-The app layer is deliberately thin, and eighteen modules under it hold what would otherwise be
+The app layer is deliberately thin, and nineteen modules under it hold what would otherwise be
 spread through React callbacks and reducer cases. Each one was pulled out because its rules could
 only be tested by mounting something, or by building a whole `AppState` to ask a question about four
 fields.
@@ -188,6 +188,29 @@ fields.
   `beginSelect`. `visible(state)` and `slicedFor(state, shown)` are the one derivation of "the grid
   as the artist sees it": the app used to spell the first half itself and draw from that, so in
   slice mode the picture was the whole model while the click landed on the sliced one.
+- **`src/render/perfect.ts`** — whether a voxel lands on whole pixels, and at which zooms it would.
+  `FEATURESET.md` §14 words the rule as "integer zoom" and **that is the wrong invariant**: zoom is
+  voxels-tall of the frame, and what lands on the grid is `cell / zoom`, pixels-tall of a voxel. The
+  camera every new 16³ document opens on is zoom 31 — an integer — and 64/31 is 2.06, so a row of
+  voxels exports `3 2 2 2 2 2 2 2 3`. Everything here is derived from `basisFor`, never from a
+  second copy of the projection, so the snap and the `Math.fround` are part of the answer. Three
+  measured facts live in its tests: **true isometric has no pixel-perfect zoom at any zoom**, its
+  screen slope being `1/√3`; **2:1 dimetric has an exact horizontal slope and still no perfect
+  zoom**, its height being `√1.5` of its half-step, which is why hand-drawn 2:1 art squashes the
+  vertical and an orthographic camera cannot; and **`asin(1/3)`, 19.47°, is the one three-quarter
+  angle that closes** — 3 across, 1 down, 4 tall, every component whole. `perfectZooms` returning an
+  empty list is the honest answer for an angle with no lattice, and nothing downstream invents a
+  fallback for it.
+
+    **`asin(1/3)` was a fourth ring pitch for one session and was removed, deliberately.** Measured
+    on a solid cube: the top face is 33% of the sprite at true isometric, 29% at 2:1 and 20% at
+    19.47°, so it costs a third of the roofs and shoulders that carry a voxel silhouette — and every
+    tileset in existence is 2:1, so a sheet built at it lines up with nothing. Even stairs are not
+    worth a sprite that matches nothing and shows less. The arithmetic stays in `perfect.test.ts` so
+    nobody re-derives it and puts the button back. **The default ring pitch is `dimetric`**, 2:1,
+    not true isometric — true isometric is the angle voxel art is modelled at, not the angle it is
+    drawn at.
+
 - **`src/gen/batch.ts`** — one generation batch as a value. Stage order, cancellation and the three
   status lines. The measured rules live here: naming sorts nothing, CLIP goes last and the grid
   never waits on it, a dropped model is taught last. `GenerateDialog` holds one `BatchState`.

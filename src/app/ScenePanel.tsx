@@ -1,76 +1,34 @@
 import {Text} from '@astryxdesign/core/Text'
 import type {Dispatch} from 'react'
 import type {Axis} from '../doc/brush'
-import {canRadial as symmetryCanRadial} from '../doc/symmetry'
+import {PLANES} from './planes'
 import {MagnetIcon} from './icons'
 import type {AppAction, AppState} from './state'
 
 /**
- * The tail of the brush column: symmetry, the drawing plane, the reference rows and the one number
- * that says what a pixel means.
+ * The tail of the brush column: the reference pictures, and nothing else.
  *
- * All four used to sit in a 193 × 260 box in the bottom-left corner, beside the four view switches
- * that are now in the rail. That box held 259 px of content — measured — so it was full before an
- * artist did anything, and the first dropped reference picture added 41 px to a `overflow: hidden`
- * panel and silently clipped the voxel size off the bottom. It is here because everything in it is
- * about the stroke about to be made, which is what the rest of this column is about, and because a
- * column that scrolls cannot clip.
+ * It held four things once — symmetry, the drawing plane, the reference rows and the voxel size —
+ * and before that all four sat in a 193 × 260 box in the bottom-left corner beside the four view
+ * switches that are now in the rail. That box held 259 px of content, measured, so it was full
+ * before an artist did anything, and the first dropped reference picture added 41 px to an
+ * `overflow: hidden` panel and silently clipped the voxel size off the bottom.
  *
- * There is no heading over it, only a rule. Every row in it names itself, and a fifth upper-cased
+ * The other three have found their own homes since, and both moves were the same argument. Symmetry
+ * and the drawing plane are properties of the next stroke, so they are in the Brush section with
+ * Size, Shape and Figure rather than four hundred pixels below them, under a whole palette. The
+ * voxel size is a fact about the orbit camera and moves with the wheel, so it is over the viewport
+ * in `HintBar`, beside the Wheel/Zoom hint that changes it.
+ *
+ * What is left is the one thing that is neither: a picture the artist is building against. It stays
+ * here because it appears and disappears — a row per dropped picture, none at all until one is
+ * dropped — and this is the column that scrolls and therefore cannot clip.
+ *
+ * There is no heading over it, only a rule. Every row in it names itself, and another upper-cased
  * word in a 216 px column would be the loudest thing in the column.
  */
-
-/**
- * Draw-time symmetry, as three axis letters and a radial ring.
- *
- * Letters rather than switches: these four are read at a glance while drawing and are set once a
- * session, so they want to be small and unambiguous rather than large and legible from across the
- * room. Radial is disabled outright when the grid is not square in x and y, because a quarter turn
- * of an oblong box lands outside it — `FEATURESET.md` §10's "where mathematically voxel-safe" is a
- * disabled button, not a silent no-op.
- */
-const SymmetryButton = ({
-    label,
-    title,
-    isOn,
-    isDisabled,
-    onToggle
-}: {
-    label: string
-    title: string
-    isOn: boolean
-    isDisabled: boolean
-    onToggle: (on: boolean) => void
-}) => (
-    <button
-        type='button'
-        role='switch'
-        aria-checked={isOn}
-        aria-label={title}
-        title={title}
-        aria-disabled={isDisabled}
-        className='symmetry-axis'
-        data-on={isOn || undefined}
-        onClick={() => {
-            if (!isDisabled) onToggle(!isOn)
-        }}
-    >
-        {label}
-    </button>
-)
-
-const PLANES: readonly {axis: Axis | undefined; label: string; title: string}[] = [
-    {axis: undefined, label: 'Face', title: 'Draw on the face under the cursor'},
-    {axis: 0, label: 'YZ', title: 'Lock drawing to the YZ plane'},
-    {axis: 1, label: 'XZ', title: 'Lock drawing to the XZ plane'},
-    {axis: 2, label: 'XY', title: 'Lock drawing to the XY plane'}
-]
-
 export const ScenePanel = ({state, dispatch}: {state: AppState; dispatch: Dispatch<AppAction>}) => {
-    const {symmetry, plane, references, volume} = state
-    const canRadial = symmetryCanRadial(volume)
-    /** How wide one voxel lands on screen. The zoom is pixels per world unit; a voxel is one. */
-    const voxelSize = Math.max(1, Math.round(state.output.cell / state.orbit.camera.zoom))
+    const {references} = state
     /**
      * The four things a reference row can do. Together here rather than as four callbacks, because
      * three of them need the row they act on and only this panel has it.
@@ -88,86 +46,21 @@ export const ScenePanel = ({state, dispatch}: {state: AppState; dispatch: Dispat
             })
         }
     }
+
+    /*
+     * Nothing dropped, nothing drawn — not even the panel's own rule.
+     *
+     * It used to be four rows deep whatever the artist had done, so an empty `.scene-panel` was
+     * never a shape anyone saw. It is only reference rows now, and a bordered box with nothing in it
+     * is a divider under the palette that promises a section and delivers none.
+     */
+    if (references.length === 0) return undefined
+
     return (
         <div className='panel scene-panel'>
-            <div className='snap-size'>
-                <Text
-                    type='supporting'
-                    color='disabled'
-                >
-                    Symmetry
-                </Text>
-                <span className='spacer' />
-                <span className='symmetry-row'>
-                    {(['x', 'y', 'z'] as const).map(axis => (
-                        <SymmetryButton
-                            key={axis}
-                            label={axis.toUpperCase()}
-                            title={`Mirror drawing across ${axis.toUpperCase()}`}
-                            isOn={symmetry[axis]}
-                            isDisabled={false}
-                            onToggle={on => {
-                                dispatch({type: 'symmetry', axis, on})
-                            }}
-                        />
-                    ))}
-                    <SymmetryButton
-                        label='◴'
-                        title={
-                            canRadial ?
-                                'Four-fold radial symmetry'
-                            :   'Radial symmetry needs a grid that is square in X and Y'
-                        }
-                        isOn={symmetry.radial}
-                        isDisabled={!canRadial}
-                        onToggle={on => {
-                            dispatch({type: 'symmetry', axis: 'radial', on})
-                        }}
-                    />
-                </span>
-            </div>
             {/*
-             * Which plane a stroke is flattened onto — `FEATURESET.md` §5. "Face" is the default and
-             * means the canvas is whatever surface the cursor is on, which is where the stroke pins
-             * itself anyway; the other three override that with a plane of the grid.
-             */}
-            <div className='snap-size'>
-                <Text
-                    type='supporting'
-                    color='disabled'
-                >
-                    Plane
-                </Text>
-                <span className='spacer' />
-                <span
-                    className='symmetry-row'
-                    role='radiogroup'
-                    aria-label='Drawing plane'
-                >
-                    {PLANES.map(entry => (
-                        <button
-                            key={entry.label}
-                            type='button'
-                            role='radio'
-                            aria-checked={plane === entry.axis}
-                            aria-label={entry.title}
-                            title={entry.title}
-                            className='symmetry-axis'
-                            data-on={plane === entry.axis || undefined}
-                            onClick={() => {
-                                dispatch({type: 'plane', axis: entry.axis})
-                            }}
-                        >
-                            {entry.label}
-                        </button>
-                    ))}
-                </span>
-            </div>
-            {/*
-             * Reference art — `FEATURESET.md` §33. It appears only once something has been dropped on
-             * the viewport, because a row of controls for a picture that is not there is a row of
-             * controls for nothing. Opacity steps rather than slides: this is a 216 px column, and the
-             * artist wants fainter or brighter, not a number.
+             * Reference art — `FEATURESET.md` §33. Opacity steps rather than slides: this is a
+             * 216 px column, and the artist wants fainter or brighter, not a number.
              */}
             {references.map(entry => (
                 <div
@@ -239,22 +132,6 @@ export const ScenePanel = ({state, dispatch}: {state: AppState; dispatch: Dispat
                     </span>
                 </div>
             ))}
-
-            <div className='snap-size'>
-                <Text
-                    type='supporting'
-                    color='disabled'
-                >
-                    Voxel size
-                </Text>
-                <span className='spacer' />
-                <Text
-                    type='supporting'
-                    hasTabularNumbers
-                >
-                    {voxelSize} px
-                </Text>
-            </div>
         </div>
     )
 }

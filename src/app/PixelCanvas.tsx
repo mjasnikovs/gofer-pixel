@@ -1,4 +1,4 @@
-import {useEffect, useRef} from 'react'
+import {useEffect, useRef, type CSSProperties} from 'react'
 
 /**
  * An RGBA buffer behind a function, because React's development build reads props.
@@ -29,13 +29,22 @@ export const PixelCanvas = ({
     height,
     data,
     className,
-    title
+    title,
+    style
 }: {
     width: number
     height: number
     data: Pixels
     className?: string
     title?: string
+    /**
+     * The size on screen, which is not the size in pixels.
+     *
+     * The export preview sets it to a whole multiple of `width` and `height`, because
+     * `image-rendering: pixelated` at a fractional scale staggers every edge — see
+     * `ExportDialog.tsx`'s `previewScale`. Left off, the canvas is whatever the stylesheet says.
+     */
+    style?: CSSProperties
 }) => {
     const ref = useRef<HTMLCanvasElement>(null)
 
@@ -52,6 +61,7 @@ export const PixelCanvas = ({
             height={height}
             className={className}
             title={title}
+            style={style}
             data-pixels={`${String(width)}x${String(height)}`}
         />
     )

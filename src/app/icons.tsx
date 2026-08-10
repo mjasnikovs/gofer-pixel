@@ -96,6 +96,26 @@ export const CubeIcon = () => (
     </Svg>
 )
 
+/**
+ * The default drawing plane: whatever face the cursor is on — `FEATURESET.md` §5.
+ *
+ * The same cube as above with one of its three faces filled, because that is literally the setting:
+ * the canvas is a face of the model rather than a plane of the grid. It sits in a row with `YZ`,
+ * `XZ` and `XY`, and those three are axis pairs with no picture — a cube showing a face is the one
+ * of the four that has one, and drawing the other three as near-identical rhombi to match would
+ * make all four harder to tell apart, not easier.
+ */
+export const FaceIcon = () => (
+    <Svg>
+        <path
+            d='M8 1.8 14 5l-6 3.2L2 5z'
+            fill='currentColor'
+        />
+        <path d='M8 1.8 14 5v6l-6 3.2L2 11V5z' />
+        <path d='M8 8.2v6' />
+    </Svg>
+)
+
 /* ---- what a drag draws between its two ends ---- */
 
 /**

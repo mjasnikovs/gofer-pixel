@@ -250,6 +250,137 @@ test('the export dialog draws the sheet’s own cells into real canvases', async
 })
 
 /*
+ * A sprite pixel gets a whole number of screen pixels, and the cell keeps its own shape.
+ *
+ * Measured here before the fix: a 64 px sprite was drawn 129.856 px wide — 2.029×, because the
+ * canvas was `width: 100%` of a fluid grid column and the stylesheet forced `aspect-ratio: 1` on
+ * top. Under `image-rendering: pixelated` that is most source pixels at two screen pixels and every
+ * thirty-fourth at three: a stagger along every edge, worst where two edges meet. `PixelCanvas`'s
+ * own comment forbids it, and it was happening in the panel whose whole job is to show the file.
+ *
+ * Only a browser can say this. happy-dom has no `ResizeObserver` and lays nothing out, so the unit
+ * tests can prove `previewScale`'s arithmetic and nothing about whether it reached the canvas.
+ */
+test('the export preview scales by whole pixels and keeps an oblong cell oblong', async ({
+    page
+}) => {
+    await ready(page)
+    await page.getByRole('button', {name: 'Export', exact: true}).click()
+
+    /*
+     * After the dialog's own entry animation, which carries a scale and would otherwise be measured
+     * as the layout. Awaiting `finished` is awaiting an *event* — the testing law forbids waiting a
+     * number of milliseconds, not waiting for the thing itself to have happened.
+     */
+    const drawn = async (): Promise<{pixels: string; scaleX: number; scaleY: number}> =>
+        page.evaluate(async () => {
+            await Promise.all(
+                document.getAnimations().map(one => one.finished.catch(() => undefined))
+            )
+            const canvas = document.querySelector('canvas.export-sprite')
+            if (!(canvas instanceof HTMLCanvasElement)) throw new Error('no preview canvas')
+            const box = canvas.getBoundingClientRect()
+            return {
+                pixels: `${String(canvas.width)}x${String(canvas.height)}`,
+                scaleX: box.width / canvas.width,
+                scaleY: box.height / canvas.height
+            }
+        })
+
+    const square = await drawn()
+    expect(square.pixels).toBe('64x64')
+    expect(Number.isInteger(square.scaleX)).toBe(true)
+    expect(square.scaleX).toBeGreaterThanOrEqual(1)
+    // One scale, both axes: a square sprite that is not square on screen is the other bug.
+    expect(square.scaleY).toBe(square.scaleX)
+
+    // Half as wide as it is tall, which is what `cellW` and `cellH` were split apart for. The
+    // stylesheet used to force this back into a square while the file on disk was correct.
+    await page.getByRole('radiogroup', {name: 'Sprite width'}).getByText('32 px').click()
+    const oblong = await drawn()
+    expect(oblong.pixels).toBe('32x64')
+    expect(Number.isInteger(oblong.scaleX)).toBe(true)
+    expect(oblong.scaleY).toBe(oblong.scaleX)
+})
+
+/*
+ * The buttons are reachable, and so is the last map in the list.
+ *
+ * Astryx caps its dialog at 540 px and the wrapper under it is `overflow: hidden`, so content taller
+ * than that is *clipped* rather than scrolled. Measured at a 720 px window: the Export pack button
+ * sat at y=769 inside a box that ended at 630, and the map list lost its last rows the same way. A
+ * dialog whose primary button is off the bottom is a dialog that cannot be used.
+ *
+ * A short window on purpose. The bug does not exist on a tall screen, which is why it shipped.
+ */
+test('the export dialog keeps its buttons and its last map inside itself', async ({page}) => {
+    await page.setViewportSize({width: 1280, height: 720})
+    await ready(page)
+    await page.getByRole('button', {name: 'Export', exact: true}).click()
+    await page.evaluate(async () => {
+        await Promise.all(document.getAnimations().map(one => one.finished.catch(() => undefined)))
+    })
+
+    const inside = await page.evaluate(() => {
+        const button = [...document.querySelectorAll('button')].find(
+            node => node.textContent.trim() === 'Export pack'
+        )
+        // Reached from the button, not by selector: astryx leaves collapsed `.astryx-dialog` nodes
+        // on the page, and a query would measure one of those instead of the box on screen.
+        const dialog = button?.closest('.astryx-dialog')
+        if (!dialog || !button) return undefined
+        const box = dialog.getBoundingClientRect()
+        const it = button.getBoundingClientRect()
+        return {
+            withinDialog: it.bottom <= Math.ceil(box.bottom) && it.top >= Math.floor(box.top),
+            withinWindow: it.bottom <= window.innerHeight
+        }
+    })
+    expect(inside).toEqual({withinDialog: true, withinWindow: true})
+
+    // And the list scrolls rather than clipping, so the last map can still be ticked.
+    await page.getByRole('checkbox', {name: /object id/i}).scrollIntoViewIfNeeded()
+    await expect(page.getByRole('checkbox', {name: /object id/i})).toBeInViewport()
+})
+
+/*
+ * The map list stops on a row boundary — `wholeRows`.
+ *
+ * 900 px is the window that showed the defect: seven rows and a sliver of the eighth, which is a
+ * scrollbar for half an item. A row sliced through the middle reads as a rendering fault, not as an
+ * invitation to scroll. The arithmetic is a unit test; only a browser can say it reached the box.
+ */
+test('the map list shows whole rows at every window height', async ({page}) => {
+    for (const height of [720, 900, 1080]) {
+        await page.setViewportSize({width: 1440, height})
+        await ready(page)
+        await page.getByRole('button', {name: 'Export', exact: true}).click()
+        const seen = await page.evaluate(async () => {
+            await Promise.all(
+                document.getAnimations().map(one => one.finished.catch(() => undefined))
+            )
+            const list = document.querySelector('.export-maps')
+            if (!(list instanceof HTMLElement)) return undefined
+            // The *content* edge: `clientHeight` excludes the box's own border, so the top border
+            // has to be stepped over or the line lands a pixel high and every row reads as cut.
+            const edge = list.getBoundingClientRect().top + list.clientTop + list.clientHeight
+            const rows = [...list.querySelectorAll('.export-map')]
+            return {
+                // A row the scroll edge runs through: the thing this is here to make impossible.
+                cut: rows.filter(one => {
+                    const box = one.getBoundingClientRect()
+                    return box.top < edge - 0.5 && box.bottom > edge + 0.5
+                }).length,
+                whole: rows.filter(one => one.getBoundingClientRect().bottom <= edge + 0.5).length
+            }
+        })
+        if (!seen) throw new Error('no map list')
+        expect(seen.cut).toBe(0)
+        expect(seen.whole).toBeGreaterThanOrEqual(1)
+    }
+})
+
+/*
  * The pack is the button the artist actually presses, and a `Blob` download is the one part of
  * `Files.write` that has no adapter under it — `memoryFiles` proves the bytes, and only a browser
  * proves they leave.

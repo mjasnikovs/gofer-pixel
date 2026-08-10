@@ -1,4 +1,6 @@
 import type {Camera} from '../render/camera'
+import {nearestPerfectZoom, stepPerfectZoom} from '../render/perfect'
+import type {Volume} from '../render/volume'
 
 /**
  * Orbit, pan and zoom as a pure function.
@@ -68,31 +70,57 @@ const RADIANS_PER_PIXEL = 0.01
 /** Straight up and straight down are allowed: the basis snap is what makes those views safe. */
 const MAX_PITCH = Math.PI / 2
 
-const MIN_ZOOM = 2
-const MAX_ZOOM = 512
+export const MIN_ZOOM = 2
+export const MAX_ZOOM = 512
 
 const clamp = (value: number, low: number, high: number): number =>
     Math.min(Math.max(value, low), high)
 
 /**
+ * What a snap is measured against, or `undefined` for a camera nobody is composing a sprite from.
+ *
+ * `cell` and `volume` are here because SNAP is a claim about *pixels*, and a camera on its own
+ * cannot make one: the zoom says how many voxels tall the frame is, and only the sprite it is
+ * rendered into says how many pixels that is. An `apply` without these does not snap, which is the
+ * honest reading of "I was not told what this view exports into".
+ */
+export interface OrbitRules {
+    /** The switch labelled SNAP. */
+    readonly snap: boolean
+    /** Reverse the direction a drag turns the view. */
+    readonly invert: boolean
+    /** The edge of the sprite this camera exports into, in pixels. */
+    readonly cell: number
+    /** The grid, because the projection is built around its middle. */
+    readonly volume: Volume
+}
+
+/**
  * Pixel snapping, as `FEATURESET.md` §14 asks for it — and it is the switch labelled SNAP.
  *
- * Zoom is how many voxels tall the view is, so a whole number of voxels over a whole number of
- * pixels is what makes a voxel edge land on a pixel edge. Pan is in voxels along the screen axes,
- * so rounding it to whole voxels keeps the same grid alignment as the model moves under the frame.
+ * §14 words it as "integer zoom" and **that is the wrong invariant**, which is the one thing worth
+ * knowing about this function. Zoom is voxels-tall of the frame; what lands on the grid is
+ * `cell / zoom`, pixels-tall of a voxel. Rounding the first does nothing for the second: the
+ * camera every new 16³ document opens on is zoom 31, an integer, and 64 / 31 is 2.06, so a row of
+ * voxels exports as `3 2 2 2 2 2 2 2 3`. `render/perfect.ts` holds the real question and this
+ * asks it.
  *
- * Off, both are free, which is what an artist wants while they are looking at something rather
- * than composing a sprite from it.
+ * Pan is still rounded to whole voxels, and for the reason it always was: pan slides the lattice
+ * without stretching it, so whole voxels keep the alignment the zoom just bought.
+ *
+ * A zoom is left alone when the angle has no whole-pixel lattice at all — most do not, true
+ * isometric among them. Moving it to *something* would be the old defect wearing a new name.
  */
-const snapCamera = (camera: Camera, snap: boolean): Camera =>
-    snap ?
-        {
-            ...camera,
-            zoom: Math.round(camera.zoom),
-            panX: Math.round(camera.panX),
-            panY: Math.round(camera.panY)
-        }
-    :   camera
+const snapCamera = (camera: Camera, rules: OrbitRules | undefined): Camera => {
+    if (!rules?.snap) return camera
+    const zoom = nearestPerfectZoom(camera, rules.volume, rules.cell, MIN_ZOOM, MAX_ZOOM)
+    return {
+        ...camera,
+        zoom: zoom ?? camera.zoom,
+        panX: Math.round(camera.panX),
+        panY: Math.round(camera.panY)
+    }
+}
 
 /**
  * Which way a drag turns the model.
@@ -107,8 +135,7 @@ export const apply = (
     state: OrbitState,
     event: OrbitEvent,
     height: number,
-    snap = false,
-    invert = false
+    rules?: OrbitRules
 ): OrbitState => {
     switch (event.type) {
         case 'camera':
@@ -134,7 +161,7 @@ export const apply = (
             const dx = event.x - gesture.x
             const dy = event.y - gesture.y
             if (gesture.mode === 'orbit') {
-                const sense = invert ? -1 : 1
+                const sense = rules?.invert === true ? -1 : 1
                 return {
                     ...state,
                     camera: {
@@ -158,7 +185,7 @@ export const apply = (
                         panX: gesture.from.panX - dx * voxelsPerPixel,
                         panY: gesture.from.panY + dy * voxelsPerPixel
                     },
-                    snap
+                    rules
                 )
             }
         }
@@ -166,13 +193,23 @@ export const apply = (
         case 'wheel': {
             // Exponential, so a notch is the same proportion of the view at every zoom level.
             const zoomed = state.camera.zoom * Math.exp(event.delta * 0.001)
-            // Rounded *away* from where it started when snapping, so a notch always moves: rounding
-            // to nearest leaves a slow wheel stuck on the integer it is already sitting on.
+            /*
+             * Snapped, the wheel walks the stops at which a voxel is a whole number of pixels
+             * rather than the integers, and it walks *past* where it started so a notch always
+             * moves — rounding to nearest leaves a slow wheel stuck on the stop it is sitting on.
+             * An angle with no stops at all falls back to the free zoom, because a wheel that
+             * refuses to turn is a worse answer than one that turns off the grid.
+             */
             const stepped =
-                snap ?
-                    zoomed > state.camera.zoom ?
-                        Math.ceil(zoomed)
-                    :   Math.floor(zoomed)
+                rules?.snap === true ?
+                    (stepPerfectZoom(
+                        state.camera,
+                        rules.volume,
+                        rules.cell,
+                        zoomed > state.camera.zoom,
+                        MIN_ZOOM,
+                        MAX_ZOOM
+                    ) ?? zoomed)
                 :   zoomed
             return {
                 ...state,

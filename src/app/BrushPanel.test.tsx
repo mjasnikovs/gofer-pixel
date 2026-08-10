@@ -117,6 +117,53 @@ test('the brush row goes dead for the tools that do not read it, and comes back 
     await panel.unmount()
 })
 
+/*
+ * Symmetry and the drawing plane, which were `ScenePanel`'s two top rows under the whole palette
+ * and are the fourth and fifth rows of this section now.
+ *
+ * The thing worth holding is that they are *not* the same kind of control, however alike they look.
+ * Symmetry is as brush-only as Size, Shape and Figure — every call to `mirrored` is inside a
+ * `Stroke`, and only `beginStroke` opens one — so it greys with them. The plane does not: `hoverAt`
+ * reads it for every tool that aims at a cell and `slicedFor` reads it as the axis slice mode cuts
+ * along, so greying it under Move would be a lie about a control that is still working.
+ */
+test('symmetry greys with the brush and the drawing plane does not', async () => {
+    const panel = await open()
+
+    await panel.click('Mirror drawing across X')
+    expect(panel.state().symmetry.x).toBe(true)
+
+    // The car is 16 × 10, so radial is refused — and the tooltip says why rather than going
+    // quietly dead. The name stays the name; only the reason moves.
+    const radial = panel.control('Four-fold radial symmetry')
+    expect(radial.getAttribute('aria-disabled')).toBe('true')
+    expect(radial.getAttribute('title')).toContain('square in X and Y')
+    await panel.click('Four-fold radial symmetry')
+    expect(panel.state().symmetry.radial).toBe(false)
+
+    await panel.click('Lock drawing to the XY plane')
+    expect(panel.state().plane).toBe(2)
+    await panel.click('Draw on the face under the cursor')
+    expect(panel.state().plane).toBeUndefined()
+
+    // Under a tool that makes no stroke, symmetry goes dead and inert — and says which tool.
+    await panel.click('Move')
+    const mirror = panel.control(
+        'Mirror drawing across X — Move does not use the brush — only Draw and Erase do'
+    )
+    expect(mirror.getAttribute('aria-disabled')).toBe('true')
+    await panel.act(() => {
+        mirror.click()
+    })
+    expect(panel.state().symmetry.x).toBe(true)
+
+    // The plane is still live, because the aim and the slice still read it.
+    await panel.click('Lock drawing to the YZ plane')
+    expect(panel.state().plane).toBe(0)
+
+    await panel.unmount()
+})
+
 test('the brush and palette controls reach the document', async () => {
     const panel = await open()
     const paletteSwitch = (label: string): HTMLElement => {

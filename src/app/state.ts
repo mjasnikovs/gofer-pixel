@@ -4,7 +4,7 @@ import {
     directions,
     eightDirections,
     focusOn,
-    ISOMETRIC_PITCH,
+    DIMETRIC_PITCH,
     ringCount,
     RING_PITCHES,
     type RingPitch
@@ -234,7 +234,6 @@ export interface Chrome {
      * A fact about the hands at this desk, not about the model, which is exactly why it is chrome.
      */
     readonly invert: boolean
-    readonly workspace: 'model' | 'render'
     readonly fps: number
     /**
      * The pitch the next direction ring is built at — see `RING_PITCHES`.
@@ -412,12 +411,13 @@ export const initialState = (source: Volume, name: string, opened?: OpenedDocume
         origin: opened?.origin,
         ...views,
         orbit: {
-            camera: first?.camera ?? createCamera(volume, 0, ISOMETRIC_PITCH),
+            camera: first?.camera ?? createCamera(volume, 0, DIMETRIC_PITCH),
             gesture: undefined
         },
         map: MODE_COLOR,
         output: {
             cell: saved?.cell ?? 64,
+            cellH: saved?.cellH ?? saved?.cell ?? 64,
             padding: saved?.padding ?? 0,
             bounds: saved?.bounds ?? false,
             presets: saved?.presets ?? [],
@@ -449,9 +449,8 @@ export const initialState = (source: Volume, name: string, opened?: OpenedDocume
         edges: true,
         snap: true,
         invert: false,
-        workspace: 'model',
         fps: 24,
-        ringPitch: 'iso',
+        ringPitch: 'dimetric',
         draggingCamera: undefined,
         draggingObject: undefined,
         frame: 1
@@ -528,13 +527,14 @@ const step = (state: AppState, action: AppAction): AppState => {
                     delta: action.event.delta > 0 ? 1 : -1
                 })
             }
-            const orbit = applyOrbit(
-                state.orbit,
-                action.event,
-                action.height,
-                state.snap,
-                state.invert
-            )
+            // The cell and the grid travel with the switches because SNAP is a claim about pixels,
+            // and the zoom alone cannot make one: `cell / zoom` is what lands on the grid.
+            const orbit = applyOrbit(state.orbit, action.event, action.height, {
+                snap: state.snap,
+                invert: state.invert,
+                cell: state.output.cellH,
+                volume: state.volume
+            })
             if (orbit === state.orbit) return state
             // Once the view has moved it is no longer the stored camera, and saying so is the
             // difference between a list of cameras and a list of bookmarks that quietly lie.

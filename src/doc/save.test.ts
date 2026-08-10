@@ -33,6 +33,7 @@ const document = (): Document => {
         symmetry: {x: true, y: false, z: false, radial: false},
         output: {
             cell: 32,
+            cellH: 48,
             padding: 2,
             bounds: true,
             preset: 'Sprite Sheet (Auto)',
@@ -79,8 +80,31 @@ test('what version 3 added — where the model came from — comes back too', ()
     const doc = document()
     const back = loadDocument(JSON.stringify(saveDocument(doc, 'tower.gpix')))
 
-    expect(back?.version).toBe(3)
+    expect(back?.version).toBe(SAVE_VERSION)
     expect(back?.origin).toEqual(doc.origin)
+})
+
+/*
+ * Version 4 split the sprite cell into a width and a height. Everything before it could only be
+ * square, so the height is not a missing field to default — it is `cell`, stated once, and filling
+ * it with 64 would resize every old document's export.
+ */
+test('a file written before cells could be oblong keeps the square it chose', () => {
+    const doc = document()
+    const written = saveDocument(doc, 'old.gpix') as unknown as Record<string, unknown>
+    const output = {...(written['output'] as Record<string, unknown>)}
+    delete output['cellH']
+    const back = loadDocument(JSON.stringify({...written, version: 3, output}))
+
+    expect(back?.output.cell).toBe(32)
+    expect(back?.output.cellH).toBe(32)
+})
+
+test('an oblong cell survives the round trip', () => {
+    const back = loadDocument(JSON.stringify(saveDocument(document(), 'tall.gpix')))
+
+    expect(back?.output.cell).toBe(32)
+    expect(back?.output.cellH).toBe(48)
 })
 
 test('a document nobody generated says nothing about generation', () => {

@@ -4,6 +4,8 @@ import {initialObjects} from '../doc/objects'
 import {sheetMetadata} from './metadata'
 import {readVox} from '../vox/vox-file'
 import {
+    cellAt,
+    cutCell,
     DEFAULT_COLUMNS,
     renderSheet,
     SHEET_MAPS,
@@ -36,6 +38,9 @@ const small = renderSheet(volume, cameras, 32)
  * The golden test the whole architecture exists to make possible: this is the exact sheet the
  * download button produces, hashed, with no browser and no GPU in the room. If a change moves a
  * pixel, this fails; if it moves a pixel deliberately, the new hash goes in this file.
+ *
+ * These moved on 2026-08-10, when the default ring pitch became the 2:1 dimetric instead of true
+ * isometric. A different camera is a different sprite; that is the change, not a regression.
  */
 test('a sheet builds only the maps it was asked for', () => {
     const two = renderSheet(volume, cameras, 32, ['normal'])
@@ -49,8 +54,8 @@ test('the eight-direction sheet of car.vox is byte-for-byte what it was', () => 
     const sheet = big
     expect([sheet.width, sheet.height]).toEqual([256, 128])
     expect([sheet.columns, sheet.rows]).toEqual([DEFAULT_COLUMNS, 2])
-    expect(hash(plane(sheet, 'color'))).toBe('932d7d5d0b94dacf')
-    expect(hash(plane(sheet, 'normal'))).toBe('44a88c24f8079b5f')
+    expect(hash(plane(sheet, 'color'))).toBe('d445502ffe08ba90')
+    expect(hash(plane(sheet, 'normal'))).toBe('7647fa6f8200736f')
 })
 
 /**
@@ -61,17 +66,17 @@ test('the eight-direction sheet of car.vox is byte-for-byte what it was', () => 
 test('every map of the sheet is byte-for-byte what it was', () => {
     const sheet = big
     const golden: Record<string, string> = {
-        color: '932d7d5d0b94dacf',
-        normal: '44a88c24f8079b5f',
-        depth: '8bfdc8195783092e',
-        height: 'bfb88f409dae4a29',
-        ao: 'bdc5da61f04cf05e',
-        emission: 'c2bf911997b4cc37',
-        index: 'ee584af307914d2e',
+        color: 'd445502ffe08ba90',
+        normal: '7647fa6f8200736f',
+        depth: '21f90625ea97d116',
+        height: 'c571338015d238d8',
+        ao: 'c0a94ff59414d55e',
+        emission: '35532451074e59a0',
+        index: '4c4a0772191db823',
         // Every voxel of `car.vox` belongs to the one object it opened as, so this is a silhouette
         // of ones — which is the right answer and worth pinning, because a bug that left it blank
         // would look exactly like a model with no objects in it.
-        object: '7324b890fc196f40'
+        object: 'c435169c5f8ed293'
     }
     for (const map of SHEET_MAPS) {
         expect(`${map}:${hash(plane(sheet, map))}`).toBe(`${map}:${golden[map] ?? ''}`)
@@ -112,11 +117,11 @@ test('every cell holds a sprite, and no cell holds the one before it', () => {
     const sheet = big
 
     const opaqueIn = (index: number): number => {
-        const ox = (index % sheet.columns) * sheet.cell
-        const oy = Math.floor(index / sheet.columns) * sheet.cell
+        const ox = (index % sheet.columns) * sheet.cellW
+        const oy = Math.floor(index / sheet.columns) * sheet.cellH
         let count = 0
-        for (let row = 0; row < sheet.cell; row += 1) {
-            for (let px = 0; px < sheet.cell; px += 1) {
+        for (let row = 0; row < sheet.cellH; row += 1) {
+            for (let px = 0; px < sheet.cellW; px += 1) {
                 if (plane(sheet, 'color')[((oy + row) * sheet.width + ox + px) * 4 + 3] === 255)
                     count += 1
             }
@@ -166,7 +171,8 @@ test('the metadata places every sprite, names it, and pivots on the model rather
     const meta = sheetMetadata(volume, cameras, big, true)
     expect(meta.sprites).toHaveLength(8)
     expect(meta.sprites[0]?.name).toBe('Front')
-    expect(meta.cell).toBe(64)
+    expect(meta.cellW).toBe(64)
+    expect(meta.cellH).toBe(64)
     expect(meta.maps).toContain('color')
 
     // Cells are laid out in list order, and the entry says where each one actually is.
@@ -185,4 +191,72 @@ test('the metadata places every sprite, names it, and pivots on the model rather
         expect(entry.bounds.width).toBeGreaterThan(0)
     }
     expect(sheetMetadata(volume, cameras, big, false).sprites[0]?.bounds).toBeUndefined()
+})
+
+/*
+ * An oblong cell — the reason `cell` became `cellW` and `cellH`.
+ *
+ * A character taller than it is wide used to be packed into a square and given air on both sides
+ * for it, and that air is texture an engine pays for in every atlas. Nothing in the renderer ever
+ * wanted the two joined: the scale comes off the height alone, and the width only says how far the
+ * frame reaches either side of the pivot.
+ */
+const tall = renderSheet(volume, cameras, {cellW: 32, cellH: 64}, ['color'], 2)
+
+test('an oblong cell packs at its own width and its own height', () => {
+    expect(tall.cellW).toBe(32)
+    expect(tall.cellH).toBe(64)
+    // Four across, two down, with two pixels of padding between the cells and around the outside.
+    expect(tall.columns).toBe(DEFAULT_COLUMNS)
+    expect(tall.rows).toBe(2)
+    expect(tall.width).toBe(4 * (32 + 2) + 2)
+    expect(tall.height).toBe(2 * (64 + 2) + 2)
+})
+
+test('the strides differ, so a cell is where the metadata says it is', () => {
+    expect(cellAt(tall, 0)).toEqual({x: 2, y: 2})
+    expect(cellAt(tall, 3)).toEqual({x: 2 + 3 * 34, y: 2})
+    // The second row steps by the *height* plus padding, not by the width.
+    expect(cellAt(tall, 4)).toEqual({x: 2, y: 2 + 66})
+})
+
+test('a cut out of an oblong sheet is the cell, not a square guess at it', () => {
+    const cut = cutCell(tall, 'color', 5)
+    expect(cut).toBeDefined()
+    expect(cut?.length).toBe(32 * 64 * 4)
+})
+
+/*
+ * The height is what sets the scale. A cell twice as wide at the same height shows the same model
+ * at the same size with more room either side — so the middle column of the wide sheet is the
+ * narrow sheet's own pixels, and the extra columns are empty.
+ */
+test('widening a cell adds room rather than magnifying the model', () => {
+    const narrow = renderSheet(volume, cameras.slice(0, 1), {cellW: 32, cellH: 64}, ['color'])
+    const wide = renderSheet(volume, cameras.slice(0, 1), {cellW: 64, cellH: 64}, ['color'])
+
+    // The middle 32 columns of the wide cell are the narrow cell, byte for byte: same rays, same
+    // pixel centres. A wider cell casts more rays either side; it does not cast different ones.
+    for (let row = 0; row < 64; row += 1) {
+        const from = (row * wide.width + 16) * 4
+        const was = row * narrow.width * 4
+        expect(plane(wide, 'color').subarray(from, from + 32 * 4)).toEqual(
+            plane(narrow, 'color').subarray(was, was + 32 * 4)
+        )
+    }
+
+    // And the narrow one was clipping, which is the whole reason an artist would widen it.
+    const edge = (sheet: Sheet, row: number, px: number): number =>
+        plane(sheet, 'color')[(row * sheet.width + px) * 4 + 3] ?? 0
+    let clipped = 0
+    for (let row = 0; row < 64; row += 1) if (edge(narrow, row, 0) === 255) clipped += 1
+    expect(clipped).toBeGreaterThan(0)
+})
+
+test('the metadata reports both edges of an oblong cell', () => {
+    const meta = sheetMetadata(volume, cameras, tall, false)
+    expect(meta.version).toBe(2)
+    expect(meta.cellW).toBe(32)
+    expect(meta.cellH).toBe(64)
+    expect(meta.sprites[0]).toMatchObject({width: 32, height: 64})
 })

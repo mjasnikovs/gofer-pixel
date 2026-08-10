@@ -16,7 +16,20 @@ import {volumeDiagonal, type Volume} from '../render/volume'
 export interface Sheet {
     readonly width: number
     readonly height: number
-    readonly cell: number
+    /**
+     * One sprite's own width and height in pixels, which are not required to match.
+     *
+     * They were one number until a character taller than it is wide had to be packed into a square
+     * and given air on both sides for it. Nothing in the renderer ever wanted them joined: the
+     * scale comes off `cellH` alone — `basisFor` takes a height and derives voxels-per-pixel from
+     * it — and `cellW` only says how far the frame reaches left and right of the pivot. A 32 × 64
+     * cell is the same rays as a 64 × 64 one with the outer 16 columns not cast.
+     *
+     * `cellH` is therefore the number `render/perfect.ts` asks its question about. The width cannot
+     * make a voxel land off the grid and cannot save it either.
+     */
+    readonly cellW: number
+    readonly cellH: number
     readonly columns: number
     readonly rows: number
     /** Transparent pixels between cells and around the edge — `FEATURESET.md` §16. */
@@ -41,6 +54,22 @@ export interface Sheet {
 export const DEFAULT_COLUMNS = 4
 
 /**
+ * One sprite's size, which a caller may give as a single number when it is square.
+ *
+ * The number form is not a convenience left over from before the split: a square cell is what most
+ * of the app wants and spelling `{cellW: 64, cellH: 64}` at every one of those call sites would be
+ * noise around the two places that differ. `cellSize` is the one widening, so nothing else has to
+ * decide what a bare number means.
+ */
+export interface CellSize {
+    readonly cellW: number
+    readonly cellH: number
+}
+
+export const cellSize = (cell: number | CellSize): CellSize =>
+    typeof cell === 'number' ? {cellW: cell, cellH: cell} : cell
+
+/**
  * Which maps a sheet carries, in the order the export panel lists them.
  *
  * `index` and `object` are the two that are data rather than pictures: the palette index and the
@@ -63,13 +92,10 @@ export type SheetMap = (typeof SHEET_MAPS)[number]
 export const sheetPlane = (sheet: Sheet, map: SheetMap): Uint8Array | undefined => sheet.maps[map]
 
 /** Where camera `index` sits in the sheet, in pixels from the top-left. */
-export const cellAt = (sheet: Sheet, index: number): {x: number; y: number} => {
-    const stride = sheet.cell + sheet.padding
-    return {
-        x: sheet.padding + (index % sheet.columns) * stride,
-        y: sheet.padding + Math.floor(index / sheet.columns) * stride
-    }
-}
+export const cellAt = (sheet: Sheet, index: number): {x: number; y: number} => ({
+    x: sheet.padding + (index % sheet.columns) * (sheet.cellW + sheet.padding),
+    y: sheet.padding + Math.floor(index / sheet.columns) * (sheet.cellH + sheet.padding)
+})
 
 /**
  * One camera's cell of one map, cut out of the packed sheet.
@@ -90,9 +116,9 @@ export const cutCell = (sheet: Sheet, map: SheetMap, index: number): Uint8Array 
     const plane = sheet.maps[map]
     if (!plane) return undefined
     const {x, y} = cellAt(sheet, index)
-    const row = sheet.cell * 4
-    const cut = new Uint8Array(sheet.cell * row)
-    for (let line = 0; line < sheet.cell; line += 1) {
+    const row = sheet.cellW * 4
+    const cut = new Uint8Array(sheet.cellH * row)
+    for (let line = 0; line < sheet.cellH; line += 1) {
         const from = ((y + line) * sheet.width + x) * 4
         cut.set(plane.subarray(from, from + row), line * row)
     }
@@ -112,23 +138,25 @@ export const sheetColor = (sheet: Sheet): Uint8Array => sheet.maps.color ?? new 
 export const renderSheet = (
     volume: Volume,
     cameras: readonly NamedCamera[],
-    cell: number,
+    cell: number | CellSize,
     wanted: readonly SheetMap[] = SHEET_MAPS,
     padding = 0,
     columns = DEFAULT_COLUMNS
 ): Sheet => {
+    const {cellW, cellH} = cellSize(cell)
     const across = Math.max(1, Math.min(columns, cameras.length || 1))
     const rows = Math.max(1, Math.ceil(cameras.length / across))
     const pad = Math.max(0, Math.round(padding))
-    const stride = cell + pad
-    const width = across * stride + pad
-    const height = rows * stride + pad
+    const strideX = cellW + pad
+    const strideY = cellH + pad
+    const width = across * strideX + pad
+    const height = rows * strideY + pad
     const asked = new Set<SheetMap>([...wanted, 'color'])
     const planes: Partial<Record<SheetMap, Uint8Array>> = {}
     for (const map of SHEET_MAPS) {
         if (asked.has(map)) planes[map] = new Uint8Array(width * height * 4)
     }
-    const target = createTarget(cell, cell)
+    const target = createTarget(cellW, cellH)
 
     /*
      * Depth is written out across the volume's own diagonal rather than across the ray's full
@@ -139,11 +167,13 @@ export const renderSheet = (
     const spread = volumeDiagonal(volume)
 
     cameras.forEach(({camera}, index) => {
-        const basis = basisFor(camera, volume, cell)
-        render(volume, basis, cell, cell, target)
+        // The height, not the width: `basisFor` derives voxels-per-pixel from the height alone,
+        // and a wider cell reaches further left and right of the pivot at the same scale.
+        const basis = basisFor(camera, volume, cellH)
+        render(volume, basis, cellW, cellH, target)
         const near = basis.dist - spread * 0.5
-        const ox = pad + (index % across) * stride
-        const oy = pad + Math.floor(index / across) * stride
+        const ox = pad + (index % across) * strideX
+        const oy = pad + Math.floor(index / across) * strideY
 
         const grey = (into: Uint8Array | undefined, at: number, value: number): void => {
             if (!into) return
@@ -159,18 +189,18 @@ export const renderSheet = (
             into[at + 3] = 255
         }
 
-        for (let row = 0; row < cell; row += 1) {
-            const from = row * cell * 4
+        for (let row = 0; row < cellH; row += 1) {
+            const from = row * cellW * 4
             const to = ((oy + row) * width + ox) * 4
-            planes.color?.set(target.color.subarray(from, from + cell * 4), to)
-            planes.normal?.set(target.normal.subarray(from, from + cell * 4), to)
-            planes.emission?.set(target.emission.subarray(from, from + cell * 4), to)
+            planes.color?.set(target.color.subarray(from, from + cellW * 4), to)
+            planes.normal?.set(target.normal.subarray(from, from + cellW * 4), to)
+            planes.emission?.set(target.emission.subarray(from, from + cellW * 4), to)
             if (!planes.depth && !planes.height && !planes.ao && !planes.index && !planes.object) {
                 continue
             }
 
-            for (let column = 0; column < cell; column += 1) {
-                const here = row * cell + column
+            for (let column = 0; column < cellW; column += 1) {
+                const here = row * cellW + column
                 const at = to + column * 4
                 if ((target.id[here] ?? 0) === 0) continue
                 const t = ((target.depth[here] ?? 0) / 65535) * basis.depthRange
@@ -186,5 +216,5 @@ export const renderSheet = (
         }
     })
 
-    return {width, height, cell, columns: across, rows, padding: pad, maps: planes}
+    return {width, height, cellW, cellH, columns: across, rows, padding: pad, maps: planes}
 }

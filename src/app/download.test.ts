@@ -98,19 +98,19 @@ test('one sprite is the cell out of the baked sheet, byte for byte', async () =>
 
     // The third cell, cut by hand the long way round, is what the export has to equal.
     const index = 2
-    const stride = sheet.cell + sheet.padding
+    const stride = sheet.cellW + sheet.padding
     const ox = sheet.padding + (index % sheet.columns) * stride
     const oy = sheet.padding + Math.floor(index / sheet.columns) * stride
-    const cut = new Uint8Array(sheet.cell * sheet.cell * 4)
-    for (let row = 0; row < sheet.cell; row += 1) {
+    const cut = new Uint8Array(sheet.cellW * sheet.cellH * 4)
+    for (let row = 0; row < sheet.cellH; row += 1) {
         const from = ((oy + row) * sheet.width + ox) * 4
-        cut.set(plane.subarray(from, from + sheet.cell * 4), row * sheet.cell * 4)
+        cut.set(plane.subarray(from, from + sheet.cellW * 4), row * sheet.cellW * 4)
     }
 
     await writeSprite(out.files, sheet, index, 'Front Left')
 
     expect(out.names()).toEqual(['front-left.png'])
-    expect(out.bytes('front-left.png')).toEqual(await encodePng(sheet.cell, sheet.cell, cut))
+    expect(out.bytes('front-left.png')).toEqual(await encodePng(sheet.cellW, sheet.cellH, cut))
 })
 
 test('a sprite cut from a different cell is different pixels', async () => {

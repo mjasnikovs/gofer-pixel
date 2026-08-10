@@ -9,12 +9,13 @@ import {ReferenceLayer} from './ReferenceLayer'
 import {slicedFor, TOOLS} from './state'
 
 /**
- * The two halves of the left-hand settings, over the real reducer. See `test/panel.tsx`.
+ * The rail's four view switches and what is left of `ScenePanel`, over the real reducer. See
+ * `test/panel.tsx`.
  *
- * They were one panel in the bottom-left corner and are the rail's four view switches and
- * `ScenePanel.tsx` now, so both are mounted here: it is one block of settings split across two
- * columns, and a test that only saw one half could not tell that a control had been dropped on the
- * way over.
+ * They were one panel in the bottom-left corner, and its contents have been dealt out three ways
+ * since: the four switches to the rail, symmetry and the drawing plane to the Brush section — those
+ * two are `BrushPanel.test.tsx`'s now, and moved with them — and the voxel size over the viewport.
+ * What is mounted here is what is still in these two: the switches, and the reference rows.
  *
  * `ReferenceLayer` is drawn beside them because half of what a reference row does is visible in the
  * SVG rather than in the state: dropping a second picture on one plane has to *replace* the first,
@@ -56,7 +57,7 @@ const withReference = async (): Promise<Panel> => {
 
 const referencesOf = (panel: Panel): readonly Reference[] => panel.state().references
 
-test('the view switches, symmetry and the drawing plane all reach the document', async () => {
+test('the view switches reach the document, and are not heard as a tenth tool', async () => {
     const panel = await open()
 
     for (const [label, field] of [
@@ -79,18 +80,6 @@ test('the view switches, symmetry and the drawing plane all reach the document',
     await panel.click('Erase')
     expect(panel.state().tool).toBe('erase')
     expect(panel.state().grid).toBe(false)
-
-    await panel.click('Mirror drawing across X')
-    expect(panel.state().symmetry.x).toBe(true)
-
-    // The car is 16 × 10, so radial is refused and says so rather than going quietly dead.
-    await panel.click('Radial symmetry needs a grid that is square in X and Y')
-    expect(panel.state().symmetry.radial).toBe(false)
-
-    await panel.click('Lock drawing to the XY plane')
-    expect(panel.state().plane).toBe(2)
-    await panel.click('Draw on the face under the cursor')
-    expect(panel.state().plane).toBeUndefined()
 
     await panel.unmount()
 })

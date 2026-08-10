@@ -3,12 +3,14 @@ import {Switch} from '@astryxdesign/core/Switch'
 import {Text} from '@astryxdesign/core/Text'
 import type {Dispatch, ReactNode} from 'react'
 import type {Files} from '../doc/files'
+import {canRadial as symmetryCanRadial} from '../doc/symmetry'
 import {colorCss, projectPalette, SWATCH_COLUMNS, toHexPalette, type Swatch} from '../doc/palette'
 import {
     CircleIcon,
     CubeIcon,
     DownloadIcon,
     EllipseIcon,
+    FaceIcon,
     FreeIcon,
     LineIcon,
     MinusIcon,
@@ -20,6 +22,7 @@ import {
     SquareIcon,
     UploadIcon
 } from './icons'
+import {PLANES} from './planes'
 import {SectionHead} from './SectionHead'
 import {writePalette} from './download'
 import {FIGURES, type Figure} from '../doc/figures'
@@ -74,6 +77,30 @@ const FIGURE_LABELS: Record<Figure, string> = {
     rectFill: 'Filled rectangle between the two ends of the drag',
     ellipse: 'Ellipse inscribed in the drag'
 }
+
+/**
+ * Draw-time symmetry — `FEATURESET.md` §10. Three axis letters and a radial ring.
+ *
+ * Letters and not icons, which is the one place this section breaks from Shape and Figure. Those
+ * two are five and four *shapes*, and a glyph of a shape is the shape; a mirror across X and a
+ * mirror across Y are the same picture turned, so three of them in a row would be three near
+ * identical glyphs an artist has to decode every time. `X` is the axis, said in the alphabet the
+ * gizmo, the coordinate readout and `Volume` all already use here.
+ *
+ * They wear the shape *box* though, because that was the real complaint: a 20 px bordered letter
+ * pushed to the right margin under two rows of 32 px boxes read as a different kind of control in
+ * the middle of one section.
+ *
+ * Radial is disabled outright when the grid is not square in x and y, because a quarter turn of an
+ * oblong box lands outside it — §10's "where mathematically voxel-safe" is a disabled button, not a
+ * silent no-op.
+ */
+const SYMMETRIES = [
+    {axis: 'x', label: 'X', title: 'Mirror drawing across X'},
+    {axis: 'y', label: 'Y', title: 'Mirror drawing across Y'},
+    {axis: 'z', label: 'Z', title: 'Mirror drawing across Z'},
+    {axis: 'radial', label: '◴', title: 'Four-fold radial symmetry'}
+] as const
 
 /**
  * The palette grid, and the two things a modified click on a swatch means.
@@ -169,7 +196,8 @@ export const BrushPanel = ({
      */
     onLoad: () => void
 }) => {
-    const {volume, brush, color, recent, paletteLocked: isLocked, tool} = state
+    const {volume, brush, color, recent, paletteLocked: isLocked, tool, symmetry, plane} = state
+    const canRadial = symmetryCanRadial(volume)
     const onBrush = (next: Partial<Brush>): void => {
         dispatch({type: 'brush', brush: next})
     }
@@ -318,6 +346,94 @@ export const BrushPanel = ({
                                 }}
                             >
                                 {FIGURE_ICONS[figure]}
+                            </button>
+                        ))}
+                    </div>
+
+                    {/*
+                     * Symmetry and the drawing plane — `FEATURESET.md` §10 and §5.
+                     *
+                     * They were the top of `ScenePanel`, under the whole palette, which put two
+                     * properties of the next stroke about four hundred pixels below the other three.
+                     * Everything in this section is what the press is about to do; these are two more
+                     * of it.
+                     *
+                     * Only symmetry is greyed with the rest. `mirrored` is called from five places
+                     * and every one of them is inside a `Stroke`, which only `beginStroke` opens —
+                     * so symmetry is exactly as brush-only as Size, Shape and Figure are. The plane
+                     * is not: `hoverAt` reads it for every tool that aims at a cell, and `slicedFor`
+                     * reads it as the axis slice mode cuts along. Greying it would be a lie about a
+                     * control that is still doing something.
+                     */}
+                    <Text
+                        type='supporting'
+                        color='disabled'
+                    >
+                        Symmetry
+                    </Text>
+                    <div
+                        className='shape-row'
+                        role='group'
+                        aria-label='Symmetry'
+                        aria-disabled={idle || undefined}
+                    >
+                        {SYMMETRIES.map(({axis, label, title}) => (
+                            <button
+                                key={axis}
+                                type='button'
+                                role='switch'
+                                aria-checked={symmetry[axis]}
+                                aria-disabled={
+                                    idle || (axis === 'radial' && !canRadial) || undefined
+                                }
+                                aria-label={reason ? `${title} — ${reason}` : title}
+                                title={
+                                    reason
+                                    ?? (axis === 'radial' && !canRadial ?
+                                        'Radial symmetry needs a grid that is square in X and Y'
+                                    :   title)
+                                }
+                                className='shape shape-lettered'
+                                data-selected={symmetry[axis] || undefined}
+                                onClick={() => {
+                                    if (idle || (axis === 'radial' && !canRadial)) return
+                                    dispatch({type: 'symmetry', axis, on: !symmetry[axis]})
+                                }}
+                            >
+                                {label}
+                            </button>
+                        ))}
+                    </div>
+
+                    <Text
+                        type='supporting'
+                        color='disabled'
+                    >
+                        Plane
+                    </Text>
+                    <div
+                        className='shape-row'
+                        role='radiogroup'
+                        aria-label='Drawing plane'
+                    >
+                        {PLANES.map(entry => (
+                            <button
+                                key={entry.label}
+                                type='button'
+                                role='radio'
+                                aria-checked={plane === entry.axis}
+                                aria-label={entry.title}
+                                title={entry.title}
+                                className='shape shape-lettered'
+                                data-selected={plane === entry.axis || undefined}
+                                onClick={() => {
+                                    dispatch({type: 'plane', axis: entry.axis})
+                                }}
+                            >
+                                {/* Face is the one of the four with a picture — see `FaceIcon`. */}
+                                {entry.axis === undefined ?
+                                    <FaceIcon />
+                                :   entry.label}
                             </button>
                         ))}
                     </div>

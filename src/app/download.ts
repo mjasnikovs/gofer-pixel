@@ -51,7 +51,7 @@ export const writeSprite = async (
     if (!cut) return
     await files.write(
         `${slug(name)}.png`,
-        await encodePng(sheet.cell, sheet.cell, cut),
+        await encodePng(sheet.cellW, sheet.cellH, cut),
         'image/png'
     )
 }

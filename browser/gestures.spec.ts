@@ -55,8 +55,35 @@ const press = async (page: Page, from: Point, to?: Point): Promise<void> => {
 
 const shifted = (point: Point, dx: number, dy = 0): Point => ({x: point.x + dx, y: point.y + dy})
 
+/**
+ * Pin the view, so a gesture test is about the gesture.
+ *
+ * Every test in this file presses a *screen point* and asserts what the model did, so the camera is
+ * an input to all of them — the middle of the viewport is over the top face at one pitch and over
+ * the front face at another, which changes which connected region a double-click takes. That made
+ * them quietly dependent on whatever `initialState` opened on, and moving the default ring pitch
+ * from true isometric to the 2:1 dimetric broke three of them without a gesture changing.
+ *
+ * So the angle is named here instead. `atan(1/√2)` is the one they were written and validated at.
+ * Dispatching it is the same category as `arm` — setup, not the thing under test — and the file's
+ * rule that nothing may be *synthesised* still holds: every press below is a real `page.mouse`.
+ */
+const VALIDATED_PITCH = Math.atan(Math.SQRT1_2)
+
+const look = async (page: Page): Promise<void> => {
+    await page.evaluate(pitch => {
+        const {camera} = window.goferPixel.state.orbit
+        window.goferPixel.dispatch({
+            type: 'orbit',
+            event: {type: 'camera', camera: {...camera, yaw: Math.PI / 4, pitch}},
+            height: 512
+        })
+    }, VALIDATED_PITCH)
+}
+
 const start = async (page: Page, tool: string): Promise<{on: Point; air: Point; was: Reading}> => {
     await ready(page)
+    await look(page)
     await arm(page, tool)
     const {on, air} = await spots(page)
     return {on, air, was: await read(page)}
@@ -218,7 +245,9 @@ test('rotate turns the selection 90° once per drag, however far the hand goes',
 
     const answers: number[] = []
     for (const dx of [60, 120, 240]) {
+        // A reload is a reset, so the pinned view goes with it — see `look`.
         await ready(page)
+        await look(page)
         await arm(page, 'move')
         await page.mouse.dblclick(on.x, on.y)
         await arm(page, 'rotate')

@@ -474,12 +474,28 @@ const blockedSaid = (blocked: Blocked, name: string | undefined): string => {
     return 'Nothing to change here'
 }
 
+/**
+ * How wide one voxel lands in the export, and whether it lands there evenly — `render/perfect.ts`.
+ *
+ * It is derived in `Stage.tsx` rather than here, for the reason every other number in this file is:
+ * nothing in the overlays owns arithmetic about the document.
+ */
+export interface VoxelSize {
+    /** `cell / zoom` — pixels per voxel, the useful way round. */
+    readonly pixels: number
+    /** Whether every edge of a voxel spans a whole number of them. */
+    readonly even: boolean
+    /** The sprite height it was measured against, which is the other half of the question. */
+    readonly cell: number
+}
+
 export const HintBar = ({
     tool,
     hover,
     blocking,
     height,
     losing,
+    voxel,
     onCapture
 }: {
     tool: string
@@ -491,6 +507,8 @@ export const HintBar = ({
     height: number
     /** How many voxels the drag in progress would destroy by landing. Zero when there is no drag. */
     losing: number
+    /** What a pixel means at this zoom, at the size the export is set to. */
+    voxel: VoxelSize
     onCapture: () => void
 }) => (
     <div className='hints'>
@@ -571,7 +589,13 @@ export const HintBar = ({
                 </Text>
             }
         </span>
-        <span className='hint'>
+        {/*
+         * The camera legend. Marked as one because it is the part of this bar that can be spared:
+         * three bindings an artist learns on the first day and then never reads again, sitting in a
+         * bar that is `nowrap` inside an `overflow: hidden` stage. Under a narrow window the
+         * stylesheet drops them so the live readings — the cell, and what a pixel means — survive.
+         */}
+        <span className='hint hint-gesture'>
             <Text
                 type='supporting'
                 color='disabled'
@@ -580,11 +604,11 @@ export const HintBar = ({
             </Text>
             <Text type='supporting'>Rotate</Text>
         </span>
-        <span className='hint'>
+        <span className='hint hint-gesture'>
             <Kbd keys='shift' />
             <Text type='supporting'>Pan</Text>
         </span>
-        <span className='hint'>
+        <span className='hint hint-gesture'>
             <Text
                 type='supporting'
                 color='disabled'
@@ -592,6 +616,49 @@ export const HintBar = ({
                 Wheel
             </Text>
             <Text type='supporting'>Zoom</Text>
+        </span>
+        {/*
+         * What a pixel means, next to the gesture that changes it.
+         *
+         * It was a row in the brush column, which is the one column that has nothing to do with the
+         * camera — and this number is `cellH / zoom`, so it moves with every notch of the wheel two
+         * hints to the left.
+         *
+         * The sprite height is in the tooltip and not on the face of it, and that is a measured
+         * decision rather than a taste one: this bar is `nowrap` and does not shrink, and it was
+         * 598 px against a 670 px stage at a 1366 window. A `Voxel ≈2.78 px at 64` run costs 146 px
+         * and took the whole bar past the stage at every window under 1600. The number is the thing
+         * that moves; the size is set two dialogs away and changes once a project.
+         *
+         * It used to be `Math.round(cell / zoom)`, which said "2 px" about the camera every new 16³
+         * document opens on — cell 64 over zoom 31 is 2.06, and a row of voxels exports
+         * `3 2 2 2 2 2 2 2 3`. The one number whose job is to say what a pixel means was rounding
+         * the answer to the thing being checked for. It shows the ratio now.
+         *
+         * The `≈` is the whole of how an uneven voxel is marked, and nothing here is coloured — see
+         * `.hint-voxel` in `app.css`.
+         */}
+        <span
+            className='hint hint-voxel'
+            data-uneven={voxel.even ? undefined : true}
+            title={
+                voxel.even ?
+                    `One voxel is this many pixels on every edge, in a ${String(voxel.cell)} px sprite`
+                :   `One voxel does not land on whole pixels at this zoom, so a ${String(voxel.cell)} px sprite staircases unevenly. Turn Snap on, or change the sprite size.`
+            }
+        >
+            <Text
+                type='supporting'
+                color='disabled'
+            >
+                Voxel
+            </Text>
+            <Text
+                type='supporting'
+                hasTabularNumbers
+            >
+                {voxel.even ? String(Math.round(voxel.pixels)) : `≈${voxel.pixels.toFixed(2)}`} px
+            </Text>
         </span>
         <span className='hint-divider' />
         <button

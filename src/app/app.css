@@ -44,7 +44,7 @@ body,
 
 .app-header {
     display: grid;
-    grid-template-columns: 1fr auto 1fr;
+    grid-template-columns: 1fr auto;
     align-items: center;
     gap: 12px;
     height: 44px;
@@ -370,6 +370,21 @@ body,
     color: var(--color-icon-primary);
 }
 
+/*
+ * A shape box holding a letter instead of a glyph — symmetry's four and the plane's four.
+ *
+ * The icons in the other two rows are sized by their own SVG, so nothing here ever needed to say
+ * what text in a box looks like. `Face` is the longest string it has to hold and the column is
+ * 216 px, so four of these are about 43 px each: supporting size fits, one step up does not.
+ */
+.shape-lettered {
+    font-size: var(--font-size-supporting);
+    line-height: 1;
+    color: var(--color-text-secondary);
+}
+.shape-lettered[data-selected] {
+    color: var(--color-text-accent);
+}
 .shape[data-selected] {
     border-color: var(--color-accent);
     background: var(--color-accent-muted);
@@ -839,26 +854,102 @@ body,
  * A dialog, not a rail section. Two columns: the settings, which are sized by what they hold, and
  * the preview, which takes the rest. Layout only — every control inside is astryx's.
  */
+/*
+ * This dialog is allowed to be tall.
+ *
+ * Astryx caps every dialog at 75vh, which is right for a form and wrong for this one: the eight-map
+ * list alone is 295 px, and at 75vh it did not fit — so the list scrolled, an artist got a scrollbar
+ * on an eight-item list, and every clever thing done to that scrollbar was work that should have
+ * been this one line. Scoped by `:has` so no other dialog is affected.
+ */
+.astryx-dialog:has(.export-dialog) {
+    max-height: 92vh;
+}
+
+/*
+ * The two columns take the height the dialog has, and each one scrolls inside it.
+ *
+ * Astryx caps its dialog at 540 px and the wrapper under it is `overflow: hidden`, so anything
+ * taller is *clipped* rather than scrolled — measured at a 720 px window, the Export pack button
+ * sat at y=769 in a box that ended at 630, and the map list lost its last two rows the same way.
+ * A footer an artist cannot reach is not a footer.
+ *
+ * `min-height: 0` is the whole trick: a flex item defaults to `auto`, which refuses to shrink below
+ * its content, so the scroll has nowhere to happen and the overflow goes to the clip instead.
+ */
 .export-dialog {
     display: grid;
     grid-template-columns: 260px minmax(0, 1fr);
+    /*
+     * One row, explicitly, and it fills. Left at `auto` the row is sized to whichever column is
+     * taller, so `align-items: stretch` stretched both to the *content* rather than to the dialog —
+     * and the slack the map list was supposed to grow into was 24 px at every window size.
+     */
+    grid-template-rows: minmax(0, 1fr);
     gap: 20px;
-    align-items: start;
+    align-items: stretch;
+    flex: 1 1 auto;
+    min-height: 0;
 }
 
 .export-settings {
     display: flex;
     flex-direction: column;
     gap: 12px;
+    min-height: 0;
 }
 
-/* One row per map: the name picks what the preview shows, the tick decides what ships. */
+/*
+ * The note that says this sprite size does not land on the pixel grid.
+ *
+ * It sits above the size control it is about and wraps rather than truncating, because the whole
+ * point is that the sentence is read once. Bordered, not filled: it is a fact about the export,
+ * not an error, and an artist who wants a 64 px isometric sheet is allowed to have one.
+ */
+.export-uneven {
+    align-items: center;
+    gap: 8px;
+    padding: 8px;
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+}
+
+.export-uneven > .symmetry-axis {
+    flex: none;
+    padding: 0 6px;
+    white-space: nowrap;
+}
+
+/*
+ * One row per map: the name picks what the preview shows, the tick decides what ships.
+ *
+ * It is the one thing in the settings column that can be shortened, so it takes the slack and
+ * scrolls inside its own border. The alternative — scrolling the whole column — cut the box's
+ * bottom edge off and sliced the last row through the middle, which reads as a rendering fault
+ * rather than as a list with more in it. `overflow` was already `hidden` here to keep the first and
+ * last row's fill inside the corner radius; `auto` keeps that and adds the scroll.
+ */
+/*
+ * One row per map: the name picks what the preview shows, the tick decides what ships.
+ *
+ * It is the one thing in the settings column that can be shortened, so it takes the slack and
+ * scrolls inside its own border. Scrolling the whole column instead cut the box's bottom edge off
+ * and sliced the last row through the middle, which reads as a rendering fault rather than as a
+ * list with more in it. `overflow` was already `hidden` here to keep the first and last row's fill
+ * inside the corner radius; `auto` keeps that and adds the scroll.
+ *
+ * Its ceiling is set in whole rows, from JavaScript — see `ExportDialog.tsx`'s `wholeRows`. There
+ * is no CSS for "as many whole rows as fit", and a list that stops seven and a half rows in is a
+ * scrollbar for half an item.
+ */
 .export-maps {
     display: flex;
     flex-direction: column;
     border: 1px solid var(--color-border);
     border-radius: 6px;
-    overflow: hidden;
+    overflow-y: auto;
+    flex: 1 1 auto;
+    min-height: 0;
 }
 
 .export-map {
@@ -902,6 +993,7 @@ body,
     display: flex;
     flex-direction: column;
     gap: 8px;
+    min-height: 0;
 }
 
 /*
@@ -913,19 +1005,44 @@ body,
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 4px;
     padding: 6px;
+    /* The canvas is sized to a whole multiple of its own pixels, so it rarely fills its column. */
+    justify-items: center;
+    align-items: center;
+    /*
+     * It scrolls rather than shrinking, and that is the whole point. The scale is chosen from the
+     * column *width* — see `previewScale` — so a cell taller than it is wide, 32 × 64 say, comes
+     * out four times up and overflows downwards. Shrinking it to fit would put the fractional scale
+     * back, in the one panel that is not allowed to resample. A scrollbar shows every cell at its
+     * true size; a fitted grid shows all of them slightly wrong.
+     */
+    min-height: 0;
+    overflow: auto;
 }
 
+/*
+ * No `width: 100%` and no `aspect-ratio`. Both were lies, in different directions.
+ *
+ * `aspect-ratio: 1` forced every preview square, so an oblong cell — 32 × 64, the reason `cellW`
+ * and `cellH` were split apart — would have been squashed back into a square on screen while the
+ * file on disk was correct.
+ *
+ * `width: 100%` was the worse one, and it was wrong even for square cells. Measured in Chromium: a
+ * 64 px sprite came out 129.856 px wide, a scale of 2.029. Under `image-rendering: pixelated` that
+ * is most source pixels at two screen pixels and every thirty-fourth at three — a stagger along
+ * every edge, worst at the corners. The whole claim of this dialog is that the preview *is* the
+ * export; `ExportDialog.tsx`'s `previewScale` sizes it in whole pixels instead.
+ */
 .export-sprite {
-    width: 100%;
-    height: auto;
-    aspect-ratio: 1;
+    max-width: 100%;
 }
 
+/* Pinned: it is the row with the buttons on it, so it is the last thing allowed to be clipped. */
 .export-foot {
     display: flex;
     align-items: center;
     gap: 8px;
     margin-top: 16px;
+    flex: none;
 }
 
 /* ---- animation ---- */
@@ -1307,6 +1424,48 @@ body,
 
 .hint-cell[data-blocked] {
     opacity: 0.5;
+}
+/*
+ * What a pixel means, at the far end of the bar. Tabular, because it is read while the wheel turns
+ * and a proportional `2.06 → 2.13` shifts the whole hint sideways as the digits change.
+ *
+ * The width is the widest string it can hold — `≈12.34 px` — rather than the widest it might like.
+ * The bar is `nowrap` and does not shrink, and it is 26 px inside a 1366 window's stage with this
+ * hint on it. Every pixel spent here is a pixel the bar has not got.
+ */
+.hint-voxel {
+    min-width: 92px;
+    justify-content: flex-end;
+    font-variant-numeric: tabular-nums;
+}
+/*
+ * An uneven voxel gets no colour, and that is the second attempt. The first painted it
+ * `--color-warning`, which is wrong for a reason the arithmetic settles: most three-quarter angles
+ * have no whole-pixel zoom at any zoom, so an artist working at one would have had an amber number
+ * lit for the whole session, moving with every notch of the wheel and meaning nothing they could
+ * act on. That is the warning-nobody-reads case this file already names twice.
+ *
+ * The `≈` is the mark. It is in the number itself, it cannot be tuned out, and it says the one
+ * thing that is true: this is a ratio, not a count. `data-uneven` stays on the element because it
+ * is what the tests read and what a future stylesheet would hook.
+ */
+/*
+ * The camera legend goes when the bar cannot fit, and this is measured rather than picked.
+ *
+ * `.hints` is `nowrap` and does not shrink, `.stage` is `overflow: hidden`, and the three fixed
+ * columns take 696 px — so the stage is the window less 696. The bar is 704 px with every hint on
+ * it, which needs a 1400 px window, and it was 598 px before the voxel size joined it, which needed
+ * 1294. Below the threshold the legend's three hints go and the bar drops to 475 px, measured, which
+ * fits any window down to 1180.
+ *
+ * The legend rather than a reading, because a binding is learnt once and a reading is looked at:
+ * the cell under the cursor and what a pixel means both change while the artist works, and neither
+ * has anywhere else to be seen.
+ */
+@media (max-width: 1420px) {
+    .hint-gesture {
+        display: none;
+    }
 }
 
 /*

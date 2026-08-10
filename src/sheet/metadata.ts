@@ -32,10 +32,19 @@ export interface SpriteEntry {
 
 export interface SheetMetadata {
     readonly format: 'gofer-pixel/sheet'
-    readonly version: 1
+    /**
+     * 2 since the sprite cell stopped being square.
+     *
+     * Version 1 wrote one `cell` number. It is `cellW` and `cellH` now, and the bump is here rather
+     * than a second optional field because an importer that reads `cell` and gets `undefined` for a
+     * 32 × 64 sheet would pack it wrong rather than fail — which is the failure mode a version
+     * number exists to prevent.
+     */
+    readonly version: 2
     readonly width: number
     readonly height: number
-    readonly cell: number
+    readonly cellW: number
+    readonly cellH: number
     readonly padding: number
     readonly columns: number
     readonly rows: number
@@ -51,12 +60,12 @@ const artworkBounds = (
 ): {x: number; y: number; width: number; height: number} | undefined => {
     const colour = sheet.maps.color
     if (!colour) return undefined
-    let left = sheet.cell
-    let top = sheet.cell
+    let left = sheet.cellW
+    let top = sheet.cellH
     let right = -1
     let bottom = -1
-    for (let row = 0; row < sheet.cell; row += 1) {
-        for (let column = 0; column < sheet.cell; column += 1) {
+    for (let row = 0; row < sheet.cellH; row += 1) {
+        for (let column = 0; column < sheet.cellW; column += 1) {
             if (colour[((oy + row) * sheet.width + ox + column) * 4 + 3] !== 255) continue
             left = Math.min(left, column)
             top = Math.min(top, row)
@@ -76,10 +85,11 @@ export const sheetMetadata = (
 ): SheetMetadata => {
     return {
         format: 'gofer-pixel/sheet',
-        version: 1,
+        version: 2,
         width: sheet.width,
         height: sheet.height,
-        cell: sheet.cell,
+        cellW: sheet.cellW,
+        cellH: sheet.cellH,
         padding: sheet.padding,
         columns: sheet.columns,
         rows: sheet.rows,
@@ -94,7 +104,7 @@ export const sheetMetadata = (
              * computed rather than assumed to be the middle of the cell, because a pan moves the
              * model inside the frame and the engine has to know where the feet went.
              */
-            const {right, up, center, scale} = basisFor(entry.camera, volume, sheet.cell)
+            const {right, up, center, scale} = basisFor(entry.camera, volume, sheet.cellH)
             const dx = volume.sx / 2 - center[0]
             const dy = volume.sy / 2 - center[1]
             const dz = 0 - center[2]
@@ -104,10 +114,10 @@ export const sheetMetadata = (
                 name: entry.name,
                 x,
                 y,
-                width: sheet.cell,
-                height: sheet.cell,
-                pivotX: Math.round(along / scale + sheet.cell * 0.5 - 0.5),
-                pivotY: Math.round(sheet.cell * 0.5 - 0.5 - over / scale),
+                width: sheet.cellW,
+                height: sheet.cellH,
+                pivotX: Math.round(along / scale + sheet.cellW * 0.5 - 0.5),
+                pivotY: Math.round(sheet.cellH * 0.5 - 0.5 - over / scale),
                 bounds: withBounds ? artworkBounds(sheet, x, y) : undefined
             }
         })

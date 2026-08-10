@@ -7,17 +7,19 @@ import {SegmentedControl, SegmentedControlItem} from '@astryxdesign/core/Segment
 import {Selector} from '@astryxdesign/core/Selector'
 import {Switch} from '@astryxdesign/core/Switch'
 import {Text} from '@astryxdesign/core/Text'
-import {useMemo, useState, type Dispatch} from 'react'
+import {useEffect, useMemo, useRef, useState, type Dispatch} from 'react'
 import type {Files} from '../doc/files'
 import {reseeded, seeded, shipped, toggled} from '../sheet/choice'
 import {emptyMaps} from '../sheet/empty'
 import {allPresets} from '../sheet/presets'
 import {cutCell, renderSheet, SHEET_MAPS, type SheetMap} from '../sheet/sheet'
+import {evenCell, unevenCount} from '../render/perfect'
 import type {Volume} from '../render/volume'
 import {writeSheetMap} from './download'
 import {writeExportPack, writeLoose, writeSheetMetadata, writeSprites} from './export'
 import {GearIcon} from './icons'
 import {PixelCanvas, type Pixels} from './PixelCanvas'
+import {previewScale, wholeRows} from './preview'
 import type {AppAction, AppState} from './state'
 
 /**
@@ -94,7 +96,7 @@ export const ExportDialog = ({
     onClose: () => void
 }) => {
     const {cameras} = state
-    const {cell, preset, padding, bounds} = state.output
+    const {cell, cellH, preset, padding, bounds} = state.output
 
     /*
      * The sheet, rebaked whenever anything it is made of moves.
@@ -111,15 +113,107 @@ export const ExportDialog = ({
      * *is* that key — with the compiler checking it instead of a convention.
      */
     const sheet = useMemo(
-        () => renderSheet(volume, cameras, cell, SHEET_MAPS, padding),
-        [volume, cameras, cell, padding]
+        () => renderSheet(volume, cameras, {cellW: cell, cellH}, SHEET_MAPS, padding),
+        [volume, cameras, cell, cellH, padding]
     )
 
     /** Which of the eight would be written blank, asked of the sheet itself — see `sheet/empty.ts`. */
     const empty = useMemo(() => emptyMaps(sheet), [sheet])
 
+    /*
+     * How much of this sheet would not land on the pixel grid, and whether another sprite size
+     * would fix all of it — see `render/perfect.ts`. Asked of the cameras rather than the sheet,
+     * because it is a question about the projection and the sheet is downstream of the answer.
+     */
+    const angles = useMemo(() => cameras.map(entry => entry.camera), [cameras])
+    // The height, not the width: the scale comes off `cellH` alone, so a wider cell can neither
+    // break the grid nor mend it.
+    const uneven = useMemo(() => unevenCount(angles, volume, cellH), [angles, volume, cellH])
+    const evenAt = useMemo(
+        () => (uneven === 0 ? undefined : evenCell(angles, volume, cellH, CELL_SIZES)),
+        [uneven, angles, volume, cellH]
+    )
+
     /** Which map the grid is showing. Not a tick: looking at a map and shipping it are separate. */
     const [shown, setShown] = useState<SheetMap>('color')
+
+    /*
+     * How wide the preview grid actually is, so a sprite can be drawn at a whole multiple of its
+     * own pixels — see `previewScale`. Measured rather than assumed: the column is `1fr` of a
+     * dialog whose padding belongs to astryx, and hard-coding a number here would be a second
+     * opinion about the layout that goes stale the first time the dialog is resized.
+     *
+     * `0` until the observer has spoken, which is also what a unit test sees — happy-dom has no
+     * `ResizeObserver`, and the same guard is in `Viewport.tsx` for the same reason. Scale 1 is the
+     * honest fallback: never a fractional one.
+     */
+    const gridRef = useRef<HTMLDivElement>(null)
+    const [room, setRoom] = useState(0)
+    useEffect(() => {
+        const host = gridRef.current
+        if (!host || typeof ResizeObserver === 'undefined') return
+        const observer = new ResizeObserver(([entry]) => {
+            const box = entry?.contentRect
+            if (box) setRoom(box.width)
+        })
+        observer.observe(host)
+        return () => {
+            observer.disconnect()
+        }
+    }, [])
+    const scale = room === 0 ? 1 : previewScale(room, cell)
+
+    /*
+     * The map list, cut to a whole number of rows — see `wholeRows`. Same measure-then-snap as the
+     * preview above it, and for the same reason: a row sliced through the middle is a rendering
+     * fault as far as an artist is concerned, not an invitation to scroll.
+     *
+     * Measured **uncapped**, and that is the whole difficulty. Astryx's dialog is `max-height`, not
+     * `height`, so it is sized by its content: capping the list shrinks the dialog, which shrinks
+     * the room the list was measured against, which lowers the cap again. Measured, every version
+     * that reads the capped layout walks down to a single row — the list itself, its column minus
+     * its siblings, and an absolutely-positioned slot all did.
+     *
+     * So the cap comes off before the tape measure goes on. Reading `clientHeight` forces the
+     * layout, so what comes back is the room the list has when it is free to ask for all of it —
+     * a number the cap cannot move. It is redone on a window resize and nowhere else: a
+     * `ResizeObserver` would see the cap it had just applied and fire again forever.
+     *
+     * The list stays in normal flow, which is not incidental. An absolutely-positioned list was
+     * tried and is worse in a way that looks like a fix: out-of-flow content adds nothing to the
+     * dialog's height, so the dialog never grew for it and the room stayed at 24 px at every window
+     * size. The measurement only means anything while the list is something the dialog can see.
+     */
+    const mapsRef = useRef<HTMLDivElement>(null)
+    const [listTall, setListTall] = useState<number>()
+    useEffect(() => {
+        const measure = (): void => {
+            const list = mapsRef.current
+            if (!list) return
+            list.style.maxHeight = ''
+            // Where each row ends, cumulative. The rules between rows are part of a row's own
+            // height, so the running total is exactly the set of places a cut would not show.
+            let run = 0
+            const edges = [...list.children].map(kid => {
+                run += kid instanceof HTMLElement ? kid.offsetHeight : 0
+                return run
+            })
+            // No layout at all — happy-dom, and the first paint. Capping on a zero would hide it.
+            if (run <= 0) return
+            /*
+             * The rows are content and `max-height` is border-box here, so the box's own border has
+             * to go back on. Without it the cap is two pixels short of the row it was aimed at and
+             * the last one is clipped by exactly that — which is the defect, at a smaller size.
+             */
+            const chrome = list.offsetHeight - list.clientHeight
+            setListTall(wholeRows(list.clientHeight, edges) + chrome)
+        }
+        measure()
+        globalThis.addEventListener('resize', measure)
+        return () => {
+            globalThis.removeEventListener('resize', measure)
+        }
+    }, [])
 
     /*
      * The ticks, seeded from the selected preset — see `sheet/choice.ts`.
@@ -254,24 +348,109 @@ export const ExportDialog = ({
                         />
                     </div>
 
-                    <span title='Edge of one sprite in the sheet, in pixels'>
-                        <SegmentedControl
-                            label='Sprite size'
-                            size='sm'
-                            value={String(cell)}
-                            onChange={value => {
-                                dispatch({type: 'output', output: {cell: Number(value)}})
-                            }}
+                    {/*
+                     * What the sprite size costs, said before the download rather than after.
+                     *
+                     * A sheet whose cell does not divide by a camera's zoom exports voxels of two
+                     * different widths — `3 2 2 2 2 2 2 2 3` for the camera a 16³ document opens
+                     * on — and every part of this dialog was happy to write it silently. It is a
+                     * note and not a block: `FEATURESET.md` wants pixel-perfectness to be the
+                     * engine's constraint, but an artist who wants a 64 px sheet of an isometric
+                     * ring is not wrong, and no sprite size exists that would grant it.
+                     */}
+                    {uneven > 0 && (
+                        <div
+                            className='field-row export-uneven'
+                            role='status'
                         >
-                            {CELL_SIZES.map(size => (
-                                <SegmentedControlItem
-                                    key={size}
-                                    value={String(size)}
-                                    label={`${String(size)} px`}
-                                />
-                            ))}
-                        </SegmentedControl>
-                    </span>
+                            <Text
+                                type='supporting'
+                                color='secondary'
+                            >
+                                {uneven === cameras.length ?
+                                    `A voxel is not a whole number of pixels at ${String(cellH)} px tall, so the sprites staircase unevenly.`
+                                :   `${String(uneven)} of ${String(cameras.length)} cameras staircase unevenly at ${String(cellH)} px tall.`
+                                }
+                            </Text>
+                            {evenAt !== undefined && (
+                                <button
+                                    type='button'
+                                    className='symmetry-axis'
+                                    title={`Every camera lands on whole pixels at ${String(evenAt)} px tall`}
+                                    onClick={() => {
+                                        dispatch({type: 'output', output: {cellH: evenAt}})
+                                    }}
+                                >
+                                    {`Use ${String(evenAt)} px tall`}
+                                </button>
+                            )}
+                        </div>
+                    )}
+
+                    {/*
+                     * Two controls, because a sprite cell is not required to be square. A character
+                     * taller than it is wide used to be packed into a square and given air on both
+                     * sides for it, and that air is texture an engine pays for in every atlas.
+                     *
+                     * They are not symmetrical questions and the tooltips say so. The height is
+                     * what sets the scale — `basisFor` derives voxels-per-pixel from it alone — so
+                     * it is the one that decides how big the model is and whether it lands on the
+                     * grid. The width only says how far the frame reaches either side of the pivot.
+                     */}
+                    {(
+                        [
+                            {
+                                label: 'Height',
+                                value: cellH,
+                                name: 'Sprite height',
+                                hint: 'How tall one sprite is. This is what sets the scale of the model.',
+                                set: (size: number): AppAction => ({
+                                    type: 'output',
+                                    output: {cellH: size}
+                                })
+                            },
+                            {
+                                label: 'Width',
+                                value: cell,
+                                name: 'Sprite width',
+                                hint: 'How wide one sprite is. Wider is more room either side, not a bigger model.',
+                                set: (size: number): AppAction => ({
+                                    type: 'output',
+                                    output: {cell: size}
+                                })
+                            }
+                        ] as const
+                    ).map(axis => (
+                        <div
+                            key={axis.label}
+                            className='field-row'
+                            title={axis.hint}
+                        >
+                            <Text
+                                type='supporting'
+                                color='disabled'
+                            >
+                                {axis.label}
+                            </Text>
+                            <span className='spacer' />
+                            <SegmentedControl
+                                label={axis.name}
+                                size='sm'
+                                value={String(axis.value)}
+                                onChange={value => {
+                                    dispatch(axis.set(Number(value)))
+                                }}
+                            >
+                                {CELL_SIZES.map(size => (
+                                    <SegmentedControlItem
+                                        key={size}
+                                        value={String(size)}
+                                        label={`${String(size)} px`}
+                                    />
+                                ))}
+                            </SegmentedControl>
+                        </div>
+                    ))}
 
                     {/*
                      * Padding and collision bounds — `FEATURESET.md` §16 and §37. The two together
@@ -330,6 +509,8 @@ export const ExportDialog = ({
                         className='export-maps'
                         role='group'
                         aria-label='Maps to write'
+                        ref={mapsRef}
+                        style={listTall === undefined ? undefined : {maxHeight: listTall}}
                     >
                         {SHEET_MAPS.map(row)}
                     </div>
@@ -341,15 +522,19 @@ export const ExportDialog = ({
                      * on a flat panel there is no telling an empty pixel from one the model happens
                      * to have painted panel-coloured.
                      */}
-                    <div className='checker export-grid'>
+                    <div
+                        className='checker export-grid'
+                        ref={gridRef}
+                    >
                         {cameras.map((entry, index) => (
                             <PixelCanvas
                                 key={entry.id}
                                 width={cell}
-                                height={cell}
+                                height={cellH}
                                 data={cells[index] ?? (() => new Uint8Array(0))}
                                 title={entry.name}
                                 className='export-sprite'
+                                style={{width: cell * scale, height: cellH * scale}}
                             />
                         ))}
                     </div>

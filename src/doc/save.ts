@@ -57,10 +57,15 @@ export interface SavedDocument {
  * at their defaults, because none of them can be inferred and a guess would be a lie about their
  * document. A v1 or v2 file has no `origin` and that is not a gap: it means nobody recorded one,
  * which is exactly what `undefined` says.
+ *
+ * `4` is the one exception to "older payloads load at their defaults", and it is worth the words:
+ * a v1–v3 file has no `cellH` because a sprite cell could only be square, so the height is not
+ * missing — it is `cell`, stated once. Defaulting it to 64 would resize every old document's
+ * export. See `readOutput`.
  */
-export type SaveVersion = 1 | 2 | 3
+export type SaveVersion = 1 | 2 | 3 | 4
 
-export const SAVE_VERSION = 3
+export const SAVE_VERSION = 4
 
 /**
  * The export settings, which belong to the model rather than to the session.
@@ -71,7 +76,15 @@ export const SAVE_VERSION = 3
  * half-hour you were having, and restoring them would be a document that opens mid-gesture.
  */
 export interface SavedOutput {
+    /**
+     * One sprite's width and height in pixels. Equal for a square sheet, which most are.
+     *
+     * `cellH` is the one that decides scale — `basisFor` derives voxels-per-pixel from the height
+     * alone — so it is also the one `render/perfect.ts` asks about. `cell` was a single number
+     * until a character taller than it is wide had to be packed into a square.
+     */
     readonly cell: number
+    readonly cellH: number
     readonly padding: number
     readonly bounds: boolean
     readonly preset: string
@@ -169,6 +182,7 @@ export interface LoadedDocument extends Document {
  */
 export const DEFAULT_OUTPUT: SavedOutput = {
     cell: 64,
+    cellH: 64,
     padding: 0,
     bounds: false,
     preset: '',
@@ -178,12 +192,15 @@ export const DEFAULT_OUTPUT: SavedOutput = {
 const readOutput = (value: unknown): SavedOutput | undefined => {
     if (value === undefined) return DEFAULT_OUTPUT
     if (typeof value !== 'object' || value === null) return undefined
-    const {cell, padding, bounds, preset, presets} = value as Record<string, unknown>
+    const {cell, cellH, padding, bounds, preset, presets} = value as Record<string, unknown>
     if (typeof cell !== 'number' || !(cell > 0)) return undefined
     if (typeof padding !== 'number' || !(padding >= 0)) return undefined
     if (typeof preset !== 'string' || !Array.isArray(presets)) return undefined
     return {
         cell,
+        // A file written before cells could be oblong said one number and meant a square. That is
+        // not a gap to guess at: it is the whole of what the artist chose, so it fills both.
+        cellH: typeof cellH === 'number' && cellH > 0 ? cellH : cell,
         padding,
         bounds: bounds === true,
         preset,
@@ -248,7 +265,7 @@ export const loadDocument = (text: string): LoadedDocument | undefined => {
     const saved: Record<string, unknown> = {...parsed}
     if (saved['format'] !== 'gofer-pixel/document') return undefined
     const version = saved['version']
-    if (version !== 1 && version !== 2 && version !== 3) return undefined
+    if (version !== 1 && version !== 2 && version !== 3 && version !== 4) return undefined
 
     const size = saved['size']
     if (!Array.isArray(size) || size.length !== 3) return undefined
