@@ -13,8 +13,7 @@ export interface Handle {
     state: {
         cameras: unknown[]
         selected: string | undefined
-        /** The last bake, stamped with what it came from — see `src/sheet/baked.ts`. */
-        baked: {sheet: {width: number; height: number}} | undefined
+        output: {cell: number; padding: number; preset: string}
         volume: {data: Uint8Array; sx: number; sy: number; sz: number}
         history: {past: unknown[]}
         orbit: {camera: {zoom: number; yaw: number; pitch: number}; gesture: unknown}

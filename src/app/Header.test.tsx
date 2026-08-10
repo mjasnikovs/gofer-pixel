@@ -32,6 +32,7 @@ const open = (restores: readonly {key: string; at: number; name: string}[] = [])
             onSave={() => undefined}
             onSaveAs={() => undefined}
             onGenerate={() => undefined}
+            onExport={() => undefined}
         />
     ))
 

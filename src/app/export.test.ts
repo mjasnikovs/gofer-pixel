@@ -1,19 +1,23 @@
 import {expect, test} from 'bun:test'
 import {memoryFiles} from '../doc/files'
+import {renderSheet, SHEET_MAPS, type Sheet} from '../sheet/sheet'
 import {readVox} from '../vox/vox-file'
 import {initialState, reduce, type AppState} from './state'
-import {writeExport, writeSheetMetadata, writeSprites} from './export'
+import {writeExportPack, writeLoose, writeSheetMetadata, writeSprites} from './export'
 
 /**
- * The three things an export writes, and the guard in front of all three.
+ * The four things an export writes, over the sheet the dialog is showing.
  *
- * That guard is the interesting part — a sheet can be stale, and writing a stale one is silent.
- * It used to be watched through three patched globals, which could see that an anchor was clicked
+ * They used to be watched through three patched globals, which could see that an anchor was clicked
  * and nothing about what was on it; and because the patches were global, an export another test
  * file had started could land inside this one's window under the same filenames. Every claim here
- * had to be softened to a *set* of names to survive that.
+ * had to be softened to a *set* of names to survive that. Each test holds its own disk now.
  *
- * Each test holds its own disk now, so the race is gone and a list can be a list.
+ * There is no longer a stale-sheet case to test, and that is the point of the change these tests
+ * moved through. The sheet used to live in the state and outlive the click that made it, so every
+ * writer opened with a guard and `sheet/baked.ts` existed to answer "is that still the sheet for
+ * this document?". The dialog rebakes on every input it can see, so the sheet it hands over cannot
+ * be a sheet for something else.
  */
 
 const volume = readVox(
@@ -23,61 +27,79 @@ const volume = readVox(
 /** A disk of this test's own, and every filename that landed on it. */
 const disk = () => {
     const backing = new Map<string, string | Uint8Array>()
-    return {files: memoryFiles(backing), names: (): string[] => [...backing.keys()]}
+    return {
+        files: memoryFiles(backing),
+        names: (): string[] => [...backing.keys()],
+        bytes: (name: string): Uint8Array => {
+            const held = backing.get(name)
+            if (!(held instanceof Uint8Array)) throw new Error(`${name} is not bytes`)
+            return held
+        }
+    }
 }
 
-/** The document, baked, at the smallest sprite the panel offers — eight PNGs, not eight seconds. */
-const baked = (): AppState => {
-    const small = reduce(initialState(volume, 'car.vox'), {
-        type: 'output',
-        output: {cell: 32}
-    })
-    return reduce(small, {type: 'bake'})
-}
-
-test('nothing is written until there is a sheet to cut it from', async () => {
-    const out = disk()
-    const fresh = initialState(volume, 'car.vox')
-
-    await writeExport(out.files, fresh)
-    await writeSprites(out.files, fresh)
-    await writeSheetMetadata(out.files, fresh)
-
-    expect(out.names()).toEqual([])
+/** The document, and the sheet the dialog would bake from it — 32 px, so eight PNGs cost no time. */
+const state: AppState = reduce(initialState(volume, 'Knight.gpix'), {
+    type: 'output',
+    output: {cell: 32}
 })
-
-test('a stale sheet is no sheet at all, and writes nothing', async () => {
-    const out = disk()
-    // Adding a camera changes what the bake would have to have come from — see `sheet/baked.ts`.
-    const moved = reduce(baked(), {type: 'capture'})
-
-    await writeSprites(out.files, moved)
-    await writeSheetMetadata(out.files, moved)
-
-    expect(out.names()).toEqual([])
-})
+const sheet: Sheet = renderSheet(volume, state.cameras, 32, SHEET_MAPS, 0)
 
 test('one PNG per camera, plus the JSON that says where each of them landed', async () => {
     const out = disk()
-    const state = baked()
 
-    await writeSprites(out.files, state)
+    await writeSprites(out.files, state, sheet)
     expect(out.names()).toHaveLength(state.cameras.length)
     expect(out.names().every(name => name.endsWith('.png'))).toBe(true)
 
-    await writeSheetMetadata(out.files, state)
+    await writeSheetMetadata(out.files, state, sheet)
     expect(out.names().at(-1)).toBe('sprites.json')
 })
 
-test('the sheet is written as the preset asks, and no other map', async () => {
+test('the loose PNGs are the maps that were asked for, and no others', async () => {
     const two = disk()
-    await writeExport(two.files, baked())
+    await writeLoose(two.files, sheet, ['color', 'normal'])
     expect(two.names().toSorted()).toEqual(['sprites-normal.png', 'sprites.png'])
 
-    const every = reduce(baked(), {type: 'output', output: {preset: 'Every map'}})
-    // The preset is part of `sheetKey`, so changing it stales the bake — bake again to compare.
     const all = disk()
-    await writeExport(all.files, reduce(every, {type: 'bake'}))
+    await writeLoose(all.files, sheet, SHEET_MAPS)
     expect(all.names()).toHaveLength(8)
     expect(all.names()).toContain('sprites-depth.png')
+})
+
+/*
+ * The pack is one file, named after the document, and it carries the JSON as well as the maps —
+ * `FEATURESET.md` §37's "one-click". Read back through the central directory, which is what an
+ * unarchiver reads; the encoder's own tests are `image/zip.test.ts`.
+ */
+test('the pack is one zip, named after the document, holding the maps and the JSON', async () => {
+    const out = disk()
+    await writeExportPack(out.files, state, sheet, ['color', 'normal'])
+    expect(out.names()).toEqual(['knight-gpix.zip'])
+
+    const archive = out.bytes('knight-gpix.zip')
+    const view = new DataView(archive.buffer, archive.byteOffset, archive.byteLength)
+    const end = archive.length - 22
+    const count = view.getUint16(end + 10, true)
+    let at = view.getUint32(end + 16, true)
+    const decoder = new TextDecoder()
+    const inside: string[] = []
+    for (let i = 0; i < count; i += 1) {
+        const length = view.getUint16(at + 28, true)
+        inside.push(decoder.decode(archive.subarray(at + 46, at + 46 + length)))
+        at += 46 + length
+    }
+    expect(inside).toEqual(['sprites.png', 'sprites-normal.png', 'sprites.json'])
+})
+
+/*
+ * Everything the artist ticked and nothing else. A pack of every map is nine entries, and the JSON
+ * is always the last of them because an engine that reads the JSON needs it whatever else is there.
+ */
+test('the pack carries exactly the maps it was given', async () => {
+    const out = disk()
+    await writeExportPack(out.files, state, sheet, SHEET_MAPS)
+    const archive = out.bytes('knight-gpix.zip')
+    const view = new DataView(archive.buffer, archive.byteOffset, archive.byteLength)
+    expect(view.getUint16(archive.length - 22 + 10, true)).toBe(9)
 })

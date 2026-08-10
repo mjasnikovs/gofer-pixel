@@ -68,7 +68,8 @@ export const Header = ({
     onOpen,
     onSave,
     onSaveAs,
-    onGenerate
+    onGenerate,
+    onExport
 }: {
     state: AppState
     dispatch: Dispatch<AppAction>
@@ -87,6 +88,7 @@ export const Header = ({
     onSave: () => void
     onSaveAs: () => void
     onGenerate: () => void
+    onExport: () => void
 }) => (
     <header className='app-header'>
         <div className='header-group'>
@@ -194,14 +196,20 @@ export const Header = ({
                 variant='ghost'
                 isDisabled
             />
+            {/*
+             * Opens the export dialog rather than writing straight to disk.
+             *
+             * It used to bake and download on the click, which is `FEATURESET.md` §38's literal one
+             * button — and the button wrote whatever the rail's preset happened to say, with no way
+             * to see it first. §16 asks to "preview the actual PNG before exporting", and eight
+             * maps of preview do not fit in a 384 px rail. One click to look, one to ship.
+             */}
             <Button
                 label='Export'
-                tooltip='Render every camera and write the sprite sheet'
+                tooltip='Preview every map and write the sprite sheet'
                 variant='primary'
                 size='sm'
-                onClick={() => {
-                    dispatch({type: 'bake'})
-                }}
+                onClick={onExport}
             />
             {/*
              * The file menu, and below it the snapshots — `FEATURESET.md` §32. Restoring is not

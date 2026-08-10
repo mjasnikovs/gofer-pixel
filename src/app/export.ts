@@ -1,41 +1,27 @@
 import type {Files} from '../doc/files'
 import {shownVolume} from '../doc/objects'
-import {sheetMetadata} from '../sheet/metadata'
-import {writeMetadata, writeSheet, writeSprite} from './download'
-import {presetMaps} from '../sheet/presets'
-import {currentSheet, type AppState} from './state'
+import {sheetMetadata, type SheetMetadata} from '../sheet/metadata'
+import type {Sheet, SheetMap} from '../sheet/sheet'
+import {writeMetadata, writePack, writeSheet, writeSprite} from './download'
+import type {AppState} from './state'
 
 /**
- * The three things an export writes, each as one call over the whole app state.
+ * The four things an export writes, each as one call over the state and the sheet on screen.
  *
  * They lived in `App.tsx` as click handlers, each opening with its own `if (!state.sheet) return`
  * and each reaching for a different combination of the state to answer "which files, from what".
- * That guard is the interesting part — a sheet can be stale, and writing a stale one is silent —
- * so it belongs somewhere it is written once rather than three times inside JSX.
  *
- * Nothing here re-renders anything. The files are cut out of the sheet the reducer baked, so what
- * lands in the downloads folder is byte-for-byte what the panel was previewing.
+ * The sheet comes **in** rather than being fetched out of the state, and that changed when export
+ * became a dialog. It used to be `currentSheet(state)`, which existed because a bake outlived the
+ * click that made it and could therefore go stale — twenty-four reducer cases and a key comparison
+ * to answer "is that still the sheet for this document?". The dialog rebakes on every change it can
+ * see, so the sheet it hands over is by construction the one it is showing. There is no staleness
+ * left to detect, and nothing here has to detect it.
  *
  * `Files` comes in rather than being reached for, and it is the same port Open, Save and the palette
  * loader use — see `doc/files.ts`. It used to be an anchor built three modules down, so an export
  * was the one thing the artist ships that no test could read the bytes of.
  */
-
-/** The sheet's maps, as the current preset asks for them — the Export button. */
-export const writeExport = async (files: Files, state: AppState): Promise<void> => {
-    const sheet = currentSheet(state)
-    if (!sheet) return
-    await writeSheet(files, sheet, presetMaps(state.output, state.output.preset))
-}
-
-/** One PNG per camera, cut out of the sheet — `FEATURESET.md` §17. */
-export const writeSprites = async (files: Files, state: AppState): Promise<void> => {
-    const sheet = currentSheet(state)
-    if (!sheet) return
-    await Promise.all(
-        state.cameras.map((entry, index) => writeSprite(files, sheet, index, entry.name))
-    )
-}
 
 /**
  * The JSON an engine reads next to the sheet — `FEATURESET.md` §37.
@@ -47,16 +33,45 @@ export const writeSprites = async (files: Files, state: AppState): Promise<void>
  * than about where this code lives. It is an opt-out from `doc/gesture.ts`'s derivation, not a
  * second spelling of it.
  */
-export const writeSheetMetadata = async (files: Files, state: AppState): Promise<void> => {
-    const sheet = currentSheet(state)
-    if (!sheet) return
-    await writeMetadata(
-        files,
-        sheetMetadata(
-            shownVolume(state.volume, state.objects),
-            state.cameras,
-            sheet,
-            state.output.bounds
-        )
+export const exportMetadata = (state: AppState, sheet: Sheet): SheetMetadata =>
+    sheetMetadata(
+        shownVolume(state.volume, state.objects),
+        state.cameras,
+        sheet,
+        state.output.bounds
     )
+
+/** Everything the artist ticked, in one `.zip` — the dialog's primary button. */
+export const writeExportPack = async (
+    files: Files,
+    state: AppState,
+    sheet: Sheet,
+    maps: readonly SheetMap[]
+): Promise<void> => {
+    await writePack(files, sheet, maps, exportMetadata(state, sheet), state.doc.name)
+}
+
+/** The same maps, loose in the downloads folder, for anyone who does not want an archive. */
+export const writeLoose = async (
+    files: Files,
+    sheet: Sheet,
+    maps: readonly SheetMap[]
+): Promise<void> => {
+    await writeSheet(files, sheet, maps)
+}
+
+/** One PNG per camera, cut out of the sheet — `FEATURESET.md` §17. */
+export const writeSprites = async (files: Files, state: AppState, sheet: Sheet): Promise<void> => {
+    await Promise.all(
+        state.cameras.map((entry, index) => writeSprite(files, sheet, index, entry.name))
+    )
+}
+
+/** The metadata JSON on its own, for a sheet the artist already has. */
+export const writeSheetMetadata = async (
+    files: Files,
+    state: AppState,
+    sheet: Sheet
+): Promise<void> => {
+    await writeMetadata(files, exportMetadata(state, sheet))
 }

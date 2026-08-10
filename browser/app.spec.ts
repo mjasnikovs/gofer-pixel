@@ -213,14 +213,14 @@ test('nothing overlaps, nothing is clipped, and nothing overflows the window', a
     expect(viewport.height).toBeGreaterThan(200)
 })
 
-test('one click bakes the sheet and the export grid carries its pixels', async ({page}) => {
+/*
+ * The export preview is real pixels in a real canvas, which is the one thing happy-dom cannot say
+ * anything about: `getContext` returns null there, so every unit test asserts against the buffer
+ * rather than against what was painted. This is the test that the buffer reached the screen.
+ */
+test('the export dialog draws the sheet’s own cells into real canvases', async ({page}) => {
     await ready(page)
-    await page.getByRole('button', {name: 'Export sprite sheet'}).click()
-
-    // The baked sheet is derived, never stored — see `sheet/baked.ts`. Read it the way the app does.
-    const sheet = await page.evaluate(() => window.goferPixel.state.baked?.sheet)
-    expect(sheet?.width).toBe(256)
-    expect(sheet?.height).toBe(128)
+    await page.getByRole('button', {name: 'Export', exact: true}).click()
 
     const sizes = await page
         .locator('canvas.export-sprite')
@@ -239,26 +239,28 @@ test('one click bakes the sheet and the export grid carries its pixels', async (
         return count
     })
     expect(drawn).toBeGreaterThan(200)
+
+    // Switching map switches the pixels, and does not switch the sheet: same size, same count.
+    await page.getByRole('button', {name: 'Preview the normal map'}).click()
+    expect(
+        await page
+            .locator('canvas.export-sprite')
+            .evaluateAll(nodes => nodes.map(node => node.getAttribute('data-pixels')))
+    ).toEqual(Array.from({length: 8}, () => '64x64'))
 })
 
-test('exporting writes both PNGs, not just the colour one', async ({page}) => {
+/*
+ * The pack is the button the artist actually presses, and a `Blob` download is the one part of
+ * `Files.write` that has no adapter under it — `memoryFiles` proves the bytes, and only a browser
+ * proves they leave.
+ */
+test('the export pack leaves the browser as one zip', async ({page}) => {
     await ready(page)
+    await page.getByRole('button', {name: 'Export', exact: true}).click()
 
-    /*
-     * One listener counting to two, not two `waitForEvent`s — both of those resolve on the *same*
-     * first event, so the pair reports the colour sheet twice and the test passes without the
-     * normal map ever being written. Subscribed before the click, so nothing can be missed.
-     */
-    const both = new Promise<string[]>(resolve => {
-        const names: string[] = []
-        page.on('download', download => {
-            names.push(download.suggestedFilename())
-            if (names.length === 2) resolve(names)
-        })
-    })
-
-    await page.getByRole('button', {name: 'Export sprite sheet'}).click()
-    expect((await both).sort()).toEqual(['sprites-normal.png', 'sprites.png'])
+    const landed = page.waitForEvent('download')
+    await page.getByRole('button', {name: 'Export pack'}).click()
+    expect((await landed).suggestedFilename()).toMatch(/\.zip$/)
 })
 
 /**

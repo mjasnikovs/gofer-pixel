@@ -16,7 +16,11 @@ const CRC_TABLE = (() => {
     return table
 })()
 
-const crc32 = (bytes: Uint8Array): number => {
+/**
+ * CRC-32/ISO-HDLC. Exported because a zip entry's checksum is the same function over the same
+ * polynomial — see `zip.ts`. Two copies of a lookup table is two chances to get one of them wrong.
+ */
+export const crc32 = (bytes: Uint8Array): number => {
     let c = 0xffffffff
     for (const byte of bytes) c = (CRC_TABLE[(c ^ byte) & 0xff] ?? 0) ^ (c >>> 8)
     return (c ^ 0xffffffff) >>> 0

@@ -41,8 +41,17 @@ export type Dialog =
     | {readonly kind: 'unsaved'; readonly next: Guarded}
     | {readonly kind: 'new'}
     | {readonly kind: 'generate'}
+    /**
+     * Export. The only one of the four that is not `Guarded`, and deliberately: it writes files
+     * *out* and never replaces the open document, so there is no unsaved work to ask about. Putting
+     * it in the same union is what stops it opening over one of the three that do.
+     */
+    | {readonly kind: 'export'}
 
 export const NO_DIALOG: Dialog = {kind: 'none'}
+
+/** Open the export dialog. No guard, no picker, nothing to come back and dispatch. */
+export const exporting = (): Step => ({dialog: {kind: 'export'}, opening: false})
 
 /**
  * A transition: the dialog to draw, and whether the caller still owes the disk a visit.

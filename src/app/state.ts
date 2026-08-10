@@ -77,9 +77,8 @@ import {
 import {createCamera, type Camera} from '../render/camera'
 import {MODE_COLOR} from '../render/raycast.glsl'
 import {voxelAt, type Volume} from '../render/volume'
-import {bakeSheet, sheetFor, type Baked, type SheetKey} from '../sheet/baked'
-import {dropPreset, presetMaps, presetNamed, savePreset} from '../sheet/presets'
-import type {Sheet, SheetMap} from '../sheet/sheet'
+import {dropPreset, presetNamed, savePreset} from '../sheet/presets'
+import type {SheetMap} from '../sheet/sheet'
 import {
     beginSelect,
     beginStroke,
@@ -95,7 +94,6 @@ import {
     previewVolume,
     SELECTS,
     slicedFor,
-    visible,
     TOOLS,
     WRITES,
     type Gesture,
@@ -121,8 +119,10 @@ import {apply as applyOrbit, type OrbitEvent, type ViewportPointer} from '../vie
  * - **What the pointer does to voxels** — `doc/gesture.ts`. Those functions take `Gesture`, which
  *   `AppState` extends, so they read eighteen fields rather than fifty and cannot touch a camera
  *   list or an export preset. The rule they keep is that the outline cannot disagree with the edit.
- * - **Whether the baked sheet is still good** — `sheet/baked.ts`. It used to be twenty-four
- *   hand-written `sheet: undefined` lines in the cases below; it is now one key, compared.
+ * - **What an export writes and what it looks like** — `app/ExportDialog.tsx` and the modules
+ *   under it. The sheet is baked inside the dialog, from what is on screen, and lives exactly as
+ *   long as the dialog does. It used to be held here behind a key of seven identities, because a
+ *   bake outlived the click that made it and twenty-four cases had to remember not to stale it.
  */
 
 /**
@@ -281,7 +281,7 @@ export interface AppState extends Gesture, Chrome, Views {
      *
      * One field rather than five, for the reason `Chrome` is one field rather than nine: the five
      * were flattened here, unpacked in `initialState`, rebuilt in `asDocument`, listed one by one
-     * in `DOCUMENT_FIELDS` and read again by `sheetKey` — the same concept written out five times,
+     * in `DOCUMENT_FIELDS` and read again by the bake — the same concept written out five times,
      * and served by four action types whose whole implementation was `{...state, x: action.x}`.
      *
      * It is the *format's* type and not a copy of it, so a field cannot be added to one and
@@ -291,19 +291,6 @@ export interface AppState extends Gesture, Chrome, Views {
     readonly output: SavedOutput
     /** Pixel art to build against, one image per plane — `FEATURESET.md` §33. */
     readonly references: readonly Reference[]
-    /**
-     * The last bake, with the identity of everything it came out of — see `sheet/baked.ts`.
-     *
-     * Never read directly. `currentSheet(state)` is the sheet, and it is `undefined` the moment
-     * anything the bake was made from has moved. No action in this file mentions it except `bake`.
-     */
-    readonly baked: Baked | undefined
-    /**
-     * Set by `bake`, cleared by `written`. Baking and writing the files are two different things —
-     * a sheet can exist because the last export made it — so "the user has just asked for files"
-     * has to be a fact in the state rather than something the click handler remembers.
-     */
-    readonly exporting: boolean
 
     /** What Copy took, as offsets from the corner of what was selected, plus that corner. */
     readonly clipboard: Clipboard | undefined
@@ -373,8 +360,6 @@ export type AppAction =
     | {type: 'saved'; name: string; at: number}
     | {type: 'slice'; on: boolean}
     | {type: 'slice-step'; delta: number}
-    | {type: 'bake'}
-    | {type: 'written'}
     | {type: 'tool'; tool: Tool}
     | {type: 'brush'; brush: Partial<Brush>}
     | {type: 'color'; color: number}
@@ -387,33 +372,6 @@ export type AppAction =
     /** Anything the artist sees but does not ship — see `Chrome`. One action for all nine. */
     | {type: 'chrome'; chrome: Partial<Chrome>}
     | {type: 'unaim'}
-
-/**
- * What the last bake would have had to be made from, as identities — see `sheet/baked.ts`.
- *
- * One list, in one place. It is the whole of what used to be twenty-four hand-written
- * `sheet: undefined` lines scattered through the reducer, and a new action cannot forget it.
- */
-const sheetKey = (state: AppState): SheetKey => ({
-    volume: state.volume,
-    objects: state.objects,
-    cameras: state.cameras,
-    cell: state.output.cell,
-    padding: state.output.padding,
-    maps: presetMaps(state.output, state.output.preset),
-    slice: state.slice,
-    plane: state.plane
-})
-
-/**
- * The baked sheet, if it is still the sheet for this document.
- *
- * `undefined` before the first export, and `undefined` again the moment anything the bake came out
- * of has moved. Everything that reads a sheet — the export panel, the sprite and metadata writers,
- * the effect that puts the files on disk — asks through here.
- */
-export const currentSheet = (state: AppState): Sheet | undefined =>
-    sheetFor(state.baked, sheetKey(state))
 
 /**
  * A document opened from somewhere other than a `.vox` file — a `.gpix` off the disk or a recovered
@@ -468,8 +426,6 @@ export const initialState = (source: Volume, name: string, opened?: OpenedDocume
         },
         references: opened?.references ?? [],
         preview: 64,
-        baked: undefined,
-        exporting: false,
         history: EMPTY_HISTORY,
         stroke: undefined,
         selection: EMPTY_SELECTION,
@@ -792,11 +748,7 @@ const step = (state: AppState, action: AppAction): AppState => {
                 case 'rename':
                     return {...state, objects: renameObject(objects, op.id, op.name)}
                 case 'hidden':
-                    // The sheet was baked from what was on screen, and that has just changed.
-                    return {
-                        ...state,
-                        objects: setHidden(objects, op.id, op.on)
-                    }
+                    return {...state, objects: setHidden(objects, op.id, op.on)}
                 case 'locked':
                     return {...state, objects: setLocked(objects, op.id, op.on)}
                 case 'solo':
@@ -873,9 +825,8 @@ const step = (state: AppState, action: AppAction): AppState => {
         /*
          * What an export writes — see `AppState.output`. Four cases became one, and unlike
          * `chrome` the fold is *not* safe by being inert: every field in here travels in the
-         * `.gpix` and three of the four are in `sheetKey`, so this action marks the document dirty
-         * and stales the bake. `bounds` is the exception and needs no special case — it is not in
-         * `sheetKey`, so `sheetFor` keeps the sheet on its own.
+         * `.gpix`, so this action marks the document dirty. Three of the four also change the
+         * sheet, which the export dialog rebakes on its own because it watches the same values.
          *
          * The padding clamp lives here rather than in the panel, so the bound is a property of the
          * document and holds however the value was set.
@@ -1008,19 +959,6 @@ const step = (state: AppState, action: AppAction): AppState => {
 
         case 'reorder-camera':
             return reorderView(state, action.id, action.to)
-
-        case 'bake':
-            return {
-                ...state,
-                exporting: true,
-                // Baked from what is on screen: a hidden object is hidden in the export too, which
-                // is what makes hiding a way to render one piece of a model on its own. This is the
-                // only case in this file that mentions the sheet; see `sheetKey`.
-                baked: bakeSheet(sheetKey(state), visible(state))
-            }
-
-        case 'written':
-            return state.exporting ? {...state, exporting: false} : state
 
         case 'tool':
             return {...state, tool: action.tool}

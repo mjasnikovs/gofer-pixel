@@ -9,8 +9,7 @@ import {defaultLibrary, type Library} from '../gen/library'
 import {browserVeto, type Veto} from '../gen/veto'
 import type {Volume} from '../render/volume'
 import {BrushPanel} from './BrushPanel'
-import {writeExport} from './export'
-import {ExportPanel} from './ExportPanel'
+import {ExportDialog} from './ExportDialog'
 import {Header} from './Header'
 import {ObjectsPanel} from './ObjectsPanel'
 import {RendersPanel} from './RendersPanel'
@@ -20,7 +19,6 @@ import {GridPanel, ToolRail} from './ToolRail'
 import {ViewsStrip} from './ViewsStrip'
 import {
     asDocument,
-    currentSheet,
     initialState,
     reduce,
     slicedFor,
@@ -37,6 +35,7 @@ import {
     closed,
     discarded,
     dropPicture,
+    exporting,
     guard,
     loadPalette as palettePicked,
     newProject,
@@ -53,23 +52,24 @@ import {
 /**
  * Frame first, as `astryx docs layout` asks. The regions and their budgets are `docs/editor.png`'s
  * own: a 96 px tool rail, a 216 px brush-and-palette column, the viewport taking whatever is left, a
- * 384 px camera-and-export rail down the side, a views strip under the viewport and an animation bar
- * across the foot. Every one is budgeted in px because a tool's panels are sized by what they hold,
+ * 384 px camera rail down the side, a views strip under the viewport and an animation bar across the
+ * foot. Export used to be a third section of that rail and is a dialog now — eight maps of preview
+ * do not fit in 384 px, and `FEATURESET.md` §39 asks the window not to advertise everything at once. Every one is budgeted in px because a tool's panels are sized by what they hold,
  * not by a fraction of the window. The exact column arithmetic is in `app.css`.
  *
  * There is no state here. Everything is `reduce` in `state.ts`, which is why the interesting tests
  * are 1 ms functions rather than a browser driving a UI.
  *
  * **A panel takes `state` and `dispatch`, not one prop per control.** It used to take one prop per
- * value and one callback per control — `ExportPanel` alone took fifteen — and three hundred of this
+ * value and one callback per control — the export panel alone took fifteen — and three hundred of this
  * file's lines were the one-line arrows that filled them in. That is a hand-maintained restatement
  * of `AppState` and `AppAction` in four places, and adding one control meant editing four files.
  *
  * The exceptions are the two kinds of prop that genuinely are not state:
  *
- * - **Memoised derivations.** `shown` and `sheet` are computed once here and passed down, because
- *   recomputing `shownVolume` inside a panel of switches would rebuild a whole grid on every render
- *   of it.
+ * - **Memoised derivations.** `shown` is computed once here and passed down, because recomputing
+ *   `shownVolume` inside a panel of switches would rebuild a whole grid on every render of it. The
+ *   export dialog's bake hangs off its identity, so it must not be rebuilt for nothing.
  * - **Anything that goes through a port.** Open, Save, the palette loader and the snapshots can be
  *   cancelled and belong to the app, so they stay callbacks — a panel must not get to decide which
  *   disk a read goes through. All of them are `session.ts`. The two panels that *write* take the
@@ -166,14 +166,6 @@ export const App = ({
     const shown = useMemo(() => slicedFor(state, hidden), [state, hidden])
 
     /*
-     * The sheet the last export baked, if it is still the sheet for this document.
-     *
-     * Derived, never stored: nothing in the reducer has to remember to throw it away, because
-     * `currentSheet` compares what it was baked from against what is there now. See `sheet/baked.ts`.
-     */
-    const sheet = useMemo(() => currentSheet(state), [state])
-
-    /*
      * The file menu, the palette loader and the viewport's drop — every path that reads or writes
      * the artist's disk. All of them are `session.ts`, which needs no React and no window: each one
      * is ports in, an `AppAction` or `undefined` out, and `undefined` always means the picker was
@@ -233,22 +225,6 @@ export const App = ({
     const loadPalette = useCallback(() => {
         apply(palettePicked(files))
     }, [apply, files])
-
-    /*
-     * Export is one action from two places — the header button and the panel button — and both mean
-     * "write the files", not "show me a preview". Both dispatch `bake`, which is what golden-hashes,
-     * and this writes the PNGs off the sheet the reducer produced rather than off a second render
-     * that would only be probably identical.
-     */
-    useEffect(() => {
-        if (state.exporting) {
-            dispatch({type: 'written'})
-            void writeExport(files, state)
-        }
-        // `exporting` alone: it is set by the one action that also bakes, so a sheet is always there
-        // when it is true, and re-running on every field the writer reads would write twice.
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [state.exporting])
 
     /*
      * The shortcuts. Which key means what is `keys.ts` — one table, no DOM — and what is left here
@@ -346,6 +322,9 @@ export const App = ({
                 onGenerate={() => {
                     guarded('generate')
                 }}
+                onExport={() => {
+                    take(exporting())
+                }}
                 restores={snapshots(store)}
                 onRestore={key => {
                     const action = restoreSnapshot(store, key)
@@ -409,13 +388,6 @@ export const App = ({
                         volume={shown}
                         camera={previewed}
                     />
-                    <ExportPanel
-                        state={state}
-                        dispatch={dispatch}
-                        files={files}
-                        volume={shown}
-                        sheet={sheet}
-                    />
                 </div>
             </div>
 
@@ -435,6 +407,18 @@ export const App = ({
              *     }}
              * />
              */}
+
+            {dialog.kind === 'export' && (
+                <ExportDialog
+                    state={state}
+                    dispatch={dispatch}
+                    volume={shown}
+                    files={files}
+                    onClose={() => {
+                        take(closed())
+                    }}
+                />
+            )}
 
             {dialog.kind === 'new' && (
                 <NewProjectDialog

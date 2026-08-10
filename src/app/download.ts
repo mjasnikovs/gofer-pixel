@@ -1,7 +1,8 @@
 import type {Files} from '../doc/files'
 import {encodePng} from '../image/png'
+import {zip} from '../image/zip'
 import type {SheetMetadata} from '../sheet/metadata'
-import {sheetPlane, type Sheet, type SheetMap} from '../sheet/sheet'
+import {cutCell, sheetPlane, type Sheet, type SheetMap} from '../sheet/sheet'
 
 /**
  * What an export is *called* and what bytes go in it — and nothing about how it reaches the disk.
@@ -25,9 +26,13 @@ export const writePalette = async (files: Files, text: string): Promise<void> =>
     await files.write('palette.hex', text, 'text/plain')
 }
 
+/** `FEATURESET.md` §37's metadata JSON, as text. One spelling, whether it goes loose or in a pack. */
+export const metadataText = (metadata: SheetMetadata): string =>
+    JSON.stringify(metadata, undefined, 4)
+
 /** `FEATURESET.md` §37's metadata JSON, next to the sheet it describes. */
 export const writeMetadata = async (files: Files, metadata: SheetMetadata): Promise<void> => {
-    await files.write('sprites.json', JSON.stringify(metadata, undefined, 4), 'application/json')
+    await files.write('sprites.json', metadataText(metadata), 'application/json')
 }
 
 /**
@@ -42,48 +47,96 @@ export const writeSprite = async (
     index: number,
     name: string
 ): Promise<void> => {
-    const plane = sheet.maps.color
-    if (!plane) return
-    const stride = sheet.cell + sheet.padding
-    const ox = sheet.padding + (index % sheet.columns) * stride
-    const oy = sheet.padding + Math.floor(index / sheet.columns) * stride
-    const cut = new Uint8Array(sheet.cell * sheet.cell * 4)
-    for (let row = 0; row < sheet.cell; row += 1) {
-        const from = ((oy + row) * sheet.width + ox) * 4
-        cut.set(plane.subarray(from, from + sheet.cell * 4), row * sheet.cell * 4)
-    }
+    const cut = cutCell(sheet, 'color', index)
+    if (!cut) return
     await files.write(
-        `${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}.png`,
+        `${slug(name)}.png`,
         await encodePng(sheet.cell, sheet.cell, cut),
         'image/png'
     )
 }
 
+/** A camera's name, or a document's, as something a file system and a zip entry both accept. */
+export const slug = (name: string): string =>
+    name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '') || 'sprites'
+
 const fileName = (map: SheetMap): string => (map === 'color' ? 'sprites.png' : `sprites-${map}.png`)
 
+/**
+ * The maps, encoded, named, and in the order they were asked for.
+ *
+ * Encoded together rather than one after another. Each one is a `CompressionStream`, and a second
+ * stream started only after the first has fully drained waits on the platform's task queue rather
+ * than on any work — under happy-dom that wait was a second and a half, which the UI test paid
+ * twice. A map the sheet was not baked with is skipped, not written empty.
+ */
+const mapFiles = async (
+    sheet: Sheet,
+    maps: readonly SheetMap[]
+): Promise<{name: string; bytes: Uint8Array}[]> => {
+    const built = await Promise.all(
+        maps.map(async map => {
+            const plane = sheetPlane(sheet, map)
+            if (!plane) return undefined
+            return {
+                name: fileName(map),
+                bytes: await encodePng(sheet.width, sheet.height, plane)
+            }
+        })
+    )
+    return built.filter(entry => entry !== undefined)
+}
+
 export const writeSheetMap = async (files: Files, sheet: Sheet, map: SheetMap): Promise<void> => {
-    const plane = sheetPlane(sheet, map)
-    // A map the sheet was not baked with has no file. The panel only offers the ones it has.
-    if (!plane) return
-    await files.write(fileName(map), await encodePng(sheet.width, sheet.height, plane), 'image/png')
+    const [file] = await mapFiles(sheet, [map])
+    if (file) await files.write(file.name, file.bytes, 'image/png')
 }
 
 /**
- * The maps a preset asks for, on the click that baked them.
+ * The maps the artist ticked, as loose PNGs — the old Export button, now a menu item.
  *
- * All six come off one render and cost nothing extra to *have*; what they cost is six PNG encodes
- * and six files in the artist's downloads folder, and most engines want two of them. Which two —
- * or four — is exactly what a preset is for (`FEATURESET.md` §38), and the menu next to the button
- * writes any single one on its own.
+ * All eight come off one render and cost nothing extra to *have*; what they cost is eight PNG
+ * encodes and eight files in the artist's downloads folder, and most engines want two of them.
+ * Which two — or four — is exactly what a preset is for (`FEATURESET.md` §38).
  */
 export const writeSheet = async (
     files: Files,
     sheet: Sheet,
     maps: readonly SheetMap[]
 ): Promise<void> => {
-    // Encoded together rather than one after another. Each one is a `CompressionStream`, and a
-    // second stream started only after the first has fully drained waits on the platform's task
-    // queue rather than on any work — under happy-dom that wait was a second and a half, which the
-    // UI test paid twice.
-    await Promise.all(maps.map(map => writeSheetMap(files, sheet, map)))
+    const built = await mapFiles(sheet, maps)
+    await Promise.all(built.map(file => files.write(file.name, file.bytes, 'image/png')))
+}
+
+/**
+ * Everything the export ships, as one `.zip` — `FEATURESET.md` §37's "one-click".
+ *
+ * One file rather than nine is the whole of the argument. An eight-direction character with colour,
+ * normal and emission is three sheets plus the JSON that says where the frames are, and four
+ * downloads that must not be separated is a thing the artist has to keep together by hand.
+ *
+ * Stored, not compressed — see `image/zip.ts`. The PNGs are already deflated, so the pack costs one
+ * pass to concatenate and nothing else, and the file is the same size the loose downloads were.
+ *
+ * Flat: `sprites.png`, `sprites-normal.png`, `sprites.json`, all at the root. Folders would be a
+ * guess about which engine is reading, and guessing that is exactly what presets exist to stop this
+ * code doing.
+ */
+export const writePack = async (
+    files: Files,
+    sheet: Sheet,
+    maps: readonly SheetMap[],
+    metadata: SheetMetadata,
+    name: string
+): Promise<void> => {
+    const encoder = new TextEncoder()
+    const built = await mapFiles(sheet, maps)
+    const archive = zip([
+        ...built,
+        {name: 'sprites.json', bytes: encoder.encode(metadataText(metadata))}
+    ])
+    await files.write(`${slug(name)}.zip`, archive, 'application/zip')
 }

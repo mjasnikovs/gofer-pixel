@@ -9,7 +9,8 @@ import {
     shownVolume
 } from '../doc/objects'
 import {ISOMETRIC_PITCH} from '../doc/cameras'
-import {SHEET_MAPS} from '../sheet/sheet'
+import {visible} from '../doc/gesture'
+import {renderSheet, SHEET_MAPS} from '../sheet/sheet'
 import {basisFor} from '../render/camera'
 import {render} from '../render/raycast'
 import {MODE_NORMAL} from '../render/raycast.glsl'
@@ -21,7 +22,6 @@ import {loadDocument, saveDocument} from '../doc/save'
 import {newDocument} from '../doc/templates'
 import {
     asDocument,
-    currentSheet,
     GHOST_CELLS,
     initialState,
     MAX_BRUSH,
@@ -152,42 +152,14 @@ test('deleting a camera drops it and clears the selection only if it was the one
     expect(reduce(gone, {type: 'delete', id: 'nope'})).toBe(gone)
 })
 
-test('the sheet is baked on demand and thrown away whenever it would go stale', () => {
-    const baked = reduce(fresh(), {type: 'bake'})
-    expect(currentSheet(baked)?.width).toBe(256)
-    expect(currentSheet(baked)?.height).toBe(128)
-
-    expect(currentSheet(reduce(baked, {type: 'delete', id: 'dir-1'}))).toBeUndefined()
-    expect(currentSheet(reduce(baked, {type: 'capture'}))).toBeUndefined()
-    expect(currentSheet(reduce(baked, {type: 'output', output: {cell: 32}}))).toBeUndefined()
-    // Changing which map the *viewport* draws does not invalidate an exported sheet.
-    expect(currentSheet(reduce(baked, {type: 'chrome', chrome: {map: MODE_NORMAL}}))).toBe(
-        currentSheet(baked)
-    )
-})
-
-test('staleness is computed, so an action nobody thought about cannot export the wrong pixels', () => {
-    const baked = reduce(fresh(), {type: 'bake'})
-
-    /*
-     * Neither of these ever wrote `sheet: undefined`, because staleness used to be twenty-four
-     * hand-maintained lines and these two were missed. Nothing was added for them: the sheet
-     * carries the identity of what it was baked from, so anything that moves one of those fields
-     * stales it whether or not the case knows the sheet exists. See `sheet/baked.ts`.
-     */
-    // Slice mode changes what is on screen, and the bake bakes what is on screen.
-    expect(currentSheet(reduce(baked, {type: 'slice', on: true}))).toBeUndefined()
-    // Renaming an object rebuilds the list the bake reads to decide what is hidden.
-    expect(
-        currentSheet(reduce(baked, {type: 'object', op: {kind: 'rename', id: 1, name: 'body'}}))
-    ).toBeUndefined()
-
-    // And chrome still does not: the tool, the grid switches and the orbit are not in the file.
-    expect(currentSheet(reduce(baked, {type: 'tool', tool: 'erase'}))).toBe(currentSheet(baked))
-    expect(currentSheet(reduce(baked, {type: 'chrome', chrome: {grid: false}}))).toBe(
-        currentSheet(baked)
-    )
-})
+/*
+ * There is no "is the sheet stale?" test here any more, and there is nothing to replace it with.
+ * The sheet used to live in this state and outlive the click that made it, so twenty-four cases had
+ * to remember to throw it away and `sheet/baked.ts` compared a key of seven identities to catch the
+ * twenty-fifth. It is baked inside `ExportDialog` now, by a `useMemo` over the same seven values,
+ * and a memo cannot hand back a sheet for a document that has moved. The rule became a type instead
+ * of a test — see `app/ExportDialog.test.tsx` for what an artist can still observe.
+ */
 
 test('a ring of directions replaces the list rather than appending to it', () => {
     const state = reduce(reduce(fresh(), {type: 'capture'}), {type: 'directions', count: 8})
@@ -623,13 +595,6 @@ test('undo mid-stroke is ignored rather than tearing the draft in half', () => {
     expect(reduce(down, {type: 'redo'})).toBe(down)
 })
 
-test('a stroke throws the baked sheet away, because the model it was baked from has changed', () => {
-    const baked = reduce(armed('draw'), {type: 'bake'})
-    expect(currentSheet(baked)).toBeDefined()
-    const {column, row} = onModel(baked)
-    expect(currentSheet(reduce(baked, at('down', column, row)))).toBeUndefined()
-})
-
 test('an edit is visible to the picker on the very next event', () => {
     const state = armed('draw')
     const {column, row} = onModel(state)
@@ -791,14 +756,13 @@ test('selecting by colour takes the loaded colour unless told another', () => {
     expect(reduce(state, {type: 'select-color', color: 0}).selection.size).toBe(0)
 })
 
-test('a transform is one undo step and throws the stale sheet away', () => {
-    const picked = reduce(armed('move'), {type: 'select-color'})
+test('a transform is one undo step and leaves as many voxels as it found', () => {
+    const baked = reduce(armed('move'), {type: 'select-color'})
+    const picked = baked
     expect(picked.selection.size).toBeGreaterThan(0)
-    const baked = reduce(picked, {type: 'bake'})
 
     const painted = reduce(baked, {type: 'transform', op: {kind: 'paint', color: 200}})
     expect(painted.history.past).toHaveLength(1)
-    expect(currentSheet(painted)).toBeUndefined()
     expect(painted.volume).not.toBe(baked.volume)
     expect(painted.selection.size).toBe(picked.selection.size)
     expect(occupied(painted.volume)).toBe(occupied(baked.volume))
@@ -1017,23 +981,12 @@ test('marking a colour emissive lights it in the emission map and nowhere else',
     expect(glowing.volume).not.toBe(state.volume)
     expect(state.volume.emissive[state.color]).toBe(0)
 
-    const baked = reduce(reduce(glowing, {type: 'output', output: {preset: 'Every map'}}), {
-        type: 'bake'
-    })
-    const emission = currentSheet(baked)?.maps.emission ?? new Uint8Array(0)
+    // And it reaches the rendered sheet, which is the only reason the emissive table exists.
+    const sheet = renderSheet(glowing.volume, glowing.cameras, 32, SHEET_MAPS)
+    const emission = sheet.maps.emission ?? new Uint8Array(0)
     let lit = 0
     for (let i = 0; i < emission.length; i += 4) if ((emission[i] ?? 0) > 0) lit += 1
     expect(lit).toBeGreaterThan(0)
-})
-
-test('a preset decides which maps get baked, and colour is always one of them', () => {
-    const auto = reduce(fresh(), {type: 'bake'})
-    expect(Object.keys(currentSheet(auto)?.maps ?? {}).sort()).toEqual(['color', 'normal'])
-
-    const every = reduce(reduce(fresh(), {type: 'output', output: {preset: 'Every map'}}), {
-        type: 'bake'
-    })
-    expect(Object.keys(currentSheet(every)?.maps ?? {})).toHaveLength(SHEET_MAPS.length)
 })
 
 test('a stroke joins the active object, and a new object is where the next one goes', () => {
@@ -1061,22 +1014,18 @@ test('hiding an object takes it out of what is drawn, picked and exported', () =
     // The document keeps every voxel; only the picture loses them.
     expect(occupied(hidden.volume)).toBe(occupied(drawn.volume))
     expect(occupied(shownVolume(hidden.volume, hidden.objects))).toBe(4)
-    expect(currentSheet(hidden)).toBeUndefined()
 
-    // And a sheet baked while it is hidden holds only what was on screen.
-    const baked = reduce(hidden, {type: 'bake'})
-    const colour = currentSheet(baked)?.maps.color ?? new Uint8Array(0)
-    let opaque = 0
-    for (let i = 3; i < colour.length; i += 4) if (colour[i] === 255) opaque += 1
-    expect(opaque).toBeGreaterThan(0)
-    expect(opaque).toBeLessThan(
-        (() => {
-            const all = currentSheet(reduce(drawn, {type: 'bake'}))?.maps.color ?? new Uint8Array(0)
-            let count = 0
-            for (let i = 3; i < all.length; i += 4) if (all[i] === 255) count += 1
-            return count
-        })()
-    )
+    // And a sheet baked from what is shown holds only that. `visible` is the one derivation of
+    // "the grid as the artist sees it", and the export dialog bakes it — see `doc/gesture.ts`.
+    const opaque = (shown: AppState): number => {
+        const colour =
+            renderSheet(visible(shown), shown.cameras, 32).maps.color ?? new Uint8Array(0)
+        let count = 0
+        for (let i = 3; i < colour.length; i += 4) if (colour[i] === 255) count += 1
+        return count
+    }
+    expect(opaque(hidden)).toBeGreaterThan(0)
+    expect(opaque(hidden)).toBeLessThan(opaque(drawn))
 })
 
 test('a locked object refuses a stroke while the rest of the model takes one', () => {
@@ -1187,7 +1136,6 @@ test('editing a palette entry changes what a colour is; replacing one moves voxe
     // Not a cell changed, so not an undo step — the same rule as the emissive flag.
     expect(edited.volume.data).toEqual(before)
     expect(edited.history.past).toHaveLength(0)
-    expect(currentSheet(edited)).toBeUndefined()
 
     const replaced = reduce(state, {type: 'replace-color', from: state.color, to: 200})
     expect(replaced.history.past).toHaveLength(1)
@@ -1225,7 +1173,6 @@ test('loading a palette replaces the colours and leaves every voxel where it was
     expect([...loaded.volume.palette.subarray(4, 8)]).toEqual([255, 0, 0, 255])
     expect([...loaded.volume.palette.subarray(12, 16)]).toEqual([0, 0, 255, 255])
     expect(loaded.volume.data).toBe(state.volume.data)
-    expect(currentSheet(loaded)).toBeUndefined()
 })
 
 /*
@@ -1243,7 +1190,7 @@ test('dragging a row along the object list reorders it, and nothing else', () =>
     const first = twice.objects.list[0]?.id ?? -1
     const held = reduce(twice, {type: 'chrome', chrome: {draggingObject: first}})
     expect(held.draggingObject).toBe(first)
-    // Arming a drag is not an edit: no history, no dirty flag, and the bake is still good.
+    // Arming a drag is not an edit: no history and no dirty flag.
     expect(held.history.past).toEqual(twice.history.past)
     expect(held.doc.dirty).toBe(twice.doc.dirty)
 
@@ -1264,37 +1211,22 @@ test('dragging a view along the strip reorders the sheet it packs', () => {
 
     const moved = reduce(held, {type: 'reorder-camera', id: 'dir-0', to: 2})
     expect(names(moved).slice(0, 3)).toEqual(['Front Right', 'Right', 'Front'])
-    // The bake is laid out in list order, so a reorder is a different sheet.
-    expect(
-        currentSheet(
-            reduce(reduce(state, {type: 'bake'}), {type: 'reorder-camera', id: 'dir-0', to: 2})
-        )
-    ).toBeUndefined()
 
     // Dropping it where it already is changes nothing at all.
     expect(reduce(moved, {type: 'reorder-camera', id: 'dir-0', to: 2})).toBe(moved)
     expect(reduce(moved, {type: 'reorder-camera', id: 'nope', to: 0})).toBe(moved)
 })
 
-test('padding changes the sheet it is baked into and nothing else', () => {
-    const tight = reduce(reduce(fresh(), {type: 'output', output: {preset: 'Every map'}}), {
-        type: 'bake'
-    })
-    const loose = reduce(
-        reduce(reduce(fresh(), {type: 'output', output: {preset: 'Every map'}}), {
-            type: 'output',
-            output: {padding: 2}
-        }),
-        {type: 'bake'}
-    )
-    expect(currentSheet(loose)?.width).toBeGreaterThan(currentSheet(tight)?.width ?? 0)
-    expect(currentSheet(loose)?.cell).toBe(currentSheet(tight)?.cell as never)
-    expect(currentSheet(reduce(tight, {type: 'output', output: {padding: 1}}))).toBeUndefined()
+test('padding is clamped to a whole number of pixels and marks the document dirty', () => {
+    const state = fresh()
+    const loose = reduce(state, {type: 'output', output: {padding: 2}})
+    expect(loose.output.padding).toBe(2)
+    expect(loose.doc.dirty).toBe(true)
 
-    // Collision bounds are a fact about the JSON, so the baked sheet is still good.
-    expect(currentSheet(reduce(tight, {type: 'output', output: {bounds: true}}))).toBe(
-        currentSheet(tight)
-    )
+    // What padding does to a sheet is `sheet/sheet.test.ts`; that it is the document's number and
+    // not the panel's is what belongs here.
+    expect(reduce(state, {type: 'output', output: {padding: -3}}).output.padding).toBe(0)
+    expect(reduce(state, {type: 'output', output: {bounds: true}}).output.bounds).toBe(true)
 })
 
 test('a saved preset joins the list and can be taken back out of it', () => {
@@ -1303,10 +1235,6 @@ test('a saved preset joins the list and can be taken back out of it', () => {
     expect(saved.output.preset).toBe('My rig')
     expect(allPresets(saved.output).map(entry => entry.name)).toContain('My rig')
     expect(presetMaps(saved.output, 'My rig')).toEqual(['color', 'ao'])
-    expect(Object.keys(currentSheet(reduce(saved, {type: 'bake'}))?.maps ?? {}).sort()).toEqual([
-        'ao',
-        'color'
-    ])
 
     // A built-in name is not available, and a blank one is not a name.
     expect(reduce(state, {type: 'save-preset', name: 'Every map', maps: ['color']})).toBe(state)
@@ -1422,8 +1350,8 @@ test('a stroke in slice mode lands on the slice, not on whatever the ray hit', (
     }
 })
 
-test('the chrome settings move without touching the render or the sheet', () => {
-    const baked = reduce(fresh(), {type: 'bake'})
+test('the chrome settings move without touching the render or the document', () => {
+    const baked = fresh()
     const after = reduce(
         reduce(
             reduce(reduce(baked, {type: 'tool', tool: 'move'}), {
@@ -1436,13 +1364,12 @@ test('the chrome settings move without touching the render or the sheet', () => 
     )
     expect(after.tool).toBe('move')
     expect(after.grid).toBe(false)
-    // The lattice is a viewport setting: it must never reach the volume, the sheet or the history.
+    // The lattice is a viewport setting: it must never reach the volume or the history.
     expect(fresh().edges).toBe(true)
     expect(after.edges).toBe(false)
     expect(after.volume).toBe(baked.volume)
     expect(after.history).toBe(baked.history)
     expect(after.workspace).toBe('render')
-    expect(currentSheet(after)).toBe(currentSheet(baked))
     expect(after.orbit).toBe(baked.orbit)
 })
 
@@ -1867,12 +1794,11 @@ test('changing the model makes the document dirty; changing the session does not
 /*
  * Chrome, as one set — see the `Chrome` interface. It was nine action types and nine reducer cases,
  * and the thing that made it worth folding is that the set is now enumerable: this test says
- * *everything* the artist can see-but-not-ship leaves the document and the bake alone, rather than
- * saying it about whichever nine somebody remembered to list.
+ * *everything* the artist can see-but-not-ship leaves the document alone, rather than saying it
+ * about whichever nine somebody remembered to list.
  */
-test('nothing in the chrome makes a document dirty or throws away a bake', () => {
-    const baked = reduce(fresh(), {type: 'bake'})
-    expect(currentSheet(baked)).toBeDefined()
+test('nothing in the chrome makes a document dirty', () => {
+    const baked = fresh()
 
     const every: readonly Partial<Chrome>[] = [
         {map: MODE_NORMAL},
@@ -1892,8 +1818,9 @@ test('nothing in the chrome makes a document dirty or throws away a bake', () =>
     for (const chrome of every) {
         const next = reduce(baked, {type: 'chrome', chrome})
         expect(next.doc.dirty).toBe(false)
-        // The same sheet object, not an equal one: nothing it was baked from has moved.
-        expect(currentSheet(next)).toBe(currentSheet(baked))
+        // Nothing in the document moves, which is what makes it safe not to be in the save file.
+        expect(next.volume).toBe(baked.volume)
+        expect(next.output).toBe(baked.output)
     }
 
     // Several at once is one action, which is most of the point of folding them.

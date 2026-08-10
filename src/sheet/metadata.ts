@@ -1,7 +1,7 @@
 import type {NamedCamera} from '../doc/cameras'
 import {basisFor} from '../render/camera'
 import type {Volume} from '../render/volume'
-import type {Sheet} from './sheet'
+import {cellAt, type Sheet} from './sheet'
 
 /**
  * The JSON that goes next to the sheet — `FEATURESET.md` §37.
@@ -74,7 +74,6 @@ export const sheetMetadata = (
     sheet: Sheet,
     withBounds: boolean
 ): SheetMetadata => {
-    const stride = sheet.cell + sheet.padding
     return {
         format: 'gofer-pixel/sheet',
         version: 1,
@@ -86,8 +85,9 @@ export const sheetMetadata = (
         rows: sheet.rows,
         maps: Object.keys(sheet.maps),
         sprites: cameras.map((entry, index) => {
-            const x = sheet.padding + (index % sheet.columns) * stride
-            const y = sheet.padding + Math.floor(index / sheet.columns) * stride
+            // The one arithmetic that says where a cell is — shared with `cutCell`, so the offset
+            // the JSON promises an engine is the offset the sprite was actually cut from.
+            const {x, y} = cellAt(sheet, index)
 
             /*
              * The pivot is the model's own origin projected through this camera's basis. It is

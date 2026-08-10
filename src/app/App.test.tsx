@@ -12,16 +12,7 @@ import {NO_SYMMETRY} from '../doc/symmetry'
 import {memoryScorer} from '../gen/clip'
 import {memoryLlama, type Llama} from '../gen/llama'
 import {handle} from './handle'
-import {currentSheet} from './state'
-import type {Sheet} from '../sheet/sheet'
 import {fakeGl, withFakeGl} from '../../test/fake-gl'
-
-/**
- * The baked sheet as the app would show it — derived, not stored, so it goes stale on its own.
- * See `sheet/baked.ts`.
- */
-const sheet = (): Sheet | undefined =>
-    handle.state === undefined ? undefined : currentSheet(handle.state)
 
 const volume = readVox(
     new Uint8Array(await Bun.file(new URL('../assets/car.vox', import.meta.url)).arrayBuffer())
@@ -141,48 +132,29 @@ test('clicking a camera selects it and moves the viewport onto it', async () => 
     await unmount(mounted)
 })
 
-test('one click bakes the sheet the export writes, at the size the panel says', async () => {
+/*
+ * Composition, which is what this file is for: the header's one coloured button reaches the dialog,
+ * and the dialog bakes on the way in. What the dialog then *does* is `ExportDialog.test.tsx`, over
+ * one component rather than a whole window.
+ *
+ * There is no longer a stale-sheet case in the window, and that is the change. The sheet used to
+ * live in `AppState` and outlive the click that baked it, so capturing a ninth camera had to be
+ * observed throwing it away. It is a `useMemo` inside the dialog now, and it cannot be observed
+ * being wrong because it cannot be wrong.
+ */
+test('the header’s Export button opens the dialog, baked and showing the sheet’s own cells', async () => {
     const mounted = await mount()
-    expect(sheet()).toBeUndefined()
+    expect(document.querySelector('canvas.export-sprite')).toBeNull()
 
     await act(async () => {
-        control(mounted.host, 'Export sprite sheet').click()
+        control(mounted.host, 'Export').click()
     })
 
-    expect(sheet()?.width).toBe(256)
-    expect(sheet()?.height).toBe(128)
-    expect(sheet()?.maps.color?.length).toBe(256 * 128 * 4)
-    expect(mounted.host.textContent).toContain('Written: 256 × 128')
-
-    // The grid above the button is the sheet's own cells, so it has to hold one per camera at the
-    // size the sheet was cut to, and follow that size when it changes.
-    const sprites = [...mounted.host.querySelectorAll('canvas.export-sprite')]
+    // A portal on `document.body`, so not under the window's host node.
+    const sprites = [...document.querySelectorAll('canvas.export-sprite')]
     expect(sprites).toHaveLength(8)
     expect(sprites[0]?.getAttribute('data-pixels')).toBe('64x64')
-
-    await act(async () => {
-        control(mounted.host, '32 px').click()
-    })
-    expect(mounted.host.querySelector('canvas.export-sprite')?.getAttribute('data-pixels')).toBe(
-        '32x32'
-    )
-
-    await unmount(mounted)
-})
-
-test('capturing adds a ninth camera and throws the stale sheet away', async () => {
-    const mounted = await mount()
-    await act(async () => {
-        control(mounted.host, 'Export sprite sheet').click()
-    })
-    expect(sheet()).toBeDefined()
-
-    await act(async () => {
-        control(mounted.host, 'Capture view as a camera').click()
-    })
-
-    expect(mounted.host.querySelectorAll('.views-strip canvas.thumbnail')).toHaveLength(9)
-    expect(sheet()).toBeUndefined()
+    expect(document.body.textContent).toContain('256 × 128')
 
     await unmount(mounted)
 })

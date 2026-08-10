@@ -26,7 +26,7 @@ Each item ends with `bun run check` green. Nothing waits — see `CLAUDE.md`.
 | 11  | The remaining output maps, emissive            | 18, 20         | done  |
 | 12  | Normal-map diagnostic preview                  | 19             | done  |
 | 13  | Camera generators, pixel-perfect, live preview | 13, 14, 15     | done  |
-| 14  | Sheet workspace and export                     | 16, 17, 37, 38 | done  |
+| 14  | Export dialog, eight-map preview, zip pack     | 16, 17, 37, 38 | done  |
 | 15  | Reference images and PNG import                | 33, 34         | done  |
 | 16  | Autosave, crash recovery, snapshots            | 32             | done  |
 | 17  | Save, open and new project files               | 32, 36         | done  |

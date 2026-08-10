@@ -43,7 +43,7 @@ What is there now, and roughly in dependency order:
 | `src/doc/`          | cameras, the brush, edits, undo, selection, transforms, symmetry, figures        |
 | `src/doc/gesture`   | what the pointer does to voxels: aiming, strokes, drags, and the outline         |
 | `src/doc/files`     | the `.gpix` save format, the disk behind a port, and the new-project templates   |
-| `src/sheet/`        | packing cameras into the six output sheets, and whether the last bake is stale   |
+| `src/sheet/`        | packing cameras into the eight output sheets, and which of them would be blank   |
 | `src/image/`        | PNG encoding                                                                     |
 | `src/viewport/`     | orbit/pan/zoom as a pure function, and the React canvas                          |
 | `src/app/`          | the whole app as one value and one `reduce`, plus the panels that show it        |
@@ -210,9 +210,30 @@ tested by mounting something, or by building a whole `AppState` to ask a questio
   combinations, three reachable, and the offline path could only be seen by mounting the dialog. The
   order is the rule that lives here — the picking call's prompt _is_ the manifest, so the bank has
   to load before a client can be built.
-- **`src/sheet/baked.ts`** — a baked sheet carries the identity of what it came from, so staleness
-  is computed. There used to be twenty-four hand-written `sheet: undefined` lines in the reducer and
-  no test could cover the twenty-fifth case nobody had written yet.
+- **`src/sheet/choice.ts`** — which maps this export is going to write while the artist is still
+  deciding: seeded from the selected preset, reseeded when the selector moves, thrown away when the
+  dialog closes. The preset is the memory; these are the ticks. Three rules live here because all
+  three get spelled twice and then differently — **colour is never optional** (`renderSheet` adds it
+  back regardless, so an unticked box would write the file anyway), **an empty map is never written
+  even when the preset names it**, and **choosing a preset replaces the ticks**. `shipped` is the
+  one derivation the zip, the loose PNGs and the count all read.
+- **`src/sheet/empty.ts`** — which of the eight maps would be written blank. Emission is black
+  unless a palette entry the model actually uses glows; object id is one flat value until the model
+  is split. The question is asked of **the baked sheet, not the volume**, and that is the whole
+  design: "no voxel glows" and "this sheet's emission map is black" are different questions once an
+  object can be hidden, sliced away, or simply behind the model from every camera on the list.
+- **`src/image/zip.ts`** — a store-only zip, so an export is one file instead of nine. No
+  compression: everything in the pack is either a PNG `encodePng` already deflated or a few
+  kilobytes of JSON. Verified against `unzip -t` and Python's `zipfile`; its own test reads the
+  archive back **through the central directory**, which is the direction an unarchiver reads and the
+  only one that can catch an offset pointing at the wrong place.
+
+`sheet/baked.ts` used to be here, and its deletion is worth knowing about. A bake outlived the click
+that made it, so "is that still the sheet for this document?" needed a key of seven identities and a
+comparison, and twenty-four reducer cases had to remember not to break it. The sheet is a `useMemo`
+inside `ExportDialog` now, over those same seven values: a memo cannot hand back a sheet for a
+document that has moved, and its dependency list _is_ the key with the compiler checking it.
+
 - **`src/doc/files.ts`** — every file read off the artist's disk: the project picker, the palette
   loader and the generate dialog's reference model. `memoryFiles` holds bytes as well as text, so a
   `.vox` can be driven through it. `open` takes a `ReadFor`, and `remember` is the whole of it: only
@@ -275,12 +296,20 @@ tested by mounting something, or by building a whole `AppState` to ask a questio
 
 Two more things about the app layer that are not modules:
 
-- **A panel takes `state` and `dispatch`, not one prop per control.** `ExportPanel` used to take
+- **A panel takes `state` and `dispatch`, not one prop per control.** The export panel used to take
   fifteen props, and about three hundred lines of `App.tsx` were the one-line arrows filling them in
   — a hand-maintained restatement of `AppState` and `AppAction` in four places. The two kinds of
-  prop that stay are the ones that are not state: memoised derivations (`shown`, `drawn`, `sheet`),
-  and anything that goes through a port, because a panel must not get to decide which disk a read
-  goes through.
+  prop that stay are the ones that are not state: memoised derivations (`shown`, `drawn`), and
+  anything that goes through a port, because a panel must not get to decide which disk a read goes
+  through.
+- **Export is a dialog, and the preview is the export.** It was the third section of the right-hand
+  rail, on screen for every stroke of every session, and the header's Export button baked and
+  downloaded on the click with no way to see it first. It is `ExportDialog.tsx` now, behind that
+  same button: eight maps, one tab each, and **every cell on screen is `cutCell` out of the sheet
+  the buttons write**. Nothing in it re-renders anything for display — `app/sprite-cache.ts` exists
+  for the viewport, covers five of the eight maps, and its depth is a _view_ mode its own comment
+  says is not what gets exported. A preview built on it would have disagreed with the download for
+  three maps out of eight, silently, in the one panel whose job is to show what lands on disk.
 - **`Chrome` in `state.ts`** is what the artist sees and does not ship — eleven fields behind one
   `{type: 'chrome'}` action, including both list drags: the views strip's camera and the objects
   panel's row are one gesture, and one of them used to be a `useState` inside the panel.
@@ -349,10 +378,10 @@ file dialogs, the guard in front of them, and the one live viewport.
 Before reaching for a mount, check whether the thing under test has a seam already: `state.ts`,
 `gesture.ts`, `session.ts`, `keys.ts`, `batch.ts`, `connect.ts`, `doc/reference.ts`,
 `gen/reference.ts`, `teaching.ts`, `overlay.ts`, `views.ts`, `presets.ts`, `store.ts`, `export.ts`,
-`history.ts`, `ask.ts` and `baked.ts` all answer their own questions in single-digit milliseconds,
-and they exist because the answers used to cost a window. If it is one panel and a real reducer,
-that is `test/panel.tsx` — and the stage is a panel by that definition, so `Stage.test.tsx` mounts
-it there rather than mounting a window.
+`history.ts`, `ask.ts`, `choice.ts` and `empty.ts` all answer their own questions in single-digit
+milliseconds, and they exist because the answers used to cost a window. If it is one panel and a
+real reducer, that is `test/panel.tsx` — and the stage is a panel by that definition, so
+`Stage.test.tsx` mounts it there rather than mounting a window.
 
 ## Conventions
 

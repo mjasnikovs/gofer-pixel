@@ -824,21 +824,86 @@ body,
         -6px 0;
 }
 
-/* ---- export ---- */
+/*
+ * ---- export ----
+ *
+ * A dialog, not a rail section. Two columns: the settings, which are sized by what they hold, and
+ * the preview, which takes the rest. Layout only — every control inside is astryx's.
+ */
+.export-dialog {
+    display: grid;
+    grid-template-columns: 260px minmax(0, 1fr);
+    gap: 20px;
+    align-items: start;
+}
 
-.export-body {
+.export-settings {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+/* One row per map: the name picks what the preview shows, the tick decides what ships. */
+.export-maps {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.export-map {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 8px 0 0;
+}
+
+.export-map + .export-map {
+    border-top: 1px solid var(--color-border);
+}
+
+.export-map[data-on] {
+    background: var(--color-accent-subtle);
+}
+
+.export-map-pick {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    flex: 1 1 auto;
+    padding: 6px 10px;
+    border: 0;
+    background: none;
+    color: var(--color-text-secondary);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.export-map-pick:hover {
+    background: var(--color-background-hover);
+}
+
+.export-map[data-on] .export-map-name {
+    color: var(--color-text-accent);
+}
+
+.export-preview {
     display: flex;
     flex-direction: column;
     gap: 8px;
-    padding: 0 12px 8px;
-    overflow-y: auto;
 }
 
+/*
+ * Four across, which is how the sheet itself is packed — `DEFAULT_COLUMNS`. The preview is the
+ * export, and a grid that rewrapped at a different width would be a picture of a different sheet.
+ */
 .export-grid {
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: 2px;
-    padding: 4px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 4px;
+    padding: 6px;
 }
 
 .export-sprite {
@@ -850,13 +915,8 @@ body,
 .export-foot {
     display: flex;
     align-items: center;
-    gap: 6px;
-    margin-top: auto;
-    padding: 4px 12px 12px;
-}
-
-.export-foot > *:first-child {
-    flex: 1 1 auto;
+    gap: 8px;
+    margin-top: 16px;
 }
 
 /* ---- animation ---- */

@@ -62,6 +62,43 @@ export type SheetMap = (typeof SHEET_MAPS)[number]
 
 export const sheetPlane = (sheet: Sheet, map: SheetMap): Uint8Array | undefined => sheet.maps[map]
 
+/** Where camera `index` sits in the sheet, in pixels from the top-left. */
+export const cellAt = (sheet: Sheet, index: number): {x: number; y: number} => {
+    const stride = sheet.cell + sheet.padding
+    return {
+        x: sheet.padding + (index % sheet.columns) * stride,
+        y: sheet.padding + Math.floor(index / sheet.columns) * stride
+    }
+}
+
+/**
+ * One camera's cell of one map, cut out of the packed sheet.
+ *
+ * **Cut, never re-rendered**, and that is the rule this function exists to hold. Everything the
+ * export dialog shows and everything it writes for a single sprite comes through here, so the
+ * preview cannot be a second opinion about what the file will contain — it is the file's own bytes,
+ * at the offset the metadata JSON records.
+ *
+ * The alternative had already grown: `app/sprite-cache.ts` renders a sprite for the viewport and
+ * covers five of the eight maps, and its depth is a *view* mode whose own comment says it is not
+ * what gets exported. A preview built on that would have disagreed with the download for three
+ * maps out of eight, silently, in the one panel whose whole job is to show what lands on disk.
+ *
+ * `undefined` when the sheet was not baked with that map — there is nothing to cut.
+ */
+export const cutCell = (sheet: Sheet, map: SheetMap, index: number): Uint8Array | undefined => {
+    const plane = sheet.maps[map]
+    if (!plane) return undefined
+    const {x, y} = cellAt(sheet, index)
+    const row = sheet.cell * 4
+    const cut = new Uint8Array(sheet.cell * row)
+    for (let line = 0; line < sheet.cell; line += 1) {
+        const from = ((y + line) * sheet.width + x) * 4
+        cut.set(plane.subarray(from, from + row), line * row)
+    }
+    return cut
+}
+
 /** The colour sheet, which every sheet has: it is what the preview and the packing are made of. */
 export const sheetColor = (sheet: Sheet): Uint8Array => sheet.maps.color ?? new Uint8Array(0)
 
