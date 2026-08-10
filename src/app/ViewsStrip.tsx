@@ -38,7 +38,8 @@ export const ViewsStrip = ({
     /** The grid with hidden objects taken out — memoised in `App.tsx`. See `ExportPanel`. */
     volume: Volume
 }) => {
-    const {cameras, selected, draggingCamera: dragging} = state
+    const {cameras, selected, ringPitch, draggingCamera: dragging} = state
+    const flat = ringPitch === 'flat'
     const onCapture = (): void => {
         dispatch({type: 'capture'})
     }
@@ -63,6 +64,32 @@ export const ViewsStrip = ({
                         {count}
                     </button>
                 ))}
+                {/*
+                 * A ring is a count and a pitch, and until this button the strip could only say the
+                 * count. Pressed is flat — a straight-on elevation, which is what a side-on
+                 * character sheet is drawn at — and unpressed is the isometric three-quarter.
+                 *
+                 * It is a mode rather than two more buttons because it multiplies: four flat and
+                 * eight flat are both wanted, and 4/8/4-flat/8-flat is a head of five buttons
+                 * before the icons even start.
+                 */}
+                <button
+                    type='button'
+                    className='symmetry-axis'
+                    aria-label='Build direction rings flat'
+                    aria-pressed={flat}
+                    data-on={flat || undefined}
+                    title={
+                        flat ?
+                            'Rings are built level — straight-on side views. Click for isometric.'
+                        :   'Rings are built at the isometric angle. Click for level side views.'
+                    }
+                    onClick={() => {
+                        dispatch({type: 'ring-pitch', pitch: flat ? 'iso' : 'flat'})
+                    }}
+                >
+                    ▱
+                </button>
                 <button
                     type='button'
                     className='symmetry-axis'

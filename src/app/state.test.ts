@@ -8,6 +8,7 @@ import {
     objectCells,
     shownVolume
 } from '../doc/objects'
+import {ISOMETRIC_PITCH} from '../doc/cameras'
 import {SHEET_MAPS} from '../sheet/sheet'
 import {basisFor} from '../render/camera'
 import {render} from '../render/raycast'
@@ -200,6 +201,36 @@ test('a ring of directions replaces the list rather than appending to it', () =>
     // One pitch and one zoom across the ring, which is what makes the sprites one set.
     expect(new Set(four.cameras.map(({camera}) => camera.pitch)).size).toBe(1)
     expect(new Set(four.cameras.map(({camera}) => camera.zoom)).size).toBe(1)
+})
+
+test('the flat toggle decides the pitch of every ring built after it', () => {
+    const iso = reduce(fresh(), {type: 'directions', count: 4})
+    expect(iso.cameras.every(({camera}) => camera.pitch === ISOMETRIC_PITCH)).toBe(true)
+
+    // The ring on screen goes flat on the press, and so does the view through it. A toggle whose
+    // effect only appears the next time some other button is pressed cannot be read.
+    const flat = reduce(iso, {type: 'ring-pitch', pitch: 'flat'})
+    expect(flat.cameras.every(({camera}) => camera.pitch === 0)).toBe(true)
+    expect(flat.orbit.camera.pitch).toBe(0)
+
+    // The toggle is a setting too, not a one-shot: pressing 4 and then 8 stays flat.
+    for (const count of [4, 8]) {
+        const ring = reduce(flat, {type: 'directions', count})
+        expect(ring.cameras).toHaveLength(count)
+        expect(ring.cameras.every(({camera}) => camera.pitch === 0)).toBe(true)
+        // The yaws are the same ring; only the height it is seen from moved.
+        expect(ring.cameras.map(({name}) => name)).toEqual(
+            reduce(iso, {type: 'directions', count}).cameras.map(({name}) => name)
+        )
+    }
+
+    // A list with the artist's own camera on it is not a ring, so the toggle only sets the mode —
+    // the alternative is a button that silently deletes a captured view.
+    const captured = reduce(iso, {type: 'capture'})
+    const kept = reduce(captured, {type: 'ring-pitch', pitch: 'flat'})
+    expect(kept.cameras).toEqual(captured.cameras)
+    expect(kept.ringPitch).toBe('flat')
+    expect(reduce(kept, {type: 'directions', count: 4}).cameras).toHaveLength(4)
 })
 
 test('aligning turns the view to the nearest stop rather than to a named view', () => {

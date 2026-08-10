@@ -1,5 +1,14 @@
 import {MAX_BRUSH, SHAPES, type Axis, type Brush, type Shape} from '../doc/brush'
-import {alignCamera, directions, eightDirections, focusOn, ISOMETRIC_PITCH} from '../doc/cameras'
+import {
+    alignCamera,
+    directions,
+    eightDirections,
+    focusOn,
+    ISOMETRIC_PITCH,
+    ringCount,
+    RING_PITCHES,
+    type RingPitch
+} from '../doc/cameras'
 import {
     captureView,
     duplicateView,
@@ -228,6 +237,14 @@ export interface Chrome {
     readonly workspace: 'model' | 'render'
     readonly fps: number
     /**
+     * The pitch the next direction ring is built at — see `RING_PITCHES`.
+     *
+     * Chrome, and it takes the definition: the cameras it produces are document and are saved with
+     * their own pitch, so nothing here has to travel with them. It is a setting on a button, and it
+     * lives on the state rather than inside `ViewsStrip` so that pressing 4 and then 8 stays flat.
+     */
+    readonly ringPitch: RingPitch
+    /**
      * The row being dragged along a list, if one is — the views strip's camera and the objects
      * panel's object. `FEATURESET.md` §16.
      *
@@ -321,6 +338,14 @@ export type AppAction =
     | {type: 'focus'}
     | {type: 'select'; id: string}
     | {type: 'directions'; count: number}
+    /**
+     * The pitch every ring is built at, and the ring on screen right now with it.
+     *
+     * Not a `chrome` action, though `ringPitch` is a chrome field: pressing it rebuilds the
+     * cameras, and cameras are document. A toggle whose effect only shows the *next* time some
+     * other button is pressed is a toggle nobody can see the meaning of.
+     */
+    | {type: 'ring-pitch'; pitch: RingPitch}
     | {type: 'align'}
     | {type: 'capture'}
     | {type: 'duplicate'}
@@ -470,10 +495,24 @@ export const initialState = (source: Volume, name: string, opened?: OpenedDocume
         invert: false,
         workspace: 'model',
         fps: 24,
+        ringPitch: 'iso',
         draggingCamera: undefined,
         draggingObject: undefined,
         frame: 1
     }
+}
+
+/**
+ * Replace the list with one ring, and look through it — the whole of what the 4, 8 and flat buttons
+ * do. The viewport follows the strip, or the highlight is a claim about a view nobody is at.
+ */
+const ringOf = (state: AppState, count: number, pitch: RingPitch): AppState => {
+    const next = resetViews(state, directions(state.volume, count, RING_PITCHES[pitch]))
+    return withCamera(
+        next,
+        viewNamed(next, next.selected)?.camera ?? state.orbit.camera,
+        next.selected
+    )
 }
 
 /** Turn the view, and say which stored camera it is now — `undefined` for none. See `showView`. */
@@ -808,13 +847,17 @@ const step = (state: AppState, action: AppAction): AppState => {
             return found ? withCamera(state, found.camera, found.id) : state
         }
 
-        case 'directions': {
-            const next = resetViews(state, directions(state.volume, action.count))
-            return withCamera(
-                next,
-                viewNamed(next, next.selected)?.camera ?? state.orbit.camera,
-                next.selected
-            )
+        case 'directions':
+            return ringOf(state, action.count, state.ringPitch)
+
+        /*
+         * Flipping the pitch re-cuts the ring under the artist, and only when there is one — see
+         * `ringCount`. With cameras of their own on the list it is just the setting for next time.
+         */
+        case 'ring-pitch': {
+            const next = {...state, ringPitch: action.pitch}
+            const count = ringCount(state.cameras)
+            return count === undefined ? next : ringOf(next, count, action.pitch)
         }
 
         case 'capture':

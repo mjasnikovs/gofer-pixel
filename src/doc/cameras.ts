@@ -34,6 +34,19 @@ const DIRECTION_NAMES = [
 export const DIRECTION_COUNTS = [4, 8] as const
 
 /**
+ * The two pitches a ring is built at. A ring is a count *and* a pitch, and the count was the only
+ * one of the two the strip could say.
+ *
+ * `flat` is exactly zero, which is a straight-on elevation: the view a side-on character sheet is
+ * drawn at, and the same stop `alignCamera` snaps to. `views.ts`'s `opening` calls a flat view the
+ * wrong one to open a 3D tool on, and that is still true — it is not the wrong one to *export*,
+ * which is the whole distinction between looking at a model and shipping a sprite of it.
+ */
+export const RING_PITCHES = {iso: ISOMETRIC_PITCH, flat: 0} as const
+
+export type RingPitch = keyof typeof RING_PITCHES
+
+/**
  * A ring of cameras around one pivot, at one click — `FEATURESET.md` §13.
  *
  * Everything but the yaw is shared: the same pitch, the same zoom, the same pivot, so the sprites
@@ -62,6 +75,20 @@ export const directions = (volume: Volume, count = 8, pitch = ISOMETRIC_PITCH): 
 
 export const eightDirections = (volume: Volume, pitch = ISOMETRIC_PITCH): NamedCamera[] =>
     directions(volume, 8, pitch)
+
+/**
+ * How many cameras this list is a ring of, or `undefined` when it is not a ring at all.
+ *
+ * Asked by the pitch toggle, which has to rebuild the ring the artist is looking at rather than
+ * wait for them to press 4 or 8 again. Read off the ids, because the ids are what `directions`
+ * mints and a captured camera is `cam-*` — so a list with one capture on it is not a ring, and the
+ * toggle leaves it alone instead of quietly deleting work.
+ */
+export const ringCount = (cameras: readonly NamedCamera[]): number | undefined => {
+    const count = cameras.length
+    if (!DIRECTION_COUNTS.includes(count as (typeof DIRECTION_COUNTS)[number])) return undefined
+    return cameras.every((camera, i) => camera.id === `dir-${String(i)}`) ? count : undefined
+}
 
 /**
  * Turn the view to the nearest of the eight yaws and the nearest of three pitches — level, three
