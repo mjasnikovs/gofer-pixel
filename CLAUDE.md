@@ -12,9 +12,10 @@ produce pixels.
    still undecided.
 2. `docs/FEATURESET.md` — the product intent, 40 items. Treat it as a someday-list.
 3. `docs/editor.png` and `docs/featureset.png` — **these two mockups are the spec.** When the two
-   disagree with FEATURESET.md, the mockups win.
-4. `docs/TASKS.md` — the list being worked through now: every unpostponed item of `FEATURESET.md`,
-   in dependency order, with what is done and what is left.
+   disagree with FEATURESET.md, the mockups win. One region has been overruled since — the
+   bottom-left settings box, which is gone; see the end of the app-layer notes below.
+4. `docs/TASKS.md` — every unpostponed item of `FEATURESET.md`, in dependency order. All seventeen
+   are built; what is left on it is the reworks the validation passes found.
 5. `docs/POC_PROMPT.md` — the brief the current `src/` was built against. All six steps are built.
    **Its do-not-build list has been superseded by `docs/TASKS.md`**: editing, selection, transforms
    and the remaining output maps were on it because they proved nothing about the architecture, and
@@ -31,8 +32,8 @@ anything in there — it says what is worth reading and what is superseded.
 
 Code from `legacy/` is carried over deliberately, file by file, with its tests — never by import.
 Carried over so far: the `.vox` reader (`src/vox/`), the PNG encoder (`src/image/`), the gesture
-replay pattern (`src/viewport/orbit.ts`), and `assets/car.vox` itself. Everything else in `src/` is
-new.
+replay pattern (`src/viewport/orbit.ts`), and `src/assets/car.vox` itself. Everything else in `src/`
+is new.
 
 What is there now, and roughly in dependency order:
 
@@ -172,11 +173,12 @@ Neither service is required to open the app. With llama-server down the menu ite
 that says so and disables its one button; with `clipserve.py` down the batch ranks on the built-in
 scores.
 
-## Sixteen seams worth knowing about
+## Eighteen seams worth knowing about
 
-The app layer is deliberately thin, and sixteen modules under it hold what would otherwise be spread
-through React callbacks and reducer cases. Each one was pulled out because its rules could only be
-tested by mounting something, or by building a whole `AppState` to ask a question about four fields.
+The app layer is deliberately thin, and eighteen modules under it hold what would otherwise be
+spread through React callbacks and reducer cases. Each one was pulled out because its rules could
+only be tested by mounting something, or by building a whole `AppState` to ask a question about four
+fields.
 
 - **`src/doc/gesture.ts`** — every pointer gesture, over a `Gesture` interface that `AppState`
   extends. Eighteen fields, not fifty. It replaces two hand-written lists of the same field names
@@ -231,8 +233,9 @@ tested by mounting something, or by building a whole `AppState` to ask a questio
 `sheet/baked.ts` used to be here, and its deletion is worth knowing about. A bake outlived the click
 that made it, so "is that still the sheet for this document?" needed a key of seven identities and a
 comparison, and twenty-four reducer cases had to remember not to break it. The sheet is a `useMemo`
-inside `ExportDialog` now, over those same seven values: a memo cannot hand back a sheet for a
-document that has moved, and its dependency list _is_ the key with the compiler checking it.
+inside `ExportDialog` now, over the four things it is made of — `volume`, `cameras`, `cell`,
+`padding`: a memo cannot hand back a sheet for a document that has moved, and its dependency list
+_is_ the key with the compiler checking it.
 
 - **`src/doc/files.ts`** — every file read off the artist's disk: the project picker, the palette
   loader and the generate dialog's reference model. `memoryFiles` holds bytes as well as text, so a
@@ -294,7 +297,7 @@ document that has moved, and its dependency list _is_ the key with the compiler 
   `!busy && connection.kind === 'ready'` on Enter and `!busy && connection.kind !== 'ready'` on the
   button. `startable` is the one call both now make.
 
-Two more things about the app layer that are not modules:
+More things about the app layer that are not modules:
 
 - **A panel takes `state` and `dispatch`, not one prop per control.** The export panel used to take
   fifteen props, and about three hundred lines of `App.tsx` were the one-line arrows filling them in
@@ -310,7 +313,7 @@ Two more things about the app layer that are not modules:
   for the viewport, covers five of the eight maps, and its depth is a _view_ mode its own comment
   says is not what gets exported. A preview built on it would have disagreed with the download for
   three maps out of eight, silently, in the one panel whose job is to show what lands on disk.
-- **`Chrome` in `state.ts`** is what the artist sees and does not ship — eleven fields behind one
+- **`Chrome` in `state.ts`** is what the artist sees and does not ship — twelve fields behind one
   `{type: 'chrome'}` action, including both list drags: the views strip's camera and the objects
   panel's row are one gesture, and one of them used to be a `useState` inside the panel.
   `CHROME_IS_NOT_SAVED` makes "never in the save file, never in the undo history" something the
@@ -322,6 +325,22 @@ Two more things about the app layer that are not modules:
 - **`handle.ts` is write-only.** The app imports `publish` and `markDrawn` and cannot reach the
   reader. `App.tsx` used to read `handle.state` in Save — a real correctness requirement met by a
   testing singleton, which two mounted apps would have shared. It is a ref now.
+- **The mockup's bottom-left settings box is gone, and the layout is four columns.**
+  `96px 216px minmax(0, 1fr) 384px`, with the rail and the camera rail spanning both rows and the
+  views strip alone in row two. The box was drawn holding two switches and a number and ended up
+  holding four switches, symmetry, the drawing plane, the reference rows and the number — 259 px of
+  content in a 260 px box, so the first dropped reference picture clipped the voxel size off the
+  bottom of an `overflow: hidden` panel. The switches are in the rail, which runs the whole height;
+  the rest is `ScenePanel.tsx` under the palette, in a column that scrolls and therefore cannot
+  clip. This is the one place the mockups have been overruled rather than followed, and the reason
+  is that the content outgrew the region three times over.
+- **The four view switches are icons with no box, and that is the second attempt.** The first gave
+  them the tool button's face — icon over label, accent fill when on — which is one visual language
+  for one column and was wrong for a reason no argument about pixels finds: three of the four are on
+  by default, so three accent-filled boxes sat under one armed tool and **the loudest thing in the
+  rail was its resting state**. Off is the same grey as an unarmed tool, never a dimming, because
+  faded means "not built yet" in this column and Measure is sitting four rows up saying so. The
+  track that came before both went with the box: it needs about 160 px and the rail is 96.
 
 ## Testing — nothing waits
 
@@ -333,7 +352,7 @@ no polling, no `@testing-library/user-event`, no animated scrolling, no screensh
 - The viewport exposes `renderNow()` and a frame counter, so a test awaits _a frame having landed_,
   never milliseconds. The render loop must be drivable, not owned by `requestAnimationFrame`.
 - Golden pixel hashes come from the CPU raycaster. It is the oracle and it needs no GPU.
-- Playwright is roughly ten tests for what cannot exist outside a browser, and it does not gate
+- Playwright is 60 tests for what cannot exist outside a browser, and it does not gate
   `bun run check`. Chromium needs
   `--use-angle=vulkan --enable-features=Vulkan --use-gl=angle --ignore-gpu-blocklist` or it silently
   falls back to SwiftShader and is 51× slower.
@@ -342,8 +361,9 @@ no polling, no `@testing-library/user-event`, no animated scrolling, no screensh
   reads one pixel back instead, which really blocks, costs ~0.2 ms, and is what makes the frame
   counter mean anything.
 - The browser suite drives the running app through `src/app/handle.ts` rather than by polling the
-  DOM. It is a deliberate seam and the app only ever writes to it — through `publish`, which is the
-  only thing it imports from there.
+  DOM. It is a deliberate seam and the app only ever writes to it — through `publish` and
+  `markDrawn`, the only two things it imports from there. `main.tsx` imports the handle itself, and
+  only to hang it on `globalThis`.
 
 `test/preload.ts` registers happy-dom for every test via `bunfig.toml`, so `document` is always
 available.
@@ -362,10 +382,10 @@ bun run format       # prettier --write
 
 `lint` and `format` are cached (`.eslintcache`, prettier's own).
 
-**Measured 2026-08-09:** `bun test` is 9.0 s for 559 tests, and `App.test.tsx` is 7.2 s of it. The
-cost is 32 whole-window mounts at roughly 220 ms each, and **the mount is what costs under
-happy-dom, not the assertions** — mounting one astryx panel is ~50 ms and mounting a bare SVG
-component is ~1 ms. It was 13.1 s for 536 tests and 55 mounts before `test/panel.tsx`.
+**Measured 2026-08-10:** `bun test` is 6.5 s for 627 tests across 65 files, and `App.test.tsx` is
+4.5 s of it. The cost is 30 whole-window mounts, and **the mount is what costs under happy-dom, not
+the assertions** — mounting one astryx panel is ~50 ms and mounting a bare SVG component is ~1 ms.
+It was 13.1 s for 536 tests and 55 mounts before `test/panel.tsx`.
 
 **`test/panel.tsx` is the harness under the panel seam.** `mountPanel(volume, draw)` puts one panel
 over a real `useReducer(reduce, …)` and hands the test `state()`, `dispatch`, `click` and `act`. A
@@ -393,12 +413,14 @@ That combination bans non-null assertions on indexed access. Use a `?? fallback`
 or an early-return guard — not `!`.
 
 Imports are extensionless. `legacy/`, `docs/spikes/` and `bunfig.toml` are excluded from lint and
-format, as are the two files `bun run theme` generates.
+format, as are `src/theme/gofer-pixel.js` and `.d.ts`. `bun run theme` writes those two plus
+`gofer-pixel-theme.css`; the CSS is formatted, so regenerating means running `bun run format` after.
 
 The theme is not decoration and it has a gate: `src/theme/theme.test.ts` measures the built CSS for
-collapsed distinctions — text roles under 12 L* apart, a surface ramp step under 3 L*, an accent no
-brighter than body text, a control border under 3:1 — and it runs inside `bun test`. Read
-`skills/gofer-ui/SKILL.md` before touching any of it.
+collapsed distinctions — text roles under 12 L* apart, a surface ramp step under 3 L*, an accent
+within 12 L* of body text, a control border under 3:1 — and it runs inside `bun test`. The rules
+themselves are in `src/theme/design-rules.ts`. Read `skills/gofer-ui/SKILL.md` before touching any
+of it.
 
 ## Environment
 
@@ -409,7 +431,7 @@ brighter than body text, a control border under 3:1 — and it runs inside `bun 
   on CPU by necessity. **The browser suite therefore runs one worker.** Two Chromiums starting at
   once intermittently fail to bring up a hardware Vulkan device and drop to SwiftShader without
   saying so — measured over eight two-worker runs, five failed, at 58–63 ms per frame or with the
-  viewport reading back an empty canvas. Serially it is stable and the whole suite is ~14 s.
+  viewport reading back an empty canvas. Serially it is stable, and the whole suite is ~1.3 min.
 - A frame costs 0.17 ms on the idle GPU and up to 2.4 ms while llama-server is busy on the same
   card. Any timing assertion has to clear that 14× spread, not the idle number.
 - WebGL2 under the Tauri webview here is **hardware**, measured 2026-08-06 with
