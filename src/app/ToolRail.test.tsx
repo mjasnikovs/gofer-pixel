@@ -3,15 +3,20 @@ import {readVox} from '../vox/vox-file'
 import {mountPanel, type Panel} from '../../test/panel'
 import type {Reference} from '../doc/reference'
 import {shownVolume} from '../doc/objects'
-import {GridPanel} from './ToolRail'
+import {ScenePanel} from './ScenePanel'
+import {ToolRail} from './ToolRail'
 import {ReferenceLayer} from './ReferenceLayer'
-import {slicedFor} from './state'
+import {slicedFor, TOOLS} from './state'
 
 /**
- * The scene panel under the viewport — the switches, symmetry, the drawing plane and the reference
- * rows — over the real reducer. See `test/panel.tsx`.
+ * The two halves of the left-hand settings, over the real reducer. See `test/panel.tsx`.
  *
- * `ReferenceLayer` is drawn beside it because half of what a reference row does is visible in the
+ * They were one panel in the bottom-left corner and are the rail's four view switches and
+ * `ScenePanel.tsx` now, so both are mounted here: it is one block of settings split across two
+ * columns, and a test that only saw one half could not tell that a control had been dropped on the
+ * way over.
+ *
+ * `ReferenceLayer` is drawn beside them because half of what a reference row does is visible in the
  * SVG rather than in the state: dropping a second picture on one plane has to *replace* the first,
  * and "replace" means one `<image>` and not two. Five whole-window mounts before.
  */
@@ -25,7 +30,12 @@ const PICTURE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUg=='
 const open = (): Promise<Panel> =>
     mountPanel(volume, ({state, dispatch}) => (
         <>
-            <GridPanel
+            <ToolRail
+                tools={TOOLS}
+                state={state}
+                dispatch={dispatch}
+            />
+            <ScenePanel
                 state={state}
                 dispatch={dispatch}
             />
@@ -46,16 +56,8 @@ const withReference = async (): Promise<Panel> => {
 
 const referencesOf = (panel: Panel): readonly Reference[] => panel.state().references
 
-test('the scene toggles, symmetry and the drawing plane all reach the document', async () => {
+test('the view switches, symmetry and the drawing plane all reach the document', async () => {
     const panel = await open()
-    const toggle = (label: string): HTMLElement => {
-        const row = [...panel.host.querySelectorAll<HTMLElement>('.snap-toggle')].find(node =>
-            node.textContent.includes(label)
-        )
-        const input = row?.querySelector<HTMLElement>('input[role="switch"]')
-        if (!input) throw new Error(`no toggle labelled "${label}"`)
-        return input
-    }
 
     for (const [label, field] of [
         ['Grid', 'grid'],
@@ -64,11 +66,19 @@ test('the scene toggles, symmetry and the drawing plane all reach the document',
         ['Invert', 'invert']
     ] as const) {
         const was = panel.state()[field]
-        await panel.act(() => {
-            toggle(label).click()
-        })
+        const control = panel.control(label)
+        // Heard as a switch, not as a tenth tool, even though it wears the same face as the nine.
+        expect(control.getAttribute('role')).toBe('switch')
+        expect(control.getAttribute('aria-checked')).toBe(String(was))
+        await panel.click(label)
         expect(panel.state()[field]).toBe(!was)
+        expect(panel.control(label).getAttribute('aria-checked')).toBe(String(!was))
     }
+
+    // Arming a tool is a different question from turning a switch on, and the rail holds both.
+    await panel.click('Erase')
+    expect(panel.state().tool).toBe('erase')
+    expect(panel.state().grid).toBe(false)
 
     await panel.click('Mirror drawing across X')
     expect(panel.state().symmetry.x).toBe(true)

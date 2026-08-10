@@ -103,21 +103,31 @@ body,
     flex: 1 1 auto;
     min-height: 0;
     display: grid;
-    grid-template-columns: 96px 97px 119px minmax(0, 1fr) 384px;
+    grid-template-columns: 96px 216px minmax(0, 1fr) 384px;
     grid-template-rows: minmax(0, 1fr) auto;
 }
 
+/*
+ * The rail runs the whole height, and that is what pays for the four view switches at the foot of
+ * it. Nine tools and a divider and four switches is 797 px, which does not fit the 776 px that row
+ * one gets on a 1080 px screen — measured — and does fit the 1036 px of both rows.
+ */
 .rail-panel {
     grid-column: 1;
-    grid-row: 1;
+    grid-row: 1 / 3;
     background: var(--color-background-body);
     border-right: 1px solid var(--color-border);
 }
 
+/*
+ * Scrolls, because it is the column that can outgrow its row: brush, palette and the scene block
+ * are 724 px of the 776 px available at 1080, and every dropped reference picture adds 41 px more.
+ */
 .brush-column {
-    grid-column: 2 / 4;
+    grid-column: 2;
     grid-row: 1;
     min-height: 0;
+    overflow-y: auto;
     background: var(--color-background-surface);
     border-right: 1px solid var(--color-border);
 }
@@ -125,29 +135,23 @@ body,
 .stage {
     position: relative;
     overflow: hidden;
-    grid-column: 4;
+    grid-column: 3;
     grid-row: 1;
     min-height: 0;
     background: var(--color-background-body);
 }
 
-.snap-column {
-    grid-column: 1 / 3;
-    grid-row: 2;
-    background: var(--color-background-body);
-    border-top: 1px solid var(--color-border);
-    border-right: 1px solid var(--color-border);
-}
-
+/* The whole foot but the rail. It used to start 97 px further right, behind a settings box that is
+ * now split between the rail and the brush column. */
 .views-panel {
-    grid-column: 3 / 5;
+    grid-column: 2 / 4;
     grid-row: 2;
     background: var(--color-background-surface);
     border-top: 1px solid var(--color-border);
 }
 
 .app-rail {
-    grid-column: 5;
+    grid-column: 4;
     grid-row: 1 / 3;
     min-height: 0;
     background: var(--color-background-surface);
@@ -223,6 +227,38 @@ body,
     overflow-y: auto;
 }
 
+/* The two halves of the rail: nine tools, then the four view switches. Each is its own ARIA group,
+ * because one of them is a radio group and the other is four independent switches. */
+.tool-group {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.tool-divider {
+    flex: 0 0 auto;
+    height: 1px;
+    margin: 6px 4px;
+    background: var(--color-border);
+}
+
+/* Two rows of two, and no fill on either state — see the comment over `SWITCHES`. */
+.tool-switches {
+    flex-direction: row;
+    flex-wrap: wrap;
+}
+
+.tool-switches .tool {
+    width: calc(50% - 1px);
+    padding: 10px 0;
+}
+
+.tool-switches .tool[data-armed] {
+    background: none;
+    border-color: transparent;
+    color: var(--color-icon-accent);
+}
+
 .tool {
     display: flex;
     flex-direction: column;
@@ -275,50 +311,23 @@ body,
     color: var(--color-icon-secondary);
 }
 
-/* ---- grid / snap / voxel size ---- */
-
-.snap-panel {
-    gap: 10px;
-    padding: 14px 12px;
-}
+/* ---- symmetry / plane / references / voxel size ---- */
 
 /*
- * One switch to a row rather than two side by side. A track needs its own width, and three of them
- * across a 193 px column would each get 60 px — enough for the track and nothing to say what it is
- * for. Stacked, each row is icon, name, track, and the tracks line up down the right edge so the
- * whole block can be read as one column of on-or-off.
+ * The tail of the brush column, separated from the palette by a full-bleed rule rather than by a
+ * heading: every row in it already names itself, and a fifth upper-cased word in a 216 px column
+ * would be the loudest thing in it.
  */
-.snap-row {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
+.scene-panel {
+    gap: 10px;
+    padding: 0 12px 14px;
+    border-top: 1px solid var(--color-border);
 }
 
-.snap-toggle {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.snap-toggle > :last-child {
-    flex: 1 1 auto;
-    min-width: 0;
-}
-
-.snap-icon {
-    display: flex;
-    flex: 0 0 auto;
-    align-items: center;
-    justify-content: center;
-    width: 24px;
-    height: 24px;
-    border-radius: var(--radius-full);
-    background: var(--color-background-card);
-    color: var(--color-icon-secondary);
-}
-
-.snap-toggle[data-on] .snap-icon {
-    color: var(--color-icon-accent);
+/* The panel's own rule is the divider, so the first row must not draw a second one 14 px under it. */
+.scene-panel > .snap-size:first-child {
+    padding-top: 14px;
+    border-top: none;
 }
 
 .snap-size {

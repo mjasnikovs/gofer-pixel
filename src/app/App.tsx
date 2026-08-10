@@ -13,9 +13,10 @@ import {ExportDialog} from './ExportDialog'
 import {Header} from './Header'
 import {ObjectsPanel} from './ObjectsPanel'
 import {RendersPanel} from './RendersPanel'
+import {ScenePanel} from './ScenePanel'
 import {Stage} from './Stage'
 // import {Timeline} from './Timeline' — see the commented bar at the end of the layout
-import {GridPanel, ToolRail} from './ToolRail'
+import {ToolRail} from './ToolRail'
 import {ViewsStrip} from './ViewsStrip'
 import {
     asDocument,
@@ -56,6 +57,14 @@ import {
  * foot. Export used to be a third section of that rail and is a dialog now — eight maps of preview
  * do not fit in 384 px, and `FEATURESET.md` §39 asks the window not to advertise everything at once. Every one is budgeted in px because a tool's panels are sized by what they hold,
  * not by a fraction of the window. The exact column arithmetic is in `app.css`.
+ *
+ * The mockup also draws a settings box in the bottom-left corner, and that box is gone. It was drawn
+ * holding two switches and a number; it ended up holding four switches, symmetry, the drawing plane,
+ * the reference rows and the number, which is 259 px of content in a 260 px box — so the first
+ * dropped reference picture clipped the voxel size off the bottom of an `overflow: hidden` panel.
+ * The switches went into the rail, which now runs the whole height and has the room; the rest went
+ * under the palette, into a column that scrolls. Nothing is left in row two but the views strip,
+ * which gains the corner's 97 px.
  *
  * There is no state here. Everything is `reduce` in `state.ts`, which is why the interesting tests
  * are 1 ms functions rather than a browser driving a UI.
@@ -351,6 +360,10 @@ export const App = ({
                         files={files}
                         onLoad={loadPalette}
                     />
+                    <ScenePanel
+                        state={state}
+                        dispatch={dispatch}
+                    />
                 </div>
 
                 <Stage
@@ -363,13 +376,6 @@ export const App = ({
                         apply(dropPicture(file, asVoxels, state.plane ?? 1))
                     }}
                 />
-
-                <div className='snap-column'>
-                    <GridPanel
-                        state={state}
-                        dispatch={dispatch}
-                    />
-                </div>
 
                 <ViewsStrip
                     state={state}
