@@ -2,6 +2,7 @@ import {useCallback, useMemo, type Dispatch} from 'react'
 import {objectAt} from '../doc/objects'
 import {selectionBounds} from '../doc/selection'
 import type {Raycaster} from '../render/gl'
+import {lightFor} from '../render/light'
 import {isPerfect, pixelsPerVoxel} from '../render/perfect'
 import type {Volume} from '../render/volume'
 import {Viewport} from '../viewport/Viewport'
@@ -146,6 +147,7 @@ export const Stage = ({
                 camera={orbit.camera}
                 map={state.map}
                 edges={state.edges}
+                light={lightFor(state.lighting)}
                 cursor={TOOL_CURSORS[state.tool]}
                 isMovingCamera={orbit.gesture !== undefined}
                 onOrbit={onOrbit}

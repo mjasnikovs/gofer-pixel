@@ -40,6 +40,7 @@ What is there now, and roughly in dependency order:
 | Path                | Holds                                                                            |
 | ------------------- | -------------------------------------------------------------------------------- |
 | `src/render/`       | the CPU raycaster, the shader it is mirrored by, the camera, the WebGL2 renderer |
+| `src/render/light`  | the sun and the ambient floor, as the six-face table both backends multiply by   |
 | `src/vox/`          | `.vox` → `Volume`                                                                |
 | `src/doc/`          | cameras, the brush, edits, undo, selection, transforms, symmetry, figures        |
 | `src/doc/gesture`   | what the pointer does to voxels: aiming, strokes, drags, and the outline         |
@@ -173,12 +174,11 @@ Neither service is required to open the app. With llama-server down the menu ite
 that says so and disables its one button; with `clipserve.py` down the batch ranks on the built-in
 scores.
 
-## Nineteen seams worth knowing about
+## Twenty seams worth knowing about
 
-The app layer is deliberately thin, and nineteen modules under it hold what would otherwise be
-spread through React callbacks and reducer cases. Each one was pulled out because its rules could
-only be tested by mounting something, or by building a whole `AppState` to ask a question about four
-fields.
+The app layer is deliberately thin, and twenty modules under it hold what would otherwise be spread
+through React callbacks and reducer cases. Each one was pulled out because its rules could only be
+tested by mounting something, or by building a whole `AppState` to ask a question about four fields.
 
 - **`src/doc/gesture.ts`** — every pointer gesture, over a `Gesture` interface that `AppState`
   extends. Eighteen fields, not fifty. It replaces two hand-written lists of the same field names
@@ -188,6 +188,49 @@ fields.
   `beginSelect`. `visible(state)` and `slicedFor(state, shown)` are the one derivation of "the grid
   as the artist sees it": the app used to spell the first half itself and draw from that, so in
   slice mode the picture was the whole model while the click landed on the sliced one.
+- **`src/render/light.ts`** — the viewport's sun and ambient floor, `FEATURESET.md` §21, which used
+  to be a disabled button in the header. **Nothing it does is exported, and that is the feature, not
+  a limitation.** Lighting is the game engine's job — that is what §21 said and what the normal,
+  depth and AO maps are for — so a lit colour map reaching an engine would be lit twice by two
+  lights that know nothing about each other. It therefore sits in exactly the same category as the
+  voxel lattice: one thing the interactive view draws that the CPU exporter is never asked for.
+  Every thumbnail, the render panel and the whole export dialog stay flat, because each of those
+  stands for a file. It is `Chrome`, so it is not in the `.gpix` and not in the undo history.
+
+    It is one module and no second renderer because **a voxel face is flat, so a directional light
+    can only ever say one thing per face**: a sun's entire effect _is_ the six-integer table
+    `faces.ts` used to hand-write. The table is whole numbers over 256 and that is the parity
+    contract, not a habit — `floor(channel * light / 256)` is exact in float32, so a `float` sun
+    computed in the shader would land the two backends on different bytes. It moved from a compile-
+    time constant in `raycast.glsl.ts` to a uniform, and the lit parity test in `browser/` is what
+    holds the shader to the CPU oracle across that change. `lightFor` returns `FACE_LIGHT` _itself_
+    when the sun is off, because the identity is the viewport's render dependency.
+
+    Four things are deliberate and are in its tests. **Off is the default**, because nobody should
+    get a light they did not ask for — and because the hand-tuned table is not a sun, so "on" could
+    not be made to mean what the app has always drawn. **The term is half-Lambert, not Lambert**:
+    clamped, every face turned away ties at the ambient floor and the shaded side of a model becomes
+    one flat silhouette. **The default azimuth is 30° and not 45°**, because at 45° the `+x` and
+    `+y` faces take the same dot product and the two visible sides of a box come out one tone. The
+    normal comes from `FACE_STEP`, not `FACE_NORMAL_RGB`, which is asymmetric about zero — decoding
+    it gives a vector of length 1.0079 on the negative side, enough to land a face one byte off its
+    own opposite when the sun turns through 180°. **A point light is the line this stops at**: it
+    varies across a face, so it is per-pixel, and it needs shadows, which is a second ray march.
+
+    `LightPanel.tsx` is sliders in the right-hand rail rather than steppers in the brush column, and
+    it updates on `onChange` rather than `onChangeEnd`. A sun is aimed, not set — the artist sweeps
+    it until the shape reads — and that is affordable precisely because it stops at the viewport: a
+    step costs one GPU frame and touches no thumbnail, no sprite-cache entry and no sheet. Its reset
+    button spreads `{...DEFAULT_LIGHTING, on: true}` and **the `on: true` is load-bearing**: the
+    default is off, so the plain spread turned the sun off and unmounted the panel the click landed
+    in, with the switch to bring it back four hundred pixels away in the header.
+
+    The header's lit glyph is a span of ours _inside_ astryx's icon slot, not a class on the button.
+    Astryx styles its buttons with StyleX and a plain class on the same element loses — measured in
+    the running app, the button computed `rgb(197, 189, 243)` while `--color-text-accent` in that
+    same header read `#a08cf6`. The button keeps its ghost face rather than taking
+    `variant='primary'`, because Export is the one filled button in the window.
+
 - **`src/render/perfect.ts`** — whether a voxel lands on whole pixels, and at which zooms it would.
   `FEATURESET.md` §14 words the rule as "integer zoom" and **that is the wrong invariant**: zoom is
   voxels-tall of the frame, and what lands on the grid is `cell / zoom`, pixels-tall of a voxel. The
@@ -421,9 +464,9 @@ file dialogs, the guard in front of them, and the one live viewport.
 Before reaching for a mount, check whether the thing under test has a seam already: `state.ts`,
 `gesture.ts`, `session.ts`, `keys.ts`, `batch.ts`, `connect.ts`, `doc/reference.ts`,
 `gen/reference.ts`, `teaching.ts`, `overlay.ts`, `views.ts`, `presets.ts`, `store.ts`, `export.ts`,
-`history.ts`, `ask.ts`, `choice.ts` and `empty.ts` all answer their own questions in single-digit
-milliseconds, and they exist because the answers used to cost a window. If it is one panel and a
-real reducer, that is `test/panel.tsx` — and the stage is a panel by that definition, so
+`history.ts`, `ask.ts`, `choice.ts`, `empty.ts` and `render/light.ts` all answer their own questions
+in single-digit milliseconds, and they exist because the answers used to cost a window. If it is one
+panel and a real reducer, that is `test/panel.tsx` — and the stage is a panel by that definition, so
 `Stage.test.tsx` mounts it there rather than mounting a window.
 
 ## Conventions

@@ -24,6 +24,7 @@ import {beginEdit, writeCells, writeOwned, type Draft} from '../doc/edits'
 import type {GenerationRecord} from '../gen/llama'
 import {drop, fade, lock, place, type Reference} from '../doc/reference'
 import {DEFAULT_OUTPUT, type Document, type SavedOutput} from '../doc/save'
+import {DEFAULT_LIGHTING, withLight, type Lighting} from '../render/light'
 import {
     addObject,
     duplicateOffset,
@@ -256,6 +257,20 @@ export interface Chrome {
      */
     readonly draggingCamera: string | undefined
     readonly draggingObject: number | undefined
+    /**
+     * The viewport's sun and ambient floor — `FEATURESET.md` §21, see `render/light.ts`.
+     *
+     * Chrome, and it takes the definition exactly: **no sprite carries it**. Lighting is the game
+     * engine's job, which is what §21 said and what the normal, depth and AO maps are for — an
+     * exported colour map that had already been lit would be lit twice. So this is a modelling aid
+     * and nothing else, and it lives beside `edges` in every sense: one thing the viewport draws
+     * that the CPU raycaster is never asked for.
+     *
+     * Not saved, therefore, and not undoable. A sun that shipped nothing but sat in the file would
+     * need a third category between chrome and document, and there is nothing for that category to
+     * hold but this.
+     */
+    readonly lighting: Lighting
 }
 
 /**
@@ -345,6 +360,14 @@ export type AppAction =
      * falls back — and a `Partial` that could carry the whole list would let a caller past them.
      */
     | {type: 'output'; output: Omit<Partial<SavedOutput>, 'presets'>}
+    /**
+     * The sun, the ambient floor and the switch over both — see `render/light.ts`.
+     *
+     * `Partial`, for the reason `output` is: five fields whose every case would have been the same
+     * assignment. The clamping is not here — `withLight` owns it, so the panel's `+` and the
+     * keyboard and a loaded file all wrap the azimuth the same way.
+     */
+    | {type: 'lighting'; lighting: Partial<Lighting>}
     | {type: 'save-preset'; name: string; maps: readonly SheetMap[]}
     | {type: 'drop-preset'; name: string}
     | {type: 'reorder-camera'; id: string; to: number}
@@ -453,6 +476,8 @@ export const initialState = (source: Volume, name: string, opened?: OpenedDocume
         ringPitch: 'dimetric',
         draggingCamera: undefined,
         draggingObject: undefined,
+        // Chrome, so it does not come off the opened document — there is none in the file.
+        lighting: DEFAULT_LIGHTING,
         frame: 1
     }
 }
@@ -1040,6 +1065,14 @@ const step = (state: AppState, action: AppAction): AppState => {
          * record, no sheet to invalidate, no file to mark dirty. An action that needs to do any of
          * those is not chrome and does not belong here.
          */
+        /*
+         * The sun and the ambient floor — see `render/light.ts`. Not an undo step: it changes no
+         * cell, the same way a palette edit does not, and folding it into a diff format built for
+         * cells is how an undo stack starts lying about what it holds.
+         */
+        case 'lighting':
+            return {...state, lighting: withLight(state.lighting, action.lighting)}
+
         case 'chrome':
             return {...state, ...action.chrome}
     }

@@ -45,6 +45,12 @@ const disk = () => {
             }
         } satisfies Files,
         names: (): string[] => [...backing.keys()],
+        /** What landed under a name, for a test that is about the bytes rather than the file list. */
+        bytes: (name: string): Uint8Array => {
+            const found = backing.get(name)
+            if (!(found instanceof Uint8Array)) throw new Error(`no PNG at "${name}"`)
+            return new Uint8Array(found)
+        },
         /** Resolves once `n` more files have reached the port. */
         after: (n: number): Promise<void> => {
             wanted = count + n
@@ -402,5 +408,39 @@ test('a sprite size that would fix the whole sheet is offered as a button', asyn
 test('no sprite size fixes an isometric ring, so none is offered', async () => {
     const panel = await withCameras([iso(16), iso(16)], 32)
     expect(note()).not.toContain('Use')
+    await panel.unmount()
+})
+
+/**
+ * The viewport's sun reaches nothing in here — `render/light.ts`.
+ *
+ * Lighting is the game engine's job, so an exported colour map that had already been lit would be
+ * lit twice. Watched at the port, on the bytes, because that is where the claim can actually be
+ * settled: the dialog rebakes on everything it can see, and a sun threaded into that memo "for
+ * consistency" would change every colour PNG the app writes without changing a single test that
+ * only looked at file names.
+ */
+test('turning the sun on changes nothing that gets written', async () => {
+    const out = disk()
+    const panel = await open(out.files)
+
+    const download = async (): Promise<void> => {
+        await panel.act(() => {
+            press('More export options').click()
+        })
+        const landed = out.after(1)
+        await panel.act(() => {
+            menuItem('Download colour sheet only').click()
+        })
+        await landed
+    }
+
+    await download()
+    const before = out.bytes('sprites.png')
+
+    await panel.dispatch({type: 'lighting', lighting: {on: true, azimuth: 200, sun: 1, ambient: 0}})
+    await download()
+
+    expect(out.bytes('sprites.png')).toEqual(before)
     await panel.unmount()
 })

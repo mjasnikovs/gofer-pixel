@@ -8,6 +8,8 @@ import {
     MODE_ID,
     MODE_NORMAL
 } from '../src/render/raycast.glsl'
+import {FACE_LIGHT} from '../src/render/faces'
+import {lightFor} from '../src/render/light'
 import {render} from '../src/render/raycast'
 import {createVolume, setVoxel, type Volume} from '../src/render/volume'
 
@@ -371,4 +373,59 @@ test('the running viewport shows no voxel that is buried inside a solid block', 
     expect(opaque).toBeGreaterThan(view.width * view.height * 0.05)
     expect(buried).toBe(0)
     expect(differs).toBe(0)
+})
+
+/**
+ * A sun agrees on both backends, byte for byte — see `src/render/light.ts`.
+ *
+ * The sun is viewport-only, so **the GPU is the only backend that ever draws one for real**. This
+ * test is what stops that being a place the shader can quietly go wrong: the light stopped being
+ * baked into this shader's source and became a uniform, and a uniform is a new way for the two to
+ * disagree. The CPU multiplies by a `Uint16Array` and the GPU by a `float[7]` it was handed, which
+ * is exact only because the table is whole numbers over 256 — and this is where that claim meets a
+ * real driver.
+ *
+ * Deliberately not overhead and deliberately not a round strength, so every one of the six faces
+ * takes a different multiplier and none of them lands on 0 or 256.
+ */
+test('the shader matches the CPU raycast with a sun on', async ({page}) => {
+    await page.goto('/browser/harness.html')
+    const camera: Camera = {yaw: 0.7, pitch: 0.5, zoom: N, panX: 0, panY: 0}
+    const light = lightFor({on: true, azimuth: 35, elevation: 55, sun: 0.7, ambient: 0.3})
+
+    // Whichever face it is, the sun changed it. A table that arrived as zeroes would render black
+    // on both sides and pass the comparison below.
+    expect(Array.from(light).slice(1)).not.toEqual(Array.from(FACE_LIGHT).slice(1))
+
+    const cpu = render(volume, basisFor(camera, volume, H), W, H, undefined, light)
+    const colour = await page.evaluate(
+        ([v, b, m, w, h, e, l]) =>
+            window.gofer.gpuRender(
+                v as Parameters<typeof window.gofer.gpuRender>[0],
+                b as Parameters<typeof window.gofer.gpuRender>[1],
+                m as number,
+                w as number,
+                h as number,
+                e as boolean,
+                l as number[]
+            ),
+        [wire, basisFor(camera, volume, H), MODE_COLOR, W, H, false, Array.from(light)] as unknown[]
+    )
+
+    let opaque = 0
+    let differs = 0
+    for (let row = 0; row < H; row += 1) {
+        for (let px = 0; px < W; px += 1) {
+            const here = row * W + px
+            const there = (H - 1 - row) * W + px
+            if ((cpu.id[here] ?? 0) !== 0) opaque += 1
+            for (let byte = 0; byte < 4; byte += 1) {
+                if (cpu.color[here * 4 + byte] !== colour[there * 4 + byte]) differs += 1
+            }
+        }
+    }
+
+    expect(opaque).toBeGreaterThan(W * H * 0.1)
+    const renderer = await page.evaluate(() => window.gofer.gpuInfo())
+    expect(differs, `lit colour differences on ${renderer}`).toBe(0)
 })

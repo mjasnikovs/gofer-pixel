@@ -11,6 +11,7 @@ import type {Volume} from '../render/volume'
 import {BrushPanel} from './BrushPanel'
 import {ExportDialog} from './ExportDialog'
 import {Header} from './Header'
+import {LightPanel} from './LightPanel'
 import {ObjectsPanel} from './ObjectsPanel'
 import {RendersPanel} from './RendersPanel'
 import {ScenePanel} from './ScenePanel'
@@ -393,6 +394,15 @@ export const App = ({
                         dispatch={dispatch}
                         volume={shown}
                         camera={previewed}
+                    />
+                    {/*
+                     * Last in the rail, and only when the sun is on — see `LightPanel`. Under the
+                     * renders rather than over them, because the renders are the sprite and this is
+                     * a light that the sprite does not carry.
+                     */}
+                    <LightPanel
+                        state={state}
+                        dispatch={dispatch}
                     />
                 </div>
             </div>

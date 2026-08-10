@@ -1,4 +1,5 @@
 import type {Basis} from './camera'
+import {FACE_LIGHT} from './faces'
 import {FRAGMENT_SHADER, MODE_COLOR, VERTEX_SHADER} from './raycast.glsl'
 import type {Volume} from './volume'
 
@@ -21,7 +22,13 @@ export interface Raycaster {
      * `edges` draws the voxel lattice over the colour map. It is viewport decoration and defaults
      * off, which is what keeps it out of the parity the two backends are held to.
      */
-    renderNow: (basis: Basis, mode?: number, edges?: boolean) => Promise<number>
+    renderNow: (
+        basis: Basis,
+        mode?: number,
+        edges?: boolean,
+        /** The six-face light table — see `light.ts`. Defaults to the unlit one. */
+        light?: Uint16Array
+    ) => Promise<number>
     /** RGBA8 of the last frame, framebuffer order — row 0 is the *bottom*. */
     readPixels: () => Uint8Array
     dispose: () => void
@@ -94,6 +101,9 @@ export const createRaycaster = (canvas: HTMLCanvasElement): Raycaster => {
 
     let frames = 0
     const landed = new Uint8Array(4)
+    // Reused rather than allocated per frame. `uniform1fv` wants floats and the table is integers,
+    // so the copy is unavoidable; doing it into a scratch buffer keeps it off the frame's budget.
+    const lightBuffer = new Float32Array(7)
 
     const setVolume = (volume: Volume): void => {
         gl.activeTexture(gl.TEXTURE0)
@@ -152,7 +162,12 @@ export const createRaycaster = (canvas: HTMLCanvasElement): Raycaster => {
         gl.uniform1f(at('uHeight'), height)
     }
 
-    const renderNow = async (basis: Basis, mode = MODE_COLOR, edges = false): Promise<number> => {
+    const renderNow = async (
+        basis: Basis,
+        mode = MODE_COLOR,
+        edges = false,
+        light: Uint16Array = FACE_LIGHT
+    ): Promise<number> => {
         const [fx, fy, fz] = basis.forward
         const [rx, ry, rz] = basis.right
         const [ux, uy, uz] = basis.up
@@ -166,6 +181,8 @@ export const createRaycaster = (canvas: HTMLCanvasElement): Raycaster => {
         gl.uniform1f(at('uDepthRange'), basis.depthRange)
         gl.uniform1i(at('uMode'), mode)
         gl.uniform1i(at('uEdges'), edges ? 1 : 0)
+        lightBuffer.set(light)
+        gl.uniform1fv(at('uLight'), lightBuffer)
 
         gl.clearColor(0, 0, 0, 0)
         gl.clear(gl.COLOR_BUFFER_BIT)

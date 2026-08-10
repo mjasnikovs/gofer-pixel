@@ -1652,3 +1652,15 @@ body,
     background: var(--color-background-body);
     border-radius: var(--radius-element);
 }
+
+/*
+ * The header's sun, lit — see `Header.tsx` and `LightPanel.tsx`.
+ *
+ * A span of ours inside astryx's icon slot, not a class on the button: astryx styles its buttons
+ * with StyleX and a plain class on the same element loses to it. The SVG strokes with
+ * `currentColor`, so one declaration covers the whole glyph.
+ */
+.lit-glyph {
+    display: flex;
+    color: var(--color-text-accent);
+}

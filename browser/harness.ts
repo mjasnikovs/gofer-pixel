@@ -29,7 +29,12 @@ const gpuRender = async (
     height: number,
     // Last and optional, so every parity call is a call with the lattice off. That default is the
     // whole reason the shader is allowed to carry something the CPU raycaster does not.
-    edges = false
+    edges = false,
+    /**
+     * The six-face light table — see `src/render/light.ts`. Plain numbers, because this crosses
+     * `page.evaluate` and a `Uint16Array` does not survive that.
+     */
+    light?: readonly number[]
 ): Promise<number[]> => {
     const canvas = document.getElementById('gl')
     if (!(canvas instanceof HTMLCanvasElement)) throw new Error('no canvas')
@@ -51,7 +56,7 @@ const gpuRender = async (
         loaded = key
     }
     raycaster.resize(width, height)
-    await raycaster.renderNow(basis, mode, edges)
+    await raycaster.renderNow(basis, mode, edges, light ? Uint16Array.from(light) : undefined)
     return Array.from(raycaster.readPixels())
 }
 

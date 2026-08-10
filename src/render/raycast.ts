@@ -77,7 +77,20 @@ export const render = (
     basis: Basis,
     width: number,
     height: number,
-    into?: RenderTarget
+    into?: RenderTarget,
+    /**
+     * The six-face light table — see `light.ts`.
+     *
+     * **Nothing that ships a sprite passes one, and that is the point.** The artist's sun is a
+     * viewport aid the exporter is never asked for, exactly like the voxel lattice, because a lit
+     * colour map reaching a game engine would be lit twice. So every caller here — the sheet, the
+     * sprite cache, the generation pipeline — takes the default.
+     *
+     * It is a parameter at all so the parity test can hold the shader to this function with a sun
+     * on. The light stopped being baked into the shader source and became a uniform, which is a new
+     * way for the two backends to disagree; the oracle has to be able to ask.
+     */
+    light: Uint16Array = FACE_LIGHT
 ): RenderTarget => {
     const target = into ?? createTarget(width, height)
     const {sx, sy, sz, data, palette, emissive, owner} = volume
@@ -163,12 +176,12 @@ export const render = (
                 if (vx < 0 || vy < 0 || vz < 0 || vx >= sx || vy >= sy || vz >= sz) break
                 const value = data[(vz * sy + vy) * sx + vx] ?? 0
                 if (value !== 0) {
-                    const light = FACE_LIGHT[face] ?? 0
+                    const lit = light[face] ?? 0
                     const at = (row * width + px) * 4
                     const swatch = value * 4
-                    color[at] = Math.floor(((palette[swatch] ?? 0) * light) / 256)
-                    color[at + 1] = Math.floor(((palette[swatch + 1] ?? 0) * light) / 256)
-                    color[at + 2] = Math.floor(((palette[swatch + 2] ?? 0) * light) / 256)
+                    color[at] = Math.floor(((palette[swatch] ?? 0) * lit) / 256)
+                    color[at + 1] = Math.floor(((palette[swatch + 1] ?? 0) * lit) / 256)
+                    color[at + 2] = Math.floor(((palette[swatch + 2] ?? 0) * lit) / 256)
                     color[at + 3] = 255
                     const n = face * 3
                     normal[at] = FACE_NORMAL[n] ?? 128

@@ -82,3 +82,66 @@ test('the header says the document’s name, its size and whether it is saved', 
 
     await panel.unmount()
 })
+
+/**
+ * The sun — `FEATURESET.md` §21, see `render/light.ts`.
+ *
+ * It was a disabled button whose tooltip said lighting was the game engine's job. That is right
+ * about a point light and wrong about a directional one: over flat voxel faces a sun is six
+ * integers, which both backends already multiply by.
+ */
+test('the sun button turns the lighting on and off', async () => {
+    const panel = await open()
+    expect(panel.state().lighting.on).toBe(false)
+
+    await panel.click('Lighting')
+    expect(panel.state().lighting.on).toBe(true)
+
+    await panel.click('Lighting')
+    expect(panel.state().lighting.on).toBe(false)
+
+    await panel.unmount()
+})
+
+/**
+ * Off is the default, so the tooltip has to say *why* or the artist reads it as unfinished — and it
+ * has to say, in both states, that nothing it does is exported. A sun is exactly the control
+ * somebody would otherwise assume was baking into their sprite.
+ */
+test('the sun button says which way round it is, and that no sprite carries it', async () => {
+    const panel = await open()
+    const said = (): string => panel.host.textContent
+
+    expect(said()).toContain('game engine')
+    expect(said()).toContain('Never exported')
+    expect(panel.control('Lighting').getAttribute('aria-pressed')).toBe('false')
+
+    await panel.click('Lighting')
+    expect(said()).toContain('flat faces')
+    expect(said()).toContain('No sprite carries it')
+    expect(panel.control('Lighting').getAttribute('aria-pressed')).toBe('true')
+
+    await panel.unmount()
+})
+
+/**
+ * The glyph takes the accent when the sun is on — see `.lit-glyph` in `app.css`.
+ *
+ * On our own span inside astryx's icon slot rather than on the button, because astryx styles its
+ * buttons with StyleX and a class on the same element loses to it. Measured in the running app:
+ * the button computed `rgb(197, 189, 243)` while the token in that header read `#a08cf6`. So the
+ * assertion is on the span, which is the thing that actually carries the colour.
+ */
+test('the sun glyph is accented only while the light is on', async () => {
+    const panel = await open()
+    const lit = (): number => panel.host.querySelectorAll('.lit-glyph').length
+    expect(lit()).toBe(0)
+
+    await panel.click('Lighting')
+    expect(lit()).toBe(1)
+
+    await panel.click('Lighting')
+    expect(lit()).toBe(0)
+
+    await panel.unmount()
+})

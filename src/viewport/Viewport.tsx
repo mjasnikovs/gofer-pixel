@@ -1,6 +1,7 @@
 import {useEffect, useRef, useState, type PointerEvent as ReactPointerEvent} from 'react'
 import type {Camera} from '../render/camera'
 import {basisFor} from '../render/camera'
+import {FACE_LIGHT} from '../render/faces'
 import {createRaycaster, type Raycaster} from '../render/gl'
 import type {Volume} from '../render/volume'
 import type {OrbitEvent, ViewportPointer} from './orbit'
@@ -61,6 +62,7 @@ export const Viewport = ({
     camera,
     map,
     edges = false,
+    light = FACE_LIGHT,
     cursor,
     isMovingCamera = false,
     onOrbit,
@@ -74,6 +76,14 @@ export const Viewport = ({
     map: number
     /** Draw the voxel lattice over the colour map. Viewport only — no sprite ever carries it. */
     edges?: boolean
+    /**
+     * The six-face light table — see `render/light.ts`. Unlike `edges`, this one *is* what the
+     * sprite carries: the viewport and the exporter multiply by the same seven integers.
+     *
+     * Its identity is a render dependency, so it must be stable between renders. `lightFor` keeps
+     * it so.
+     */
+    light?: Uint16Array
     /**
      * The pointer, as a CSS `cursor` value — see `app/cursors.ts`. It comes in rather than being
      * decided here because which tool is armed is application state, and this component deliberately
@@ -169,8 +179,10 @@ export const Viewport = ({
         const raycaster = glRef.current?.raycaster
         if (!raycaster || size.width === 0) return
         raycaster.resize(size.width, size.height)
-        void raycaster.renderNow(basisFor(camera, volume, size.height), map, edges).then(onFrame)
-    }, [camera, map, edges, size, volume, onFrame])
+        void raycaster
+            .renderNow(basisFor(camera, volume, size.height), map, edges, light)
+            .then(onFrame)
+    }, [camera, map, edges, light, size, volume, onFrame])
 
     // React's wheel listener is passive, so it cannot stop the page scrolling under a zoom.
     useEffect(() => {

@@ -23,8 +23,12 @@ export const FACE_Z_POS = 6
  * (`255 * 256` is far below the 2²⁴ where float32 stops counting), so the shader and the exporter
  * land on the same colour rather than on two colours a rounding mode apart.
  *
- * Voxel art wants flat faces, not a gradient — this is the whole lighting model, and there is
- * deliberately no light direction. `+z` is up, which is what `.vox` means by z.
+ * Voxel art wants flat faces, not a gradient, so a face's whole appearance is one number — which
+ * is also why a sun can be a *replacement* for this table rather than a second pass over it. See
+ * `light.ts`. These six are the unlit default and are not a sun: no single direction reproduces
+ * `-y` sitting above `-x` while both face away from it. They are hand-tuned, and they stay.
+ *
+ * `+z` is up, which is what `.vox` means by z.
  */
 export const FACE_LIGHT = new Uint16Array([
     0, // unused: face codes are 1-based

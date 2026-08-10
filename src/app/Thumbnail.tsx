@@ -11,6 +11,10 @@ import {spriteFor} from './sprite-cache'
  * Every preview in the window comes through here: the camera grid, the views strip, the render
  * panel and the export grid. That is the point. What the artist picks from is what they get, rather
  * than a preview drawn by a second renderer that agrees with the first only most of the time.
+ *
+ * There is deliberately no light on it. The viewport's sun is a modelling aid that no sprite
+ * carries — see `render/light.ts` — and a lit thumbnail would be this component doing the one thing
+ * it exists to prevent: showing the artist something the file does not contain.
  */
 export const Thumbnail = ({
     volume,

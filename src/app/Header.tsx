@@ -23,6 +23,10 @@ import type {AppAction, AppState} from './state'
  * otherwise. A disabled control that lies is worse than no control: it teaches the artist that the
  * feature is missing, and they stop looking for the shortcut that would have worked.
  *
+ * The sun is wired too, and the same argument applies: it was disabled with a tooltip handing
+ * lighting to the game engine, which is right about a point light and wrong about a directional
+ * one. See the comment on the button.
+ *
  * The rest of this row genuinely does nothing yet and stays disabled, each saying so in its own
  * tooltip. A greyed button that names what it would do is a promise; an enabled one that swallows
  * the click is a bug report.
@@ -147,13 +151,49 @@ export const Header = ({
                 }}
             />
             <span className='app-divider' />
+            {/*
+             * The viewport's sun — `FEATURESET.md` §21. See `render/light.ts`.
+             *
+             * It was disabled with a tooltip handing lighting to the game engine, and that reading
+             * was right: nothing this button does reaches a file. What it turns on is a modelling
+             * aid, in the same category as the voxel lattice — the shape reads better under a
+             * raking light while you are placing voxels, and the sprite you ship is flat.
+             *
+             * The tooltip has to say that in both states, because a sun is exactly the control an
+             * artist would otherwise assume was baking into their export.
+             */}
             <IconButton
                 label='Lighting'
-                tooltip='Lighting is the game engine’s job — see FEATURESET §21'
-                icon={<SunIcon />}
+                tooltip={
+                    state.lighting.on ?
+                        'Lighting the viewport only — click for flat faces. No sprite carries it'
+                    :   'Light the viewport while you model. Never exported: the game engine does '
+                        + 'the lighting, off the normal map — see FEATURESET §21'
+                }
+                /*
+                 * The glyph takes the accent when the sun is on; the button keeps its ghost face.
+                 *
+                 * Not `variant='primary'`, which fills the whole control — Export is the one filled
+                 * button in this window and a second fill four places to its left would argue with
+                 * it. Colouring the icon alone says "this one is doing something" in the same accent
+                 * every on-state in the app already uses, at a weight that does not compete.
+                 *
+                 * The colour is on a span of ours *inside* the icon rather than on the button,
+                 * because astryx styles its buttons with StyleX and a plain class on the same
+                 * element loses to it — measured: the token reads `#a08cf6` in this header and the
+                 * button still computed `rgb(197, 189, 243)`. Nothing targets this span but us.
+                 */
+                icon={
+                    <span className={state.lighting.on ? 'lit-glyph' : undefined}>
+                        <SunIcon />
+                    </span>
+                }
                 size='sm'
                 variant='ghost'
-                isDisabled
+                aria-pressed={state.lighting.on}
+                onClick={() => {
+                    dispatch({type: 'lighting', lighting: {on: !state.lighting.on}})
+                }}
             />
             <IconButton
                 label='Shading'

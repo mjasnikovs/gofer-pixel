@@ -1,5 +1,5 @@
 import {AO_STEP} from './ao'
-import {FACE_LIGHT, FACE_NORMAL_RGB, FACE_STEP, FACE_UV} from './faces'
+import {FACE_NORMAL_RGB, FACE_STEP, FACE_UV} from './faces'
 import {BIG, MAX_STEPS} from './raycast'
 
 /**
@@ -12,7 +12,9 @@ import {BIG, MAX_STEPS} from './raycast'
  *
  * - the camera basis is computed once on the CPU and uploaded, so no trigonometry runs twice;
  * - a zero direction component uses the same finite `BIG` sentinel, never `Infinity`;
- * - the light and normal tables below are generated from `faces.ts`, so they cannot drift;
+ * - the normal, step and uv tables below are generated from `faces.ts`, so they cannot drift, and
+ *   the light table is not generated at all: it is a uniform, computed once on the CPU and
+ *   uploaded, so a sun is one table on both sides rather than the same trigonometry run twice;
  * - every colour is integer arithmetic small enough to be exact in float32.
  *
  * The framebuffer's row 0 is the bottom and `RenderTarget`'s is the top. That is the one difference
@@ -47,7 +49,6 @@ void main(){ gl_Position = vec4(aCorner, 0.0, 1.0); }
 const glslFloat = (value: number): string =>
     Number.isInteger(value) ? `${String(value)}.0` : String(value)
 
-const lightTable = Array.from(FACE_LIGHT, glslFloat).join(', ')
 const normalTable = FACE_NORMAL_RGB.map(rgb => `vec3(${rgb.map(glslFloat).join(', ')})`).join(', ')
 const stepTable = FACE_STEP.map(step => `ivec3(${step.map(String).join(', ')})`).join(', ')
 const uvTable = FACE_UV.map(uv => `ivec2(${uv.map(String).join(', ')})`).join(', ')
@@ -72,12 +73,20 @@ uniform float uWidth;
 uniform float uHeight;
 uniform int uMode;
 uniform int uEdges;
+/**
+ * The six-face light, sent per frame rather than baked into this source — see \`light.ts\`.
+ *
+ * The values are integers over 256 on both sides. That is the parity requirement, not a habit:
+ * \`floor(rgb * light / 256.0)\` is exact in float32 for every integer light in 0–256, so the
+ * viewport and the CPU exporter land on the same byte. A float sun computed in the shader would
+ * not, because the two backends would round its dot product differently.
+ */
+uniform float uLight[7];
 
 out vec4 fragColor;
 
 const float BIG = ${glslFloat(BIG)};
 const int MAX_STEPS = ${String(MAX_STEPS)};
-const float LIGHT[7] = float[7](${lightTable});
 const vec3 NORMAL[7] = vec3[7](${normalTable});
 const ivec3 STEP[7] = ivec3[7](${stepTable});
 const ivec2 UV[7] = ivec2[7](${uvTable});
@@ -189,7 +198,7 @@ void main(){
         if (value != 0u){
             vec3 rgb = floor(texelFetch(uPalette, ivec2(int(value), 0), 0).rgb * 255.0 + 0.5);
             if (uMode == ${String(MODE_COLOR)}) {
-                vec3 lit = floor(rgb * LIGHT[face] / 256.0) / 255.0;
+                vec3 lit = floor(rgb * uLight[face] / 256.0) / 255.0;
                 if (uEdges != 0) lit = lattice(lit, org + f * (enter + walked) - cell, face);
                 fragColor = vec4(lit, 1.0);
             } else if (uMode == ${String(MODE_NORMAL)}) {

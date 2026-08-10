@@ -126,6 +126,8 @@ export const fakeGl = (options: FakeGlOptions = {}): FakeGl => {
         uniform1i: record('uniform1i'),
         uniform1f: record('uniform1f'),
         uniform3f: record('uniform3f'),
+        /** The six-face light table — one array uniform per frame. See `render/light.ts`. */
+        uniform1fv: record('uniform1fv'),
 
         viewport: record('viewport'),
         clearColor: record('clearColor'),

@@ -251,6 +251,20 @@ export const UndoIcon = () => (
     </Svg>
 )
 
+/**
+ * Put it back — a circular arrow, not `UndoIcon`'s hook.
+ *
+ * Deliberately not the undo glyph even though it is close: undo walks the history one step and this
+ * jumps a group of settings back to where they started, which is a different promise. The full
+ * circle is what says "all the way round", and it is the arrow every settings panel uses for it.
+ */
+export const ResetIcon = () => (
+    <Svg>
+        <path d='M13.5 8a5.5 5.5 0 1 1-1.9-4.2' />
+        <path d='M13.6 1.9v3.2h-3.2' />
+    </Svg>
+)
+
 export const RedoIcon = () => (
     <Svg>
         <path d='M13 7H6a3.5 3.5 0 0 0 0 7h4' />

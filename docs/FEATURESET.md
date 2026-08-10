@@ -228,18 +228,35 @@ The three groups postponed on 2026-08-07, and why:
     - ~~Perhaps "unlit pixel" vs "lit voxel".~~
     - Avoid node graphs entirely.
 
-21. **Lighting made for pixel art** — **POSTPONE — NOT IMPLEMENT NOW**
+21. **Lighting made for pixel art** — **A VIEWPORT SUN IS BUILT; NOTHING IT DOES IS EXPORTED**
 
     The normal, depth and AO maps hand lighting to the game engine, which knows its own falloff,
-    blend mode and axis convention. Reimplementing that here means guessing at all three.
+    blend mode and axis convention. Reimplementing that here means guessing at all three. **That
+    still stands, and it is why nothing here reaches a file.** A colour map that had already been
+    lit would be lit twice, by two lights that know nothing about each other.
 
-    - Sun.
-    - Ambient.
-    - Point light.
+    What is built is a sun and an ambient floor for the **viewport only** — a modelling aid, in the
+    same category as the voxel lattice: one thing the interactive view draws that the CPU exporter
+    is never asked for. Every thumbnail in the window, the render panel and the whole export dialog
+    stay flat, because each of those stands for a file. It is not in the `.gpix` either; it is
+    chrome, beside Grid and Snap. See `src/render/light.ts`.
+
+    It is affordable at all because a voxel face is flat, so a directional light can only ever say
+    one thing per face — a sun's whole effect is the six-integer table both backends already
+    multiply by. No second renderer, no per-pixel arithmetic.
+
+    - ~~Sun.~~ Built, viewport only. Angle and height, on the header's sun button and the sliders it
+      summons in the right-hand rail.
+    - ~~Ambient.~~ Built, viewport only. A floor under every face.
+    - Point light. **Postponed, and this is the line.** It varies across a face, so it is per-pixel
+      rather than a table, and it reads as a mistake without shadows — which is a second ray march
+      per pixel, in the loop whose own comment says it must not allocate.
     - Maybe three-light maximum by default.
     - Hard/soft shadows.
-    - Quantized lighting option.
-    - Live final-sprite preview.
+    - Quantized lighting option. Note the sun already is: the table is whole numbers over 256,
+      because that is what keeps the shader and the CPU exporter on the same byte.
+    - Live final-sprite preview. **Nothing to preview** — the sprite is what the export dialog
+      already shows, and the sun is not in it.
 
 22. **Pixel-art lighting mode** — **POSTPONE — NOT IMPLEMENT NOW**
 

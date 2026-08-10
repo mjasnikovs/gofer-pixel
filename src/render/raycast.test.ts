@@ -9,6 +9,7 @@ import {
     FACE_Y_POS,
     FACE_Z_POS
 } from './faces'
+import {lightFor} from './light'
 import {render} from './raycast'
 import {createVolume, setVoxel, voxelAt, type Volume} from './volume'
 
@@ -317,4 +318,50 @@ test('the fault the sweep is watching for, built by hand, is caught', () => {
 
     expect(hits).toBeGreaterThan(0)
     expect(core).toBeGreaterThan(0)
+})
+
+/**
+ * The sun reaches the exported pixels, and reaches them through the table rather than beside it.
+ *
+ * This is the join `light.ts` exists for: the artist's lighting is a `Uint16Array` of seven
+ * integers and the raycaster's colour arithmetic never learns there is a sun. Asserting the exact
+ * byte is what keeps that true — a second shading step added anywhere in the loop would pass a
+ * "the lit one is darker" test and fail this one.
+ */
+test('a light table given to the exporter is the multiplier the pixels come out with', () => {
+    const volume = createVolume(4, 4, 4, new Uint8Array(256 * 4))
+    volume.palette.set([200, 100, 50, 255], 7 * 4)
+    setVoxel(volume, 1, 1, 3, 7)
+
+    const camera: Camera = {yaw: 0, pitch: Math.PI / 2, zoom: 4, panX: 0, panY: 0}
+    const table = lightFor({on: true, azimuth: 30, elevation: 50, sun: 0.75, ambient: 0.25})
+    const target = render(volume, basisFor(camera, volume, 16), 16, 16, undefined, table)
+    const at = (5 * 16 + 5) * 4
+    const light = table[FACE_Z_POS] ?? 0
+
+    // The sun is not overhead and the top face is not at 256, so this is a real change and not the
+    // default table under another name.
+    expect(light).not.toBe(FACE_LIGHT[FACE_Z_POS] ?? 0)
+    expect(target.color[at]).toBe(Math.floor((200 * light) / 256))
+    expect(target.color[at + 1]).toBe(Math.floor((100 * light) / 256))
+    expect(target.color[at + 2]).toBe(Math.floor((50 * light) / 256))
+    expect(target.color[at + 3]).toBe(255)
+})
+
+/** Everything that is not the colour map is geometry, and a sun does not move geometry. */
+test('lighting changes the colour map and nothing else', () => {
+    const volume = testVolume()
+    const camera: Camera = {yaw: 0.7, pitch: 0.5, zoom: 40, panX: 0, panY: 0}
+    const basis = basisFor(camera, volume, 64)
+    const flat = render(volume, basis, 64, 64)
+    const table = lightFor({on: true, azimuth: 210, elevation: 15, sun: 1, ambient: 0})
+    const sunny = render(volume, basis, 64, 64, undefined, table)
+
+    expect(sunny.color).not.toEqual(flat.color)
+    expect(sunny.normal).toEqual(flat.normal)
+    expect(sunny.depth).toEqual(flat.depth)
+    expect(sunny.id).toEqual(flat.id)
+    expect(sunny.ao).toEqual(flat.ao)
+    expect(sunny.emission).toEqual(flat.emission)
+    expect(sunny.object).toEqual(flat.object)
 })
