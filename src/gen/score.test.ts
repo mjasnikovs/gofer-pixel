@@ -1,6 +1,14 @@
 import {expect, test} from 'bun:test'
 import {createVolume, setVoxel, type Volume} from '../render/volume'
-import {bboxFill, connectivity, overallScore, scoreModel, sliceUsage} from './score'
+import {
+    bboxFill,
+    connectivity,
+    overallScore,
+    scoreModel,
+    shellColors,
+    sliceUsage,
+    type ModelScores
+} from './score'
 
 const box = (
     volume: Volume,
@@ -39,6 +47,7 @@ test('an empty grid scores zero everywhere rather than dividing by nothing', () 
         sliceUsage: 0,
         bboxFill: 0,
         colorsUsed: 0,
+        shellColors: 0,
         voxels: 0
     })
 })
@@ -97,4 +106,43 @@ test('a cloud of debris does not win by being empty of its own box', () => {
     // Debris has almost no fill at all, so connectivity is what has to hold it down.
     expect(bboxFill(debris)).toBeLessThan(bboxFill(carved))
     expect(overallScore(scoreModel(carved))).toBeGreaterThan(overallScore(scoreModel(debris)))
+})
+
+/*
+ * The prop score has to be measured before `finish` — measured 2026-08-11, and it is the reason
+ * `scoreModel` takes two grids. `finish` invents up to two shade tones per colour, so a shell colour
+ * count taken after it pins at 10+ for every candidate and the variety term sorts nothing.
+ */
+test('shell colours come from the model as it was painted, not as it was shaded', () => {
+    const flat = createVolume(6, 6, 6)
+    flat.palette.set([200, 100, 60, 255], 4)
+    for (let z = 0; z < 6; z += 1) {
+        for (let y = 0; y < 6; y += 1) {
+            for (let x = 0; x < 6; x += 1) setVoxel(flat, x, y, z, 1)
+        }
+    }
+
+    // The same cube after shading: three tones where the reply painted one.
+    const shaded = {...flat, data: Uint8Array.from(flat.data)}
+    for (let i = 0; i < shaded.data.length; i += 3) shaded.data[i] = 2
+    for (let i = 1; i < shaded.data.length; i += 5) shaded.data[i] = 3
+
+    expect(shellColors(flat)).toBe(1)
+    expect(shellColors(shaded)).toBeGreaterThan(1)
+    // One grid: the inflated count, which is what a caller with only one grid can honestly have.
+    expect(scoreModel(shaded).shellColors).toBeGreaterThan(1)
+    // Both: the fact about what the reply painted.
+    expect(scoreModel(shaded, flat).shellColors).toBe(1)
+})
+
+test('a flat prop and a patterned one no longer score the same', () => {
+    const bare = scoreModel(createVolume(1, 1, 1))
+    const one: ModelScores = {...bare, connectivity: 1, sliceUsage: 1, bboxFill: 1, shellColors: 1}
+    const many: ModelScores = {...one, shellColors: 6}
+
+    // As silhouettes they are identical solid cubes, and both sort at the bottom.
+    expect(overallScore(one)).toBe(overallScore(many))
+    // As props they are a blank box and a patterned one, and the score can tell them apart.
+    expect(overallScore(many, true)).toBeGreaterThan(overallScore(one, true))
+    expect(overallScore(one, true)).toBeLessThan(0.75)
 })

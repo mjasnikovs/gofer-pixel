@@ -9,7 +9,6 @@ import {latestSnapshot, memoryStore, snapshots, type Store} from '../doc/store'
 import {memoryFiles, type Files} from '../doc/files'
 import {initialObjects} from '../doc/objects'
 import {NO_SYMMETRY} from '../doc/symmetry'
-import {memoryScorer} from '../gen/clip'
 import {memoryLlama, type Llama} from '../gen/llama'
 import {handle} from './handle'
 import {fakeGl, withFakeGl} from '../../test/fake-gl'
@@ -39,7 +38,7 @@ const mount = async (
                 name='car.vox'
                 store={store}
                 files={files}
-                {...(llama ? {llama, scorer: memoryScorer([], false)} : {})}
+                {...(llama ? {llama} : {})}
             />
         )
     })

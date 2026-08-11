@@ -1,15 +1,15 @@
-import {rankAgreement, type Scorer} from './clip'
+import {DEFAULT_FLAGS, type Flags} from './flags'
+import {gateStatus, NOTHING_GATED, type GateTally} from './gate'
 import {generateMany, randomSeed, type Candidate, type Llama} from './llama'
-import {overallScore, scoreModel, type ModelScores} from './score'
+import {overallScore, type ModelScores} from './score'
 import {judge, type Veto, type Verdict} from './veto'
-import {rankingViews} from './views'
 import type {WorkedExample} from './bank'
 import type {Swatches} from './palette'
 import {teachingSet} from './teaching'
 
 /**
- * One batch of candidates, end to end: ask the model N times, score what lands, optionally ask what
- * each one reads as, then let CLIP re-rank if it is running.
+ * One batch of candidates, end to end: ask the model N times, score what lands, and optionally ask
+ * what each one reads as.
  *
  * This used to be a callback inside the generate dialog, which meant the only way to test the
  * *order of the stages* was to mount React and click a button. The stages are where the measured
@@ -21,9 +21,7 @@ import {teachingSet} from './teaching'
  * 2. **Naming sorts nothing.** It is one vision call per candidate and the word it returns is a
  *    label. Measured over 8 cats and 8 knights, ranking by it threw away a real cat for being
  *    called "dog" and the best knight of eight for being called "santa".
- * 3. **CLIP goes last and nothing waits on it.** The built-in scores are an order already, so the
- *    grid is complete before CLIP is asked and the artist can pick while it is being asked.
- * 4. **A dropped model outranks the bank's guess.** The artist's own example is appended after the
+ * 3. **A dropped model outranks the bank's guess.** The artist's own example is appended after the
  *    bank's picks, which puts it nearest the prompt — the position the model imitates hardest.
  *
  * Every stage checks the signal before it starts. Cancelling mid-batch keeps what landed.
@@ -32,7 +30,6 @@ export interface Ranked {
     readonly candidate: Candidate
     readonly scores: ModelScores
     readonly overall: number
-    readonly clip: number | null
     /**
      * What the vision model called it — see `veto.ts`. `null` until it has been asked.
      *
@@ -49,7 +46,7 @@ export interface Ranked {
  * naming and ranking both run after the grid is complete, and an artist who has seen the pictures
  * should be able to start a new batch without waiting for a label.
  */
-export type BatchStage = 'idle' | 'generating' | 'naming' | 'ranking' | 'done'
+export type BatchStage = 'idle' | 'generating' | 'naming' | 'done'
 
 /** How far the naming has got, and what it found. `undefined` when naming was not asked for. */
 export interface NamingProgress {
@@ -63,20 +60,10 @@ export interface NamingProgress {
     readonly done: boolean
 }
 
-/** What CLIP did. `undefined` until it has been asked. */
-export type ClipOutcome =
-    | {readonly kind: 'asking'}
-    /** `py/clipserve.py` is not running. The built-in order stands and nothing is lost. */
-    | {readonly kind: 'absent'}
-    | {readonly kind: 'ranked'; readonly ranked: number; readonly agreement: number}
-    | {readonly kind: 'failed'; readonly error: string}
-
 export interface BatchState {
     readonly stage: BatchStage
     /** The candidates that landed, in the order they landed. For display, see `ordered`. */
     readonly ranked: readonly Ranked[]
-    /** Which score the grid is sorted by. Flips to `clip` only when CLIP actually ranked. */
-    readonly rankBy: 'built-in' | 'clip'
     /** Attempts finished — candidates and failures alike, so a failure closes its own slot. */
     readonly done: number
     readonly count: number
@@ -85,24 +72,23 @@ export interface BatchState {
     /** Every failed attempt's message, in the order they failed. */
     readonly failures: readonly string[]
     readonly naming: NamingProgress | undefined
-    readonly clip: ClipOutcome | undefined
+    /** What the gate did, when the `gates` experiment is on — see `gen/gate.ts`. */
+    readonly gate: GateTally
 }
 
 export const idleBatch = (count: number): BatchState => ({
     stage: 'idle',
     ranked: [],
-    rankBy: 'built-in',
     done: 0,
     count,
     taughtBy: [],
     failures: [],
     naming: undefined,
-    clip: undefined
+    gate: NOTHING_GATED
 })
 
 export interface BatchPorts {
     readonly llama: Llama
-    readonly scorer: Scorer
     /** The naming judge. The same server as `llama`, a different question. */
     readonly veto: Veto
 }
@@ -126,6 +112,8 @@ export interface BatchRequest {
     /** The project's colours, when the palette is enforced — see `gen/palette.ts`. */
     readonly swatches?: Swatches | undefined
     readonly seed?: number
+    /** Which experiments are on — see `gen/flags.ts`. Absent is the measured generator. */
+    readonly flags?: Flags
     readonly now?: () => Date
 }
 
@@ -154,6 +142,7 @@ export const runBatch = async (
         canvas,
         swatches,
         seed = randomSeed(),
+        flags = DEFAULT_FLAGS,
         now
     } = request
     // Read through a call, never as a field: it flips during an `await`, and a plain read narrows
@@ -174,6 +163,7 @@ export const runBatch = async (
         seed,
         canvas,
         swatches,
+        flags,
         ...(signal ? {signal} : {}),
         ...(now ? {now} : {}),
         /*
@@ -184,16 +174,21 @@ export const runBatch = async (
         onPick: ids => {
             publish({taughtBy: [...ids, ...(reference ? [OWN_MODEL] : [])]})
         },
+        // The gate's running tally, so the line under the grid moves while seeds are being spent.
+        onGate: gate => {
+            publish({gate})
+        },
         // Which examples, in what order, within what budget — all four rules are `teaching.ts`.
         teach: ids => teachingSet(teach?.(ids) ?? [], reference),
         onAttempt: (attempt, at) => {
             if (attempt.ok) {
-                const scores = scoreModel(attempt.candidate.volume)
+                // Scored once, in `generateMany`, where the pre-shading grid still exists.
+                const {scores} = attempt.candidate
                 landed.push({
                     candidate: attempt.candidate,
                     scores,
-                    overall: overallScore(scores),
-                    clip: null,
+                    // A prop is ranked on its surface and not on its silhouette — `gen/face.ts`.
+                    overall: overallScore(scores, attempt.candidate.spec.surface === true),
                     veto: null
                 })
             } else {
@@ -236,40 +231,9 @@ export const runBatch = async (
     }
     if (stopped()) return state
 
-    publish({stage: 'ranking', clip: {kind: 'asking'}})
-    try {
-        if (!(await ports.scorer.probe())) {
-            publish({stage: 'done', clip: {kind: 'absent'}})
-            return state
-        }
-        const views = await Promise.all(judged.map(entry => rankingViews(entry.candidate.volume)))
-        const scores = await ports.scorer.score(prompt, views, signal)
-        const withClip = judged.map((entry, i) => ({...entry, clip: scores[i] ?? null}))
-        publish({
-            stage: 'done',
-            ranked: withClip,
-            rankBy: 'clip',
-            clip: {
-                kind: 'ranked',
-                ranked: scores.filter(score => score !== null).length,
-                agreement: rankAgreement(
-                    withClip.map(entry => entry.overall),
-                    withClip.map(entry => entry.clip)
-                )
-            }
-        })
-    } catch (error) {
-        publish({
-            stage: 'done',
-            clip: {kind: 'failed', error: error instanceof Error ? error.message : String(error)}
-        })
-    }
+    publish({stage: 'done', ranked: judged})
     return state
 }
-
-/** Whether any candidate carries a CLIP score, which is what makes the Rank-by control worth showing. */
-export const hasClip = (state: BatchState): boolean =>
-    state.ranked.some(entry => entry.clip !== null)
 
 /**
  * The grid's order.
@@ -278,15 +242,8 @@ export const hasClip = (state: BatchState): boolean =>
  * and `docs/GEN_RESEARCH.md`, 2026-08-08. The word is shown because it says what the sprite reads
  * as; it does not get to move anything.
  */
-export const ordered = (
-    state: BatchState,
-    rankBy: 'built-in' | 'clip' = state.rankBy
-): readonly Ranked[] =>
-    [...state.ranked].sort((a, b) =>
-        rankBy === 'clip' && hasClip(state) ?
-            (b.clip ?? -Infinity) - (a.clip ?? -Infinity)
-        :   b.overall - a.overall
-    )
+export const ordered = (state: BatchState): readonly Ranked[] =>
+    [...state.ranked].sort((a, b) => b.overall - a.overall)
 
 /**
  * The slots still to fill, so the grid has its final shape from the first second.
@@ -298,7 +255,7 @@ export const ordered = (
 export const pendingSlots = (state: BatchState): number =>
     state.stage === 'generating' ? Math.max(0, state.count - state.done) : 0
 
-/* The three status lines. Here rather than in the dialog so the wording is testable without React. */
+/* The status lines. Here rather than in the dialog so the wording is testable without React. */
 
 export const generateNote = (state: BatchState): string => {
     if (state.stage === 'idle') return ''
@@ -333,20 +290,5 @@ export const namingNote = (state: BatchState): string => {
     return `Naming: ${String(naming.matched)} of ${String(naming.answered)} read as the subject`
 }
 
-export const clipNote = (state: BatchState): string => {
-    const {clip} = state
-    if (!clip) return ''
-    switch (clip.kind) {
-        case 'asking':
-            return 'CLIP: ranking…'
-        case 'absent':
-            return 'CLIP: py/clipserve.py is not running — built-in scores only'
-        case 'failed':
-            return `CLIP: ${clip.error}`
-        case 'ranked':
-            return (
-                `CLIP: ${String(clip.ranked)} ranked`
-                + ` · agreement with the built-in order ${clip.agreement.toFixed(2)}`
-            )
-    }
-}
+/** The gate's line, or nothing at all when the experiment is off — see `gen/gate.ts`. */
+export const gateNote = (state: BatchState): string => gateStatus(state.gate)

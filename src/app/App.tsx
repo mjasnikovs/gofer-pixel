@@ -3,7 +3,6 @@ import {shownVolume} from '../doc/objects'
 import {saveDocument} from '../doc/save'
 import type {Files} from '../doc/files'
 import {clearSnapshots, putSnapshot, snapshots, type Store} from '../doc/store'
-import {browserScorer, type Scorer} from '../gen/clip'
 import type {Llama} from '../gen/llama'
 import {defaultLibrary, type Library} from '../gen/library'
 import {browserVeto, type Veto} from '../gen/veto'
@@ -100,7 +99,6 @@ import {
  * They close over an endpoint string and nothing else, so a second instance is a waste rather than
  * a bug — which is exactly why they may have a default and `store` and `files` may not.
  */
-const DEFAULT_SCORER = browserScorer()
 const DEFAULT_VETO = browserVeto()
 
 export const App = ({
@@ -111,7 +109,6 @@ export const App = ({
     files,
     library = defaultLibrary,
     llama,
-    scorer = DEFAULT_SCORER,
     veto = DEFAULT_VETO
 }: {
     volume: Volume
@@ -144,8 +141,6 @@ export const App = ({
      * generate dialog is actually opened.
      */
     library?: () => Promise<Library>
-    /** The local CLIP service — see `src/gen/clip.ts`. Optional at runtime as well as in a test. */
-    scorer?: Scorer
     /** The naming judge — see `src/gen/veto.ts`. The same server as `llama`. */
     veto?: Veto
 }) => {
@@ -455,7 +450,6 @@ export const App = ({
                     store={store}
                     files={files}
                     volume={shown}
-                    scorer={scorer}
                     veto={veto}
                     onClose={() => {
                         take(closed())

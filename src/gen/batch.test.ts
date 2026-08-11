@@ -1,6 +1,5 @@
 import {expect, test} from 'bun:test'
 import {
-    clipNote,
     generateNote,
     namingNote,
     ordered,
@@ -10,7 +9,6 @@ import {
     type BatchState
 } from './batch'
 import type {WorkedExample} from './bank'
-import {memoryScorer, type Scorer} from './clip'
 import {memoryLlama, type Llama} from './llama'
 import type {VoxSpec} from './ops'
 import {memoryVeto, type Veto} from './veto'
@@ -42,10 +40,9 @@ const brick: VoxSpec = {
 
 const ports = (
     llama: Llama,
-    scorer: Scorer = memoryScorer([], false),
     // Canned silence: the judge answers nothing, which passes every candidate — see `veto.ts`.
     veto: Veto = memoryVeto([''])
-): BatchPorts => ({llama, scorer, veto})
+): BatchPorts => ({llama, veto})
 
 const run = async (
     given: BatchPorts,
@@ -118,7 +115,7 @@ test('the grid keeps its shape while the model is still answering', async () => 
 
 test('naming is never asked for until it is switched on, because it costs a call a candidate', async () => {
     const veto = memoryVeto(['rock'], false)
-    const {final} = await run(ports(memoryLlama([carved('tower', '#808080')]), undefined, veto))
+    const {final} = await run(ports(memoryLlama([carved('tower', '#808080')]), veto))
 
     expect(final.naming).toBeUndefined()
     expect(namingNote(final)).toBe('')
@@ -131,7 +128,6 @@ test('what a candidate reads as is counted, and allowed to move nothing', async 
     const {final} = await run(
         ports(
             memoryLlama([carved('tower', '#808080'), brick]),
-            undefined,
             // The second of the four is the brick, and the model calls it a rock. That is not the
             // prompt's word and the text call refuses it, so two of the four "fail".
             memoryVeto(['tower', 'rock'], false)
@@ -152,7 +148,7 @@ test('a word the model stands behind counts the same as one that matched', async
     // "a stone tower" named "castle": not the prompt's word, and the model says it could describe
     // it anyway. Counted as read, and nothing moves either way.
     const {final} = await run(
-        ports(memoryLlama([carved('tower', '#808080')]), undefined, memoryVeto(['castle'], true)),
+        ports(memoryLlama([carved('tower', '#808080')]), memoryVeto(['castle'], true)),
         {naming: true}
     )
 
@@ -161,49 +157,22 @@ test('a word the model stands behind counts the same as one that matched', async
 })
 
 test('a judge that will not say anything says so rather than reporting nought of nought', async () => {
-    const {final} = await run(
-        ports(memoryLlama([carved('tower', '#808080')]), undefined, memoryVeto([''])),
-        {naming: true}
-    )
+    const {final} = await run(ports(memoryLlama([carved('tower', '#808080')]), memoryVeto([''])), {
+        naming: true
+    })
 
     expect(namingNote(final)).toBe('Naming: the model would not say what these are')
 })
 
-test('CLIP takes over the order when the service is up, and says how much it disagreed', async () => {
+test('the grid is ordered by the built-in score, and the brick goes last', async () => {
     const {final} = await run(
-        ports(
-            memoryLlama([carved('tower', '#808080'), brick, carved('hut', '#664422')]),
-            // The brick is second in the batch, and CLIP is told it is the best of the three.
-            memoryScorer([0.28, 0.36, 0.3])
-        )
+        ports(memoryLlama([carved('tower', '#808080'), brick, carved('hut', '#664422')]))
     )
 
-    expect(final.rankBy).toBe('clip')
-    expect(clipNote(final)).toContain('3 ranked')
-    expect(clipNote(final)).toContain('agreement with the built-in order')
-    // The built-in order put the brick last; CLIP's opinion is what the grid draws now.
-    expect(ordered(final)[0]?.candidate.spec.name).toBe('brick')
-    // And the built-in order is still there to go back to.
-    expect(ordered(final, 'built-in')[0]?.candidate.spec.name).not.toBe('brick')
-})
-
-test('a scorer that is not running costs the ranking, not the candidates', async () => {
-    const {final} = await run(ports(memoryLlama([carved('tower', '#808080')])))
-
     expect(final.ranked).toHaveLength(4)
-    expect(final.rankBy).toBe('built-in')
-    expect(clipNote(final)).toContain('clipserve.py is not running')
-})
-
-test('a scorer that falls over costs the ranking, not the candidates', async () => {
-    const broken: Scorer = {
-        probe: () => Promise.resolve(true),
-        score: () => Promise.reject(new Error('scorer 500: out of memory'))
-    }
-    const {final} = await run(ports(memoryLlama([carved('tower', '#808080')]), broken))
-
-    expect(final.ranked).toHaveLength(4)
-    expect(clipNote(final)).toContain('out of memory')
+    // One order, `overallScore` — a solid brick has no silhouette, so carving is what ranks.
+    expect(ordered(final)[0]?.candidate.spec.name).not.toBe('brick')
+    expect(ordered(final)[final.ranked.length - 1]?.candidate.spec.name).toBe('brick')
 })
 
 test('a dropped model is taught last, nearest the prompt, and is named as the artist’s own', async () => {
@@ -223,7 +192,7 @@ test('a dropped model is taught last, nearest the prompt, and is named as the ar
 test('cancelling keeps what landed and never asks CLIP about a batch that was walked away from', async () => {
     const controller = new AbortController()
     let asked = 0
-    const scorer = memoryScorer([0.5, 0.5])
+
     const held: Llama = {
         probe: () => Promise.resolve('qwen'),
         pick: () => Promise.resolve(['dog']),
@@ -235,24 +204,20 @@ test('cancelling keeps what landed and never asks CLIP about a batch that was wa
             return Promise.resolve({spec: carved('tower', '#808080'), model: 'q'})
         }
     }
-    const {final} = await run(ports(held, scorer), {}, controller.signal)
+    const {final} = await run(ports(held), {}, controller.signal)
 
     expect(asked).toBe(2)
     expect(final.ranked).toHaveLength(2)
     expect(generateNote(final)).toContain('2 candidates')
-    expect(scorer.seen).toHaveLength(0)
-    expect(clipNote(final)).toBe('')
 })
 
 test('a batch that produced nothing stops before the two stages that need candidates', async () => {
-    const scorer = memoryScorer([0.5])
     const veto = memoryVeto(['tower'])
-    const {final} = await run(ports(memoryLlama([new Error('llama-server 503')]), scorer, veto), {
+    const {final} = await run(ports(memoryLlama([new Error('llama-server 503')]), veto), {
         naming: true
     })
 
     expect(final.ranked).toHaveLength(0)
     expect(final.failures).toHaveLength(4)
     expect(veto.seen).toHaveLength(0)
-    expect(scorer.seen).toHaveLength(0)
 })

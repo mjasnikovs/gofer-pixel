@@ -1,23 +1,13 @@
 import {expect, test} from 'bun:test'
 import MANIFEST from '../assets/examples/examples.json'
-import {
-    asking,
-    CANVAS_SIZES,
-    DEFAULT_CANVAS,
-    FIRST_ASK,
-    MAX_CANDIDATES,
-    showing,
-    startable,
-    starting
-} from './ask'
+import {asking, CANVAS_SIZES, DEFAULT_CANVAS, FIRST_ASK, MAX_CANDIDATES, startable} from './ask'
 import {readManifest} from './bank'
-import {idleBatch, type BatchState} from './batch'
 import {connect, CONNECTING, type Connection} from './connect'
 import {buildLibrary, type Library} from './library'
 import {memoryLlama, type Llama} from './llama'
 
 /**
- * The four rules that used to be written inline in `GenerateDialog.tsx`'s JSX.
+ * The rules that used to be written inline in `GenerateDialog.tsx`'s JSX.
  *
  * Two of them were written *twice* — the count's bound once as the field's `min`/`max` and once as
  * a clamp, the start guard once as `!busy && connection.kind === 'ready'` on the Enter key and once
@@ -34,8 +24,6 @@ const absent = (): Llama => ({...memoryLlama([]), probe: () => Promise.resolve(u
 
 const READY: Connection = await connect(bank, memoryLlama([], 'test'))
 const OFFLINE: Connection = await connect(bank, absent())
-
-const running = (): BatchState => ({...idleBatch(4), stage: 'generating'})
 
 test('a count is held inside its bounds however it was set', () => {
     expect(asking(FIRST_ASK, {count: 40}).count).toBe(MAX_CANDIDATES)
@@ -59,34 +47,10 @@ test('changing one part of the ask leaves the rest of it alone', () => {
  * model whose results nothing will ever show.
  */
 test('a batch may start only when the server is there and no batch is running', () => {
-    expect(startable(READY, idleBatch(4))).toBe(true)
-    expect(startable(READY, running())).toBe(false)
-    expect(startable(OFFLINE, idleBatch(4))).toBe(false)
-    expect(startable(CONNECTING, idleBatch(4))).toBe(false)
-})
-
-test('the grid follows the batch until the artist picks an order, and then follows the artist', () => {
-    const batch = idleBatch(4)
-    expect(batch.rankBy).toBe('built-in')
-    expect(showing(FIRST_ASK, batch)).toBe('built-in')
-
-    // The batch flips to CLIP once CLIP has ranked, and an ask with no click follows it.
-    const clipped: BatchState = {...batch, rankBy: 'clip'}
-    expect(showing(FIRST_ASK, clipped)).toBe('clip')
-
-    // A click outlives the next snapshot, which is the only reason this field exists.
-    const chosen = asking(FIRST_ASK, {rankBy: 'built-in'})
-    expect(showing(chosen, clipped)).toBe('built-in')
-})
-
-test('a new batch drops the order the last one was being read in', () => {
-    const chosen = asking(FIRST_ASK, {rankBy: 'clip', prompt: 'a fish'})
-
-    const next = starting(chosen)
-
-    expect(next.rankBy).toBeUndefined()
-    expect(next.prompt).toBe('a fish')
-    expect(showing(next, {...idleBatch(4), rankBy: 'built-in'})).toBe('built-in')
+    expect(startable(READY, false)).toBe(true)
+    expect(startable(READY, true)).toBe(false)
+    expect(startable(OFFLINE, false)).toBe(false)
+    expect(startable(CONNECTING, false)).toBe(false)
 })
 
 /*
@@ -117,6 +81,20 @@ test('changing one part of the ask leaves the rest of it standing', () => {
     expect(asked.canvas).toBe(32)
     expect(asked.enforcePalette).toBe(false)
     expect(asked.prompt).toBe(FIRST_ASK.prompt)
-    // And a new batch keeps both: they are the ask, not the order the last grid came back in.
-    expect(starting(asked)).toMatchObject({canvas: 32, enforcePalette: false, rankBy: undefined})
+})
+
+/*
+ * The two small canvases, added 2026-08-11. A sprite sheet is mostly props, and a 16³ barrel is a
+ * subject the model has fewer chances to get wrong than a 128³ figure.
+ */
+test('the small canvases are on offer and are narrowed like the rest', () => {
+    expect(CANVAS_SIZES).toContain(8)
+    expect(CANVAS_SIZES).toContain(16)
+    expect(asking(FIRST_ASK, {canvas: 8}).canvas).toBe(8)
+    expect(asking(FIRST_ASK, {canvas: 16}).canvas).toBe(16)
+    // Still only the offered sizes: 4 and 12 are as off as 1000 is.
+    expect(asking(FIRST_ASK, {canvas: 4}).canvas).toBeUndefined()
+    expect(asking(FIRST_ASK, {canvas: 12}).canvas).toBeUndefined()
+    // And the default has not moved: 32 is the ground every finding was measured on.
+    expect(DEFAULT_CANVAS).toBe(32)
 })

@@ -1,4 +1,3 @@
-import type {BatchState} from './batch'
 import type {Connection} from './connect'
 
 /**
@@ -12,6 +11,9 @@ import type {Connection} from './connect'
  *
  * The same fold `connect.ts` did to the four booleans about reaching the server, and `session.ts`
  * did to `pending`/`asking`/`generating`. What is left in the dialog is drawing.
+ *
+ * The rank-by control that used to be here went with the CLIP scorer on 2026-08-11 — there is one
+ * order now, `overallScore`, so there is nothing for the artist to choose between.
  *
  * The dropped reference model is deliberately *not* in here. It is a `WorkedExample` with a file
  * behind it and its own rules about what a failed drop does — see `gen/reference.ts` — and folding
@@ -46,13 +48,6 @@ export interface Ask {
      * the bigger box *and* gives the document that box, so there is somewhere to keep drawing.
      */
     readonly canvas: number | undefined
-    /**
-     * The order the artist clicked, or `undefined` to follow the batch.
-     *
-     * The batch decides the *default* — it flips to CLIP once CLIP has actually ranked — and this
-     * exists only so that a click on the segmented control is not undone by the next snapshot.
-     */
-    readonly rankBy: 'built-in' | 'clip' | undefined
 }
 
 /** How many candidates can be asked for at once. */
@@ -74,15 +69,24 @@ export const DEFAULT_COUNT = 4
  * Cubes, because the generator has no notion of a tall subject and a flat one — it is handed a box
  * and told to fill it.
  *
- * **32 is the default, because 32 is the size every finding on the record was measured at.** The
- * bigger two are not a claim that the model draws well at them. Measured 2026-08-11 against the live
+ * **32 is the default, because 32 is the size every finding on the record was measured at.** None of
+ * the other four is a claim that the model draws well at them. Measured 2026-08-11 against the live
  * server on "a stone tower", one candidate each: fitted it drew 13 wide × 25 tall, at 64 it drew
  * 30 × 55, and at 128 it drew 61 × 128 at 88 % of its own bounding box — which is the solid brick
  * `score.ts` exists to sink. The instruction to fill the box works; filling a big box with *shape*
- * is a different thing and is not measured. So the default is the ground that has been walked, and
- * 64 and 128 are there to be tried.
+ * is a different thing and is not measured. So the default is the ground that has been walked and
+ * the rest are there to be tried.
+ *
+ * **8 and 16 are a different bet from 64 and 128, and worth stating.** Going up asks the model for
+ * more shape than it has been shown how to draw. Going down asks it for *less*, and less is where a
+ * sprite sheet actually lives — a 16³ model is an icon, a prop, a barrel, a helmet, and the whole
+ * of finding 4's "organic and architectural" caveat matters less the fewer voxels there are to get
+ * wrong. What is unmeasured in the other direction is the teaching: every worked example in the bank
+ * is a model built at 32, and an example beats a rule (finding 7), so at 8 the prompt asks for a
+ * cube the examples do not demonstrate. Expect the model to overflow the box and `gridFor` to crop
+ * it, which is the honest outcome and the one the switch exists to show.
  */
-export const CANVAS_SIZES = [32, 64, 128] as const
+export const CANVAS_SIZES = [8, 16, 32, 64, 128] as const
 
 export const DEFAULT_CANVAS = 32
 
@@ -91,8 +95,7 @@ export const FIRST_ASK: Ask = {
     count: DEFAULT_COUNT,
     naming: false,
     enforcePalette: true,
-    canvas: DEFAULT_CANVAS,
-    rankBy: undefined
+    canvas: DEFAULT_CANVAS
 }
 
 const isCanvas = (value: number | undefined): value is number =>
@@ -124,12 +127,5 @@ export const asking = (ask: Ask, change: Partial<Ask>): Ask => {
  * batch running. The second is what stops Enter held down in the prompt field from starting a second
  * batch over the first — twelve more calls to a 27B model whose results nothing will ever show.
  */
-export const startable = (connection: Connection, batch: BatchState): boolean =>
-    connection.kind === 'ready' && batch.stage !== 'generating'
-
-/** The ask a new batch begins from: whatever order was clicked belonged to the last one. */
-export const starting = (ask: Ask): Ask => ({...ask, rankBy: undefined})
-
-/** The order the grid is actually in — the artist's click if there was one, the batch's otherwise. */
-export const showing = (ask: Ask, batch: BatchState): 'built-in' | 'clip' =>
-    ask.rankBy ?? batch.rankBy
+export const startable = (connection: Connection, busy: boolean): boolean =>
+    connection.kind === 'ready' && !busy

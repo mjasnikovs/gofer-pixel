@@ -1615,6 +1615,46 @@ body,
 }
 
 /*
+ * The experiments — `gen/flags.ts`.
+ *
+ * Folded, and styled to read as a footnote rather than as a section: no surface of its own, a
+ * border only on top, and the summary in the supporting text colour. Eight switches is the tallest
+ * thing in this dialog when it is open, and none of them is measured, so it must not look like the
+ * two rules above it that are.
+ */
+.generate-experiments {
+    border-top: 1px solid var(--color-border);
+    padding-top: 8px;
+}
+
+.generate-experiments > summary {
+    cursor: pointer;
+    color: var(--color-text-secondary);
+    font-size: 12px;
+    /* The marker is the only affordance a bare <summary> has; list-style: none would take it away. */
+    user-select: none;
+}
+
+.generate-experiments-body {
+    display: grid;
+    /* Two columns at 780 px: eight switches in one column is longer than the candidate grid. */
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    align-items: start;
+    gap: 12px 24px;
+    padding: 12px 0 4px;
+}
+
+/* The blurb and the reset button span, so the switches stay a clean two-column block between them. */
+.generate-experiments-body > :first-child,
+.generate-experiments-body > :last-child {
+    grid-column: 1 / -1;
+}
+
+.generate-experiments-body > :last-child {
+    justify-self: start;
+}
+
+/*
  * The drop target for a model to teach from.
  *
  * Dashed rather than solid, and inside the flow rather than an overlay: it is a place to put

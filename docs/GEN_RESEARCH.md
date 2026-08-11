@@ -142,6 +142,152 @@ Dropped in as an example, the car failed that test at 6 tall, which is the guard
 `GenerationRecord.plan` became `examples`, a list. A version-3 file's single word reads back as a
 one-element list, so an old provenance line survives the change instead of becoming a gap.
 
+## The experiments are switches now (2026-08-11)
+
+`docs/GEN_IDEAS.md` is eleven directions out of the code and four 2026 papers. Every one that is
+built is behind a flag in `src/gen/flags.ts`, off by default, in a folded block at the bottom of the
+generate dialog. Off is the generator every number above was measured with, and the way an
+experiment graduates is that its numbers land in this file and the flag is deleted with the branch
+it guarded.
+
+### The brick block, and the face language it produced (2026-08-11)
+
+"It cannot even generate a Mario brick block." Measured, and **the model generates it perfectly
+well.** What happened is that three separate parts of this pipeline threw the answer away.
+
+Live, seed 4200, one candidate per cell:
+
+| canvas         | solid | what the gate said                                   |
+| -------------- | ----- | ---------------------------------------------------- |
+| 16             | 0.70  | kept                                                 |
+| 32             | 0.83  | **"a brick: 83 % of its own bounding box is solid"** |
+| 16, relational | 0.95  | **"a brick: 95 % solid"**                            |
+
+`overallScore` ranks by `1 - bboxFill`, so a correct cube sorts last. `gate.ts` rejects over 0.8
+solid. And every cell came back **taught by `tower`**, because the bank has no block in it.
+
+The third failure is the one that could not be fixed by moving a number: **a block is all surface.**
+Its silhouette is a square and every bit of its information is the pattern on its faces — and the op
+language paints solids, so the reply painted its mortar lines _through the middle of the cube_,
+where nothing can see them. Half of what a sprite sheet needs is that subject and nothing in
+`src/gen/` could address a face.
+
+`src/gen/face.ts` is the answer, behind the `faces` flag: `face("+z", s => …)` paints one voxel deep
+on a side of what has already been painted, in 2D `(u, v)`, with `rect`/`line`/`dot`/`bevel`/
+`courses`/`studs`. **A reply that called `face` has declared its content is on its surface**, which
+is what turns off the brick rule and switches `overallScore` off silhouette — no artist-facing
+switch, the language is the declaration.
+
+Measured after wiring, canvas 16, same seed:
+
+| run                 | solid | shell colours | gate                       |
+| ------------------- | ----- | ------------- | -------------------------- |
+| brick, `faces` off  | 1.00  | 6             | **rejected — 100 % solid** |
+| brick, `faces` on   | 1.00  | 10            | **kept**                   |
+| wooden crate        | 0.94  | 10            | kept                       |
+| question mark block | 1.00  | 10            | kept                       |
+
+The model used `face` in every prop run and wrote real surface code: bevels, running-bond courses,
+an "M" emblem, a "?" symbol.
+
+**Two defects the same run found, both in the new code:**
+
+1. **The prop score is saturated and therefore sorts nothing.** Every prop came back at `rank 1.00`.
+   `variety` maxes at six shell colours and `finish` invents two shade tones per colour, so the
+   shell is always 10+ and the term is always 1. This is the same defect the record already names
+   about `bboxFill` pinning at 1.000 for every candidate — rebuilt, in a new place. It has to be
+   measured on the volume **before** `finish`, or on the spec's own colours, and until it is, the
+   prop branch of `overallScore` is a constant.
+2. **A cat declared itself a prop.** `FACE_HELP` says "do not use it for a creature or a figure" and
+   the model called `face` on a cat regardless. A rule in prose did not survive contact with the
+   examples, which is finding 7 stated from the other direction. The declaration is therefore not
+   trustworthy on its own; what would make it trustworthy is unmeasured.
+
+### The three language experiments do change what comes back (2026-08-11)
+
+The first thing to check about a new op language is whether the model uses it or ignores it and
+writes `box` anyway — `GEN_IDEAS.md` §2 names that as the way the idea dies. It does not happen.
+Live against Qwen3.6-27B, one candidate per cell, seed 4200, temp 0.9, canvas 32, through the real
+`browserLlama` path with the raw reply kept:
+
+| subject       | flag         | what the reply actually called | voxels | solid |
+| ------------- | ------------ | ------------------------------ | ------ | ----- |
+| `a fish`      | off          | `box`                          | 6046   | 0.48  |
+| `a fish`      | `silhouette` | **`front` `side`** + `box`     | 499    | 0.39  |
+| `a fish`      | `procedural` | `box`                          | 2526   | 0.70  |
+| `a fish`      | `relational` | **`part` `attach`**            | 1281   | 0.54  |
+| `a pine tree` | off          | `box`                          | 2835   | 0.28  |
+| `a pine tree` | `silhouette` | **`front` `side`**             | 4059   | 0.37  |
+| `a pine tree` | `procedural` | **`tree({shape: 'pine', …})`** | 4446   | 0.29  |
+| `a pine tree` | `relational` | **`part` `attach`**            | 716    | 0.16  |
+
+Connectivity is 1.00 in every cell. Three things worth keeping:
+
+- **The new words get used the moment they are offered**, and `procedural` is used _selectively_ —
+  the pine tree called `tree()` and the fish did not, which is the right answer, since there is no
+  generator for a fish and the prompt says so.
+- **`silhouette` shrinks the model.** The fish came back at 499 voxels against 6046 with the same
+  seed: the reply wrote an eight-row outline inside a 32 box. Curvier and far smaller, and the "fill
+  most of that box" line in the system prompt does not survive the ribs. Whether that is worth it is
+  a question for the pictures, not the numbers.
+- **`relational` is the sparsest of the four**, at 0.16 solid on the tree. Parts that must touch is
+  a stricter language than boxes that may overlap.
+
+Not measured yet: whether any of them is _better_ by eye, which is the only question that matters
+and needs a strip per cell rather than one candidate.
+
+### CLIP is gone (2026-08-11)
+
+The scorer was removed, along with `py/clipserve.py`, `src/gen/clip.ts`, `src/gen/views.ts`, the
+rank-by control and the `bun run clip` script. The negative-anchor measurement below is what
+prompted the question, and the answer did not depend on it:
+
+**A sort order is all CLIP could ever be, and a sort order is not worth a service.** It ranks
+candidates of one prompt only, so the number means nothing across subjects; it cannot be a gate; and
+it cannot be looped against — the legacy refiner optimised against it reliably and tore a mushroom's
+cap apart for +0.03. The other half of a loop is missing too: the model does not edit, measured
+three times here and confirmed by 3DCodeBench across every model size. So the one thing a second
+opinion could have bought — a fix — was never available.
+
+What is left is `overallScore`, which is exact, free, and honest about being a sort order. The loop
+that works is code: measure in `score.ts`, repair in `repair.ts`, reject in `gate.ts`.
+
+The measurement that preceded the decision is kept below, because it is the reason.
+
+### CLIP negative anchors: built, measured, and it moved almost nothing (2026-08-11)
+
+`py/clipserve.py`, behind `clipNegatives`. The score becomes `sim(prompt) − max sim(anchor)` over
+three anchors — _a solid rectangular block_, _a pile of scattered cubes_, _an empty grey grid_ —
+each phrased through the same `pixel art sprite of …` template as the positive, so the margin
+measures the subject and not the wording. Anchors are encoded once per request.
+
+Measured against the four stored strips in `docs/renders/`, three candidates × four views each:
+
+| strip            | order, plain | order, margin |
+| ---------------- | ------------ | ------------- |
+| `a-fish-one`     | 1, 0, 2      | unchanged     |
+| `a-fish-three`   | 0, 2, 1      | unchanged     |
+| `a-knight-one`   | 2, 0, 1      | unchanged     |
+| `a-knight-three` | 0, 2, 1      | 2, 1, 0       |
+
+**Three of four orderings do not move**, and the one that does is a strip the record already calls 0
+of 3, with a total spread of 0.008 — noise, and driven by the _empty grey grid_ anchor rather than
+by the brick. The diagnosis is in the per-anchor numbers: _a solid rectangular block_ is the winning
+anchor for 9 of 12 candidates and sits in a 0.314–0.350 band across all of them, the real fish
+scoring 0.3408 against it and the brick 0.3369. It is a near-constant offset whose residual is the
+same size as the differences in the positive term.
+
+The reason is worth writing down because it kills the premise, not the implementation: **CLIP had no
+brick to fix.** In `a-fish-three` the brick was already last under plain scoring. The tie-at-the-top
+defect the idea was aimed at belongs to the _deterministic_ scores in `score.ts`, where three
+candidates came back at exactly 1.000 on every term. Pooled across all six fish candidates the
+margin does promote one real fish from third to first, Spearman 0.83 — one candidate, two places,
+and the only positive signal found. The flag stays for a live batch to argue with; the anchors were
+not tuned until they did something.
+
+The default path is byte-identical to the old one, verified float for float, so the switch is a real
+before/after and not a new baseline.
+
 ## Leads worth wiring next
 
 - **Assets for the bank.** The decomposer is waiting on models. One good CC0 `.vox` per entry — dog,

@@ -34,8 +34,8 @@ box(1,18,1, 10,19,10, '#4a4f57')`
 
 const BRICK = "box(0,0,0, 11,19,11, '#808080')"
 
-/** llama-server and clipserve, as far as the page can tell. */
-const stub = async (page: Page, {clip = true}: {clip?: boolean} = {}): Promise<string[]> => {
+/** llama-server, as far as the page can tell. */
+const stub = async (page: Page): Promise<string[]> => {
     const asked: string[] = []
     let next = 0
     await page.route('http://localhost:8080/**', async route => {
@@ -59,20 +59,6 @@ const stub = async (page: Page, {clip = true}: {clip?: boolean} = {}): Promise<s
         await route.fulfill({
             json: {model: 'stub-27b', choices: [{message: {content: reply}}]}
         })
-    })
-    await page.route('http://127.0.0.1:8765/**', async route => {
-        asked.push(route.request().url())
-        if (!clip) {
-            await route.abort('connectionrefused')
-            return
-        }
-        if (route.request().url().endsWith('/health')) {
-            await route.fulfill({json: {ok: true}})
-            return
-        }
-        // The brick is second in the batch, and CLIP is told it is the better of the two.
-        const body = route.request().postDataJSON() as {candidates: string[][]}
-        await route.fulfill({json: {scores: body.candidates.map((_, i) => (i === 1 ? 0.4 : 0.3))}})
     })
     return asked
 }
@@ -104,7 +90,7 @@ test('a batch draws real pixels on every card, and picking one replaces the docu
     page
 }) => {
     await ready(page)
-    await stub(page, {clip: false})
+    await stub(page)
     await openDialog(page)
 
     const dialog = dialogOf(page)
@@ -169,22 +155,6 @@ test('a batch draws real pixels on every card, and picking one replaces the docu
     expect(after.origin?.sampler.seed).toBeGreaterThan(0)
 })
 
-test('CLIP reorders the grid when the service answers, and says so', async ({page}) => {
-    await ready(page)
-    await stub(page, {clip: true})
-    await openDialog(page)
-
-    const dialog = dialogOf(page)
-    await dialog.getByLabel('Candidates').fill('2')
-    await dialog.getByRole('button', {name: 'Generate', exact: true}).click()
-    await expect(dialog.locator('[data-testid="clip-status"]')).toContainText('2 ranked')
-
-    // The built-in order put the solid brick last. CLIP disagrees, and CLIP is what is on screen.
-    await expect(dialog.locator('.generate-card').nth(0)).toContainText('solid 100%')
-    await dialog.getByRole('radio', {name: 'Built-in'}).click()
-    await expect(dialog.locator('.generate-card').nth(0)).not.toContainText('solid 100%')
-})
-
 test('Enter starts a batch, and empty slots stand in for the candidates still coming', async ({
     page
 }) => {
@@ -214,7 +184,6 @@ test('Enter starts a batch, and empty slots stand in for the candidates still co
         if (asked === 1) await held
         await route.fulfill({json: {model: 'stub-27b', choices: [{message: {content: TOWER}}]}})
     })
-    await page.route('http://127.0.0.1:8765/**', route => route.abort('connectionrefused'))
 
     await openDialog(page)
     const dialog = dialogOf(page)
@@ -335,7 +304,7 @@ test('the canvas control decides the document, and Off gives the fitted model ba
     page
 }) => {
     await ready(page)
-    await stub(page, {clip: false})
+    await stub(page)
     await openDialog(page)
 
     const dialog = dialogOf(page)
@@ -359,7 +328,7 @@ test('the canvas control decides the document, and Off gives the fitted model ba
 
 test('the palette switch decides whether a candidate may invent colours', async ({page}) => {
     await ready(page)
-    await stub(page, {clip: false})
+    await stub(page)
     await openDialog(page)
 
     const dialog = dialogOf(page)
@@ -404,7 +373,7 @@ test('the palette switch decides whether a candidate may invent colours', async 
 test('a twelve-candidate batch scrolls the dialog, not the grid', async ({page}) => {
     await page.setViewportSize({width: 1280, height: 720})
     await ready(page)
-    await stub(page, {clip: false})
+    await stub(page)
     await openDialog(page)
 
     const dialog = dialogOf(page)

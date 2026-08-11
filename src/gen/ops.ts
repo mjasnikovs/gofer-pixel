@@ -11,8 +11,9 @@ import {createVolume, setVoxel, voxelIndex, type Volume} from '../render/volume'
  *
  * Carried over from `legacy/src/gen/ops.ts`, re-derived against the dense `Volume` rather than the
  * old sparse `Map`. The legacy version was pinned byte-for-byte against `legacy/py/voxgen.py`
- * because Python rasterised the same specs to score them. Nothing rasterises them twice any more —
- * see `src/gen/clip.ts` — so that parity requirement is gone with the second rasteriser.
+ * because Python rasterised the same specs to score them. Nothing rasterises them twice any more,
+ * and since 2026-08-11 nothing scores them with a model either, so that parity requirement is gone
+ * with the second rasteriser.
  */
 export type Vec3 = [number, number, number]
 
@@ -43,6 +44,24 @@ export interface VoxSpec {
     readonly size: Vec3
     readonly mirror_x: boolean
     readonly ops: readonly VoxOp[]
+    /**
+     * Whether the reply painted a *surface* — see `gen/face.ts`, and `docs/GEN_RESEARCH.md`'s brick
+     * measurement for why it has to be recorded rather than guessed at.
+     *
+     * A block, a tile or a crate is all surface: its silhouette is a square and every bit of
+     * information is the pattern on its faces. Two things downstream are built for the opposite kind
+     * of subject and are wrong for this one — `overallScore` ranks by `1 - bboxFill`, and `gate.ts`
+     * calls anything over 80 % solid a brick and throws it away. Measured live on "a Mario brick
+     * block": the model wrote sensible code and the gate rejected it at 83 % and at 95 %.
+     *
+     * A reply that called `face` has *said* its information is on its surface, so this is the
+     * declaration and not a switch the artist has to remember. Absent means what it has always
+     * meant: judge this by its silhouette.
+     *
+     * It does not reach the `.gpix`, because a spec does not — `doc/save.ts` stores the
+     * `GenerationRecord`, and `rasterise` needs none of this.
+     */
+    readonly surface?: boolean
 }
 
 /**
@@ -86,7 +105,7 @@ const readOp = (value: unknown): VoxOp | undefined => {
  */
 export const readSpec = (value: unknown, cap: number = MAX_SIZE): VoxSpec | undefined => {
     if (typeof value !== 'object' || value === null) return undefined
-    const {name, size, mirror_x: mirror, ops} = value as Record<string, unknown>
+    const {name, size, mirror_x: mirror, ops, surface} = value as Record<string, unknown>
     if (!Array.isArray(size) || size.length !== 3 || !Array.isArray(ops)) return undefined
     const read = ops.map(readOp).filter((entry): entry is VoxOp => entry !== undefined)
     if (read.length === 0) return undefined
@@ -94,7 +113,10 @@ export const readSpec = (value: unknown, cap: number = MAX_SIZE): VoxSpec | unde
         name: typeof name === 'string' && name !== '' ? name : 'Generated',
         size: [clampAxis(size[0], cap), clampAxis(size[1], cap), clampAxis(size[2], cap)],
         mirror_x: mirror === true,
-        ops: read
+        ops: read,
+        // Absent rather than `false`, so a spec that never mentioned a surface reads as one that
+        // never mentioned it — `exactOptionalPropertyTypes` is on and the two are not the same.
+        ...(surface === true ? {surface: true} : {})
     }
 }
 

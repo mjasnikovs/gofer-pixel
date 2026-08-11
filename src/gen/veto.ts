@@ -4,7 +4,6 @@ import {basisFor, createCamera} from '../render/camera'
 import {render} from '../render/raycast'
 import type {Volume} from '../render/volume'
 import {DEFAULT_ENDPOINT} from './llama'
-import {onGrey} from './views'
 import {toBase64} from '../image/base64'
 
 /**
@@ -48,6 +47,25 @@ export const NAMING_SIZE = 224
 
 /** The three-quarter view. A tower seen square-on is a rectangle, and so is a knight. */
 export const NAMING_YAW = Math.PI / 4
+
+/**
+ * A sprite composited onto neutral grey.
+ *
+ * A sprite is mostly transparent, and transparency reaches a vision model as whatever the decoder
+ * felt like — usually black, which reads as part of the model. It lived in `gen/views.ts` until the
+ * CLIP scorer that module existed for was removed on 2026-08-11, and this is the one caller left.
+ */
+const onGrey = (rgba: Uint8Array): Uint8Array => {
+    const out = new Uint8Array(rgba.length)
+    for (let i = 0; i < rgba.length; i += 4) {
+        const alpha = (rgba[i + 3] ?? 0) / 255
+        out[i] = Math.round((rgba[i] ?? 0) * alpha + 128 * (1 - alpha))
+        out[i + 1] = Math.round((rgba[i + 1] ?? 0) * alpha + 128 * (1 - alpha))
+        out[i + 2] = Math.round((rgba[i + 2] ?? 0) * alpha + 128 * (1 - alpha))
+        out[i + 3] = 255
+    }
+    return out
+}
 
 /** The one picture the judge is shown, as a base64 PNG. */
 export const namingView = async (volume: Volume, size: number = NAMING_SIZE): Promise<string> => {

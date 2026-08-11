@@ -6,9 +6,9 @@ import {freshenPalette} from '../doc/palette'
 import {memoryStore, type Store} from '../doc/store'
 import {newDocument} from '../doc/templates'
 import {DEFAULT_CANVAS} from '../gen/ask'
+import {DEFAULT_FLAGS, readFlags} from '../gen/flags'
 import {swatchesOf} from '../gen/palette'
 import type {BankEntry} from '../gen/bank'
-import {memoryScorer, type Scorer} from '../gen/clip'
 import {buildLibrary, type Library} from '../gen/library'
 import {memoryLlama, type GenerationRecord, type Llama} from '../gen/llama'
 import type {VoxSpec} from '../gen/ops'
@@ -80,7 +80,6 @@ const project = (): Volume => {
 
 const open = async (
     llama: Llama,
-    scorer: Scorer = memoryScorer([], false),
     // Canned silence: the judge answers nothing, which passes every candidate — see `gen/veto.ts`.
     veto: Veto = memoryVeto(['']),
     store: Store = memoryStore(),
@@ -101,7 +100,6 @@ const open = async (
                 store={store}
                 files={files}
                 volume={volume}
-                scorer={scorer}
                 veto={veto}
                 onClose={() => closed.push(1)}
                 onPick={(made, name, record) => picked.push({volume: made, name, record})}
@@ -224,7 +222,6 @@ test('a batch fills the grid, and every candidate carries what made it', async (
     // influence on what came back.
     expect(said('generate-status')).toBe('4 candidates, 0 failed · taught by dog')
     expect(cards()).toHaveLength(4)
-    expect(said('clip-status')).toContain('clipserve.py is not running')
     // The naming switch is off until it is asked for, because it costs a call a candidate.
     expect(said('veto-status')).toBe('')
 
@@ -243,27 +240,17 @@ test('a batch fills the grid, and every candidate carries what made it', async (
     await close(root, host)
 })
 
-test('CLIP takes over the order when the service is up, and says how much it disagreed', async () => {
+test('the grid is ordered by the built-in score, and the brick is not first', async () => {
     const mounted = await open(
-        memoryLlama([carved('tower', '#808080'), brick, carved('hut', '#664422')]),
-        // The brick is second in the batch, and CLIP is told it is the best of the three.
-        memoryScorer([0.28, 0.36, 0.3])
+        memoryLlama([carved('tower', '#808080'), brick, carved('hut', '#664422')])
     )
     const {root, host} = mounted
 
     await generate(mounted)
 
-    expect(said('clip-status')).toContain('3 ranked')
-    expect(said('clip-status')).toContain('agreement with the built-in order')
-    // The built-in order put the brick last; CLIP's opinion is what is on screen now.
-    expect(cards()[0]?.textContent).toContain('brick')
-    expect(cards()[0]?.textContent).toContain('clip 0.360')
-
-    // And the artist can put it back.
-    await act(async () => {
-        control('Built-in').click()
-    })
+    // One order now — `overallScore`. A solid brick has no silhouette, so carving is what ranks.
     expect(cards()[0]?.textContent).not.toContain('brick')
+    expect(cards()[cards().length - 1]?.textContent).toContain('brick')
 
     await close(root, host)
 })
@@ -331,7 +318,6 @@ test('the slots a batch will fill are on screen before the model answers', async
 test('what a candidate reads as reaches the card the artist is looking at', async () => {
     const mounted = await open(
         memoryLlama([carved('tower', '#808080'), brick]),
-        memoryScorer([], false),
         // The second of the four is the brick, and the model calls it a rock. That is not the
         // prompt's word and the text call refuses it, so two of the four "fail".
         memoryVeto(['tower', 'rock'], false)
@@ -468,8 +454,6 @@ test('Cancel stops a batch that is already running, and keeps what landed', asyn
     expect(asked).toBe(2)
     expect(said('generate-status')).toContain('2 candidates')
     expect(cards()).toHaveLength(2)
-    // Aborted, so CLIP is never asked about a batch the artist walked away from.
-    expect(said('clip-status')).toBe('')
 
     await close(mounted.root, mounted.host)
 })
@@ -497,7 +481,7 @@ const carBytes = new Uint8Array(
 test('a dropped model becomes the example the next batch is taught from', async () => {
     const llama = memoryLlama([carved('tower', '#808080')])
     const store = memoryStore()
-    const mounted = await open(llama, memoryScorer([], false), memoryVeto(['']), store)
+    const mounted = await open(llama, memoryVeto(['']), store)
     const {root, host} = mounted
 
     await dropFile(referenceZone(), new File([carBytes], 'car.vox'))
@@ -526,13 +510,7 @@ test('choosing a model through the picker teaches the same as dropping one', asy
      * not the document — see `doc/files.ts`.
      */
     const disk = new Map<string, string | Uint8Array>([['car.vox', carBytes]])
-    const mounted = await open(
-        llama,
-        memoryScorer([], false),
-        memoryVeto(['']),
-        memoryStore(),
-        memoryFiles(disk)
-    )
+    const mounted = await open(llama, memoryVeto(['']), memoryStore(), memoryFiles(disk))
     const {root, host} = mounted
 
     await act(async () => {
@@ -571,7 +549,7 @@ test('a file that is not a model says so, and does not become the reference', as
 test('clearing the dropped reference forgets it, on screen and on disk', async () => {
     const llama = memoryLlama([carved('tower', '#808080')])
     const store = memoryStore()
-    const mounted = await open(llama, memoryScorer([], false), memoryVeto(['']), store)
+    const mounted = await open(llama, memoryVeto(['']), store)
     const {root, host} = mounted
 
     await dropFile(referenceZone(), new File([carBytes], 'car.vox'))
@@ -652,7 +630,6 @@ test('a candidate paints in the project palette until the switch says it need no
     // On no palette, and nowhere near DB32's greys: every voxel of it has to move.
     const mounted = await open(
         memoryLlama([carved('tower', '#013b02')]),
-        memoryScorer([], false),
         memoryVeto(['']),
         memoryStore(),
         memoryFiles(),
@@ -688,4 +665,109 @@ test('a candidate paints in the project palette until the switch says it need no
     expect(free?.palette).not.toEqual(doc.palette)
 
     await close(root, host)
+})
+
+/*
+ * The experiments — `gen/flags.ts`. Off is the ground every finding on the record was measured on,
+ * so what these hold is that nothing turns one on except the switch, and that the switch is
+ * remembered: half a measurement is three seeds before a reload against three seeds after it.
+ */
+
+test('every experiment is off when the dialog opens, and nothing says otherwise', async () => {
+    const store = memoryStore()
+    const {root, host} = await open(memoryLlama([carved('tower', '#808080')]), undefined, store)
+
+    expect(readFlags(store)).toEqual(DEFAULT_FLAGS)
+    expect(said('flags-status')).toBe('')
+    // The block exists whether or not anything is on: it is how an experiment is turned off again.
+    expect(dialog().querySelector('[data-testid="generate-experiments"]')).not.toBeNull()
+
+    await close(root, host)
+})
+
+test('an experiment switched on is remembered, and says so next to the pictures', async () => {
+    const store = memoryStore()
+    const first = await open(memoryLlama([carved('tower', '#808080')]), undefined, store)
+
+    await toggleSwitch('Repair the volume')
+    expect(readFlags(store).repair).toBe(true)
+    expect(said('flags-status')).toBe('Experiments: repair')
+
+    await close(first.root, first.host)
+
+    // The point of the store: a reload is the middle of a measurement, not the end of one.
+    const second = await open(memoryLlama([carved('tower', '#808080')]), undefined, store)
+    expect(said('flags-status')).toBe('Experiments: repair')
+    await close(second.root, second.host)
+})
+
+test('All off puts every experiment back, on screen and on disk', async () => {
+    const store = memoryStore()
+    const {root, host} = await open(memoryLlama([carved('tower', '#808080')]), undefined, store)
+
+    await toggleSwitch('Repair the volume')
+    await toggleSwitch('Reject and resample')
+    expect(said('flags-status')).toBe('Experiments: repair, gates')
+
+    await act(async () => {
+        control('All off').click()
+    })
+    expect(readFlags(store)).toEqual(DEFAULT_FLAGS)
+    expect(said('flags-status')).toBe('')
+
+    await close(root, host)
+})
+
+/*
+ * The switch has to reach the *call*, not just the reducer. Everything else about the experiments is
+ * tested in `gen/`; what only a mount can show is that a click in the folded block changes what the
+ * batch asks the server for.
+ */
+test('an experiment switched on reaches the brief the server is sent', async () => {
+    const llama = memoryLlama([carved('tower', '#808080')], 'qwen', ['tower'])
+    const mounted = await open(llama, undefined, memoryStore())
+
+    await generate(mounted)
+    expect(llama.seen[0]?.brief.flags?.silhouette).toBe(false)
+    const plainExamples = llama.seen[0]?.brief.examples.length ?? 0
+
+    await toggleSwitch('Silhouette ops')
+    await generate(mounted)
+    const sent = llama.seen[llama.seen.length - 1]
+    expect(sent?.brief.flags?.silhouette).toBe(true)
+    // And the experiment's own worked examples went with it, not just the flag.
+    expect(sent?.brief.examples.length).toBeGreaterThan(plainExamples)
+
+    await close(mounted.root, mounted.host)
+})
+
+test('the relational switch replaces the language the server is asked for', async () => {
+    const llama = memoryLlama([carved('tower', '#808080')], 'qwen', ['tower'])
+    const mounted = await open(llama, undefined, memoryStore())
+
+    await toggleSwitch('Relational language')
+    await generate(mounted)
+
+    const sent = llama.seen[llama.seen.length - 1]
+    expect(sent?.brief.flags?.relational).toBe(true)
+    // The bank's box-written reply is gone: a batch shown both languages is taught two answers.
+    const replies = (sent?.brief.examples ?? []).map(example => example.reply).join('\n')
+    expect(replies).toContain('part(')
+    expect(replies).not.toContain('mirrorX')
+
+    await close(mounted.root, mounted.host)
+})
+
+test('one worked example instead of three is what the picking call is asked for', async () => {
+    const llama = memoryLlama([carved('tower', '#808080')], 'qwen', ['tower', 'dog'])
+    const mounted = await open(llama, undefined, memoryStore())
+
+    await generate(mounted)
+    expect(llama.asked[0]).toBe(3)
+
+    await toggleSwitch('One worked example')
+    await generate(mounted)
+    expect(llama.asked[llama.asked.length - 1]).toBe(1)
+
+    await close(mounted.root, mounted.host)
 })

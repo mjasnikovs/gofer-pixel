@@ -13,9 +13,8 @@ import type {Store} from '../doc/store'
 import type {WorkedExample} from '../gen/bank'
 import {choose, forget, recall, takeFile, type Outcome} from '../gen/reference'
 import {
-    clipNote,
+    gateNote,
     generateNote,
-    hasClip,
     idleBatch,
     namingNote,
     ordered,
@@ -24,18 +23,17 @@ import {
     type BatchState,
     type Ranked
 } from '../gen/batch'
-import type {Scorer} from '../gen/clip'
 import {randomSeed, type GenerationRecord, type Llama} from '../gen/llama'
+import {asking, CANVAS_SIZES, FIRST_ASK, MAX_CANDIDATES, startable, type Ask} from '../gen/ask'
 import {
-    asking,
-    CANVAS_SIZES,
-    FIRST_ASK,
-    MAX_CANDIDATES,
-    showing,
-    startable,
-    starting,
-    type Ask
-} from '../gen/ask'
+    experimenting,
+    FLAG_NOTES,
+    flagsOn,
+    flip,
+    readFlags,
+    resetFlags,
+    type Flags
+} from '../gen/flags'
 import {swatchesOf} from '../gen/palette'
 import {clientOf, connect, CONNECTING, type Connection} from '../gen/connect'
 import type {Library} from '../gen/library'
@@ -58,9 +56,10 @@ import {Thumbnail} from './Thumbnail'
  * What is left in this file is the dialog: the prompt, the count, the dropped reference, and which
  * of the two orders the artist is looking at.
  *
- * Nothing here is a quality gate. The built-in scores are exact and rank the broken candidates down;
- * CLIP is a better opinion when `py/clipserve.py` happens to be running, and both are sort orders
- * over one batch. The artist looks at the pictures.
+ * Nothing here is a quality gate. The scores in `gen/score.ts` are exact and rank the broken
+ * candidates down, and that is all they are — a sort order over one batch. The artist looks at the
+ * pictures. There was a CLIP scorer behind a second order until 2026-08-11; it was removed because a
+ * sort order is all it could ever be, and it could not be looped against without rewarding damage.
  */
 export type {Ranked}
 export {MAX_CANDIDATES}
@@ -103,7 +102,6 @@ const CandidateCard = ({
                 {`joined ${percent(scores.connectivity)} · layers ${percent(scores.sliceUsage)}`}
                 <br />
                 {`solid ${percent(scores.bboxFill)} · rank ${entry.overall.toFixed(2)}`}
-                {entry.clip === null ? '' : ` · clip ${entry.clip.toFixed(3)}`}
             </Text>
             <Button
                 label='Use this one'
@@ -121,7 +119,6 @@ export const GenerateDialog = ({
     store,
     files,
     volume,
-    scorer,
     veto,
     onClose,
     onPick,
@@ -149,7 +146,6 @@ export const GenerateDialog = ({
      * paints with it or when somebody chose it, and filler counts as neither.
      */
     volume: Volume
-    scorer: Scorer
     /** The naming judge — see `gen/veto.ts`. Same server as `llama`, different question. */
     veto: Veto
     onClose: () => void
@@ -188,6 +184,14 @@ export const GenerateDialog = ({
      */
     const [reference, setReference] = useState<WorkedExample | undefined>(() => recall(store))
     const [referenceNote, setReferenceNote] = useState('')
+    /**
+     * Which experiments are switched on — see `gen/flags.ts`.
+     *
+     * Read from the store the way the dropped teacher above is, and for a stronger reason: half a
+     * measurement is three seeds before a reload against three seeds after it, and a switch that
+     * forgot itself in between would compare an experiment against itself without saying so.
+     */
+    const [flags, setFlags] = useState<Flags>(() => readFlags(store))
 
     /**
      * Land whatever `gen/reference.ts` came back with.
@@ -260,10 +264,8 @@ export const GenerateDialog = ({
         if (!client) return
         const controller = new AbortController()
         running.current = controller
-        // Whatever order was clicked belonged to the last batch — see `starting`.
-        setAsk(starting)
         await runBatch(
-            {llama: client, scorer, veto},
+            {llama: client, veto},
             {
                 prompt,
                 count,
@@ -273,16 +275,19 @@ export const GenerateDialog = ({
                 // is held to is the one that was open when the artist pressed Generate.
                 ...(enforcePalette ? {swatches: swatchesOf(volume)} : {}),
                 seed: randomSeed(),
+                // Which experiments this batch runs under — see `gen/flags.ts`. Read at the moment
+                // the batch starts, the same as the palette above.
+                flags,
                 teach: ids => (connection.kind === 'loading' ? [] : connection.library.teach(ids)),
                 ...(reference ? {reference} : {})
             },
             setBatch,
             controller.signal
         )
-    }, [connection, reference, scorer, veto, naming, prompt, count, canvas, enforcePalette, volume])
+    }, [connection, reference, veto, naming, prompt, count, canvas, enforcePalette, flags, volume])
 
     const busy = batch.stage === 'generating'
-    const ready = startable(connection, batch)
+    const ready = startable(connection, busy)
     const pending = pendingSlots(batch)
 
     /** The one way a batch starts, so the button and the Enter key cannot drift apart. */
@@ -292,8 +297,7 @@ export const GenerateDialog = ({
         void started
     }
 
-    const clipRanked = hasClip(batch)
-    const order = ordered(batch, showing(ask, batch))
+    const order = ordered(batch)
 
     return (
         <Dialog
@@ -464,6 +468,59 @@ export const GenerateDialog = ({
                     />
                 </div>
 
+                {/*
+                 * The experiments, folded away — `gen/flags.ts` and `docs/GEN_IDEAS.md`.
+                 *
+                 * Collapsed by default and last in the column, because none of them is measured and
+                 * the two switches above are. A `<details>` rather than a panel: eight switches is
+                 * more vertical space than the prompt and the pictures together, and a dialog whose
+                 * unmeasured half is the tallest thing in it is telling the artist the wrong story.
+                 */}
+                <details
+                    className='generate-experiments'
+                    data-testid='generate-experiments'
+                >
+                    <summary>
+                        Experiments
+                        {experimenting(flags) ? ` — ${String(flagsOn(flags).length)} on` : ''}
+                    </summary>
+                    <div className='generate-experiments-body'>
+                        <Text
+                            type='supporting'
+                            color='secondary'
+                        >
+                            Unmeasured ideas from docs/GEN_IDEAS.md. Off is the ground every finding
+                            on the record was measured on, so turn one on at a time and render the
+                            same seeds before and after.
+                        </Text>
+                        {FLAG_NOTES.map(note => (
+                            <Switch
+                                key={note.key}
+                                label={note.title}
+                                description={`${note.note} — ${note.where}`}
+                                size='sm'
+                                value={flags[note.key]}
+                                isDisabled={busy}
+                                onChange={value => {
+                                    // Written outside the updater on purpose: `flip` puts the value
+                                    // in `localStorage`, and React may call an updater twice.
+                                    setFlags(flip(store, flags, note.key, value))
+                                }}
+                            />
+                        ))}
+                        <Button
+                            label='All off'
+                            size='sm'
+                            variant='ghost'
+                            isDisabled={busy || !experimenting(flags)}
+                            tooltip='Back to the generator every finding on the record was measured with'
+                            onClick={() => {
+                                setFlags(resetFlags(store))
+                            }}
+                        />
+                    </div>
+                </details>
+
                 {busy && (
                     <ProgressBar
                         label='Generating candidates'
@@ -490,28 +547,23 @@ export const GenerateDialog = ({
                         type='supporting'
                         color='disabled'
                     >
-                        <span data-testid='clip-status'>{clipNote(batch)}</span>
+                        <span data-testid='gate-status'>{gateNote(batch)}</span>
                     </Text>
-                    {clipRanked && (
-                        <SegmentedControl
-                            label='Rank by'
-                            size='sm'
-                            value={showing(ask, batch)}
-                            onChange={value => {
-                                setAsk(held =>
-                                    asking(held, {rankBy: value === 'clip' ? 'clip' : 'built-in'})
-                                )
-                            }}
+                    {/*
+                     * What is switched on, next to the pictures rather than only inside the folded
+                     * block that switched it on. A batch judged by eye without knowing which
+                     * generator made it is not a measurement, and the block above is closed by the
+                     * time the pictures land.
+                     */}
+                    {experimenting(flags) && (
+                        <Text
+                            type='supporting'
+                            color='secondary'
                         >
-                            <SegmentedControlItem
-                                value='built-in'
-                                label='Built-in'
-                            />
-                            <SegmentedControlItem
-                                value='clip'
-                                label='CLIP'
-                            />
-                        </SegmentedControl>
+                            <span data-testid='flags-status'>
+                                {`Experiments: ${flagsOn(flags).join(', ')}`}
+                            </span>
+                        </Text>
                     )}
                 </div>
 

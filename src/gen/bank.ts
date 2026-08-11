@@ -52,6 +52,21 @@ export interface Manifest {
  */
 export const MAX_PICKS = 3
 
+/**
+ * One example instead of three, when the `onePick` experiment is on — `gen/flags.ts`, §8.
+ *
+ * The measurement says one. Live on 2026-08-09 against three fixed seeds: `a knight` read as an
+ * armoured figure 3 of 3 with one example and 0 of 3 with three, two of the three growing the
+ * chicken example's red comb on the helmet. The picking call is honest about easy subjects and
+ * **pads when it is unsure**, so the subjects that collect three examples are exactly the ones that
+ * were already hard.
+ *
+ * It is a cap passed down the call rather than a different constant, because `pickPrompt` writes the
+ * number into the sentence it sends the model: the cap and the prompt that states it have to move
+ * together, and a flag that moved only one of them would ask for three and keep one.
+ */
+export const picksFor = (onePick: boolean): number => (onePick ? 1 : MAX_PICKS)
+
 const isString = (value: unknown): value is string => typeof value === 'string' && value !== ''
 
 const readEntry = (value: unknown): BankEntry | undefined => {
@@ -95,10 +110,17 @@ export const readManifest = (value: unknown): Manifest | undefined => {
  * grammar here would buy nothing. Asked once per *batch* — which example fits is a property of the
  * subject, not of the seed — so it costs about two seconds against ten to twenty per candidate.
  */
-export const pickPrompt = (manifest: Manifest): string => {
+export const pickPrompt = (manifest: Manifest, picks: number = MAX_PICKS): string => {
     const width = Math.max(...manifest.entries.map(entry => entry.id.length))
     const lines = manifest.entries.map(entry => `${entry.id.padEnd(width)}  ${entry.use}`)
-    return `Which of these examples is the subject most like? Reply with up to ${String(MAX_PICKS)} ids from this list, closest first, separated by commas.
+    if (picks <= 1) {
+        return `Which one of these examples is the subject most like? Reply with a single id from this list.
+
+${lines.join('\n')}
+
+Answer with one id only, nothing else.`
+    }
+    return `Which of these examples is the subject most like? Reply with up to ${String(picks)} ids from this list, closest first, separated by commas.
 
 ${lines.join('\n')}
 
@@ -112,13 +134,20 @@ Answer with ids only, nothing else.`
  * to none: a prompt with no worked example in it is the 0-of-12 case from finding 7, and that is a
  * worse outcome than a badly chosen teacher.
  */
-export const readPicks = (value: string, manifest: Manifest): readonly string[] => {
+export const readPicks = (
+    value: string,
+    manifest: Manifest,
+    picks: number = MAX_PICKS
+): readonly string[] => {
     const known = new Set(manifest.entries.map(entry => entry.id))
+    // The cap is enforced here as well as asked for: a model told "one id" that answers with three
+    // must be held to one, or the experiment measures the prompt rather than the number.
+    const cap = Math.max(1, Math.floor(picks))
     const out: string[] = []
     for (const word of value.toLowerCase().split(/[^a-z0-9]+/)) {
         if (!known.has(word) || out.includes(word)) continue
         out.push(word)
-        if (out.length === MAX_PICKS) break
+        if (out.length === cap) break
     }
     return out.length === 0 ? [manifest.fallback] : out
 }

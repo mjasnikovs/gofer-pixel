@@ -58,7 +58,6 @@ What is there now, and roughly in dependency order:
 | `src/gen/teaching`  | which examples teach a batch, in what order, within what line budget                |
 | `src/gen/palette`   | holding a candidate to the project's colours, in Oklab                              |
 | `src/theme/`        | `theme.ts` and the CSS it generates; never edit the CSS                             |
-| `py/`               | `clipserve.py`, the CLIP scoring service. Optional, started by hand                 |
 | `browser/`          | the Playwright suite and the page it drives                                         |
 
 ## The renderer
@@ -88,8 +87,9 @@ Carried back out of `legacy/` on 2026-08-08, into `src/gen/` and one dialog behi
 The pipeline is:
 
 ```
-prompt → llama-server emits a JSON op list under a grammar → rasterise to a Volume
-  → the CPU raycaster renders four views → CLIP ranks them → pick one, and it becomes the document
+prompt → llama-server emits an op list → rasterise to a Volume → shade it
+  → the CPU raycaster renders it → the deterministic scores order the grid
+  → pick one, and it becomes the document
 ```
 
 Four things are settled and must not be re-litigated. They are measured, and the record is
@@ -99,8 +99,13 @@ Four things are settled and must not be re-litigated. They are measured, and the
    still produced 0 of 12 sprites that depicted their subject. It emits primitives; code rasterises.
 2. **The model cannot judge its own renders.** 1–4/10 on counting. Only simple binary presence
    questions about one image work, at 20/20.
-3. **CLIP is the scorer, for candidates of one prompt only.** A good stone tower scores below a
-   mediocre mushroom, so it is a sort order inside a batch and never a quality bar.
+3. **There is no learned scorer, and a scorer is not what is missing.** CLIP ranked candidates here
+   until 2026-08-11 and was removed. It only ever ranked candidates of _one_ prompt — a good stone
+   tower scores below a mediocre mushroom — so it was a sort order and never a quality bar, and a
+   sort order cannot be looped against: the legacy refiner optimised against it reliably and made
+   the sprite worse, tearing the mushroom's cap apart for +0.03. Negative anchors were tried
+   (`GEN_RESEARCH.md`, 2026-08-11) and moved three of four orderings not at all. The order is
+   `score.ts`'s `overallScore`, and the artist looks at the pictures.
 4. **Organic and architectural subjects work; directional machines do not.** A tank comes back
    front-to-back reversed and no prompt fixes it.
 
@@ -136,17 +141,14 @@ re-running them:
 - **The model as a yes/no judge over candidates**, which finding 2 says is its one reliable vision
   skill. It gave 4/4 and 1/4 to pictures that could not be told apart. It does not rank.
 
-What is different from the legacy build: **nothing rasterises a spec twice.** Legacy shipped the op
-list to Python and re-rasterised and re-rendered it there with the sprite stacker, so two
-rasterisers and two renderers had to agree byte for byte. `py/clipserve.py` now takes the PNGs the
-CPU raycaster already made and does nothing but CLIP. The evolutionary refiner is deliberately not
-carried over — it optimises reliably against an objective that makes the sprite worse.
+What is different from the legacy build: **nothing rasterises a spec twice, and nothing scores it
+with a model.** Legacy shipped the op list to Python and re-rasterised and re-rendered it there with
+the sprite stacker, so two rasterisers and two renderers had to agree byte for byte. It also ran an
+evolutionary refiner against a CLIP objective, which is the reason neither the refiner nor the
+service survives: both existed to optimise a number that does not track whether the sprite is good.
 
 Measured 2026-08-08, end to end in Chromium against the live server: **7–20 s per candidate**,
-sequentially because llama-server has two slots and shares both GPUs; **83 ms** to render 24 ranking
-views on the CPU; **~0.2 s per candidate** to score four views with CLIP, plus 4.6 s to load it
-once. The built-in score and CLIP picked the same winner out of six, at a rank agreement of 0.17 —
-low because four of the six were solid bricks that tie at the top of any deterministic score.
+sequentially because llama-server has two slots and shares both GPUs.
 
 The worked examples are the ceiling, so they live on disk. `src/assets/examples/` is one directory
 of models plus `examples.json` describing them; `src/gen/library.ts` decomposes each one losslessly
@@ -175,18 +177,21 @@ entry to a darkened pink is a _grey_, because RGB puts every dark colour in one 
 Where a palette has no ramp under a colour the three tones collapse into one and the model comes out
 flat there, which is the honest outcome rather than a fourth colour the palette does not have.
 
-**Enforce canvas size — off, 32³, 64³ or 128³, default 32³.** Two halves that have to move together:
-`systemFor` asks the model for that cube _and_ tells it to fill it, and `gridFor` makes the document
-that cube whether or not it obliged — centred across, feet on the floor, because the prompt has
-always said feet at y = 0. Off is the old behaviour: 32 asked for, and a grid fitted to the ops with
-no room around the model.
+**Enforce canvas size — off, 8³, 16³, 32³, 64³ or 128³, default 32³.** Two halves that have to move
+together: `systemFor` asks the model for that cube _and_ tells it to fill it, and `gridFor` makes
+the document that cube whether or not it obliged — centred across, feet on the floor, because the
+prompt has always said feet at y = 0. Off is the old behaviour: 32 asked for, and a grid fitted to
+the ops with no room around the model.
 
 The instruction to fill the box does work — measured 2026-08-11 against the live server on "a stone
 tower", one candidate each: fitted it drew 13 wide × 25 tall, at 64 it drew 30 × 55, at 128 it drew
 61 × 128. **Filling a big box with _shape_ is a different thing and is not measured**: the 128 run
 came back at 88 % of its own bounding box, which is the solid brick `score.ts` exists to sink, and
 every worked example in the bank is built at 32. So 32 is the default because it is the ground the
-findings were walked on, and the bigger two are there to be tried.
+findings were walked on, and the other four are there to be tried. **8³ and 16³ are the opposite bet
+from 64³ and 128³**: down asks the model for less shape rather than more, which is where a sprite
+sheet mostly lives — a prop, a barrel, a helmet — and the same unmeasured gap cuts the other way,
+because every example teaches at 32.
 
 The canvas travels in the `.gpix` record because it is in the system prompt; whether the palette was
 enforced does not, because that happens after generation and the palette it snapped to belonged to a
@@ -197,13 +202,60 @@ the only thing that call moves is the `matched` count in a status line. That is 
 (`FEATURESET.md`'s naming brief: the judge names a sprite and does not get to reject it), so it
 stands, but it is the most expensive thing in `src/gen/` per unit of what it changes.
 
-```bash
-bun run clip          # .venv/bin/python py/clipserve.py — optional, port 8765
-```
+llama-server is not required to open the app: with it down the menu item opens a dialog that says so
+and disables its one button.
 
-Neither service is required to open the app. With llama-server down the menu item opens a dialog
-that says so and disables its one button; with `clipserve.py` down the batch ranks on the built-in
-scores.
+## The experiments
+
+`docs/GEN_IDEAS.md` is eleven directions out of `src/gen/` and four 2026 papers, written after
+generation was judged still short of good. The diagnosis it argues, and the reason most of the older
+ideas died: **the op language makes the model responsible for absolute integer coordinates in 3D**,
+and the outside literature says that is the wall — SpatialBabel measures precise coordinate output
+as near-zero across every configuration, and 3DCodeBench's two named failure modes are disconnected
+parts and structural misalignment. So every remaining move is one of two shapes: take the
+coordinates away from the model, or fix the geometry in code afterwards.
+
+Everything built out of it is behind a switch in **`src/gen/flags.ts`**, and the rule that makes
+them experiments is that **every flag is off by default**. Off is the generator every number in
+`docs/GEN_RESEARCH.md` was measured with; a flag that defaults on is a decision that skipped its
+measurement. They are remembered in `localStorage` rather than held in `Ask`, because half a
+measurement is three seeds before a reload against three seeds after it. They are **not** in the
+`.gpix`: when an experiment graduates its numbers go in `GEN_RESEARCH.md` and the flag is deleted
+with the branch it guarded, so a file recording one would name a code path that is about to go.
+
+The dialog draws them cheapest-first in a folded block at the bottom, and repeats what is on next to
+the pictures — a batch judged by eye without knowing which generator made it is not a measurement.
+
+| Flag         | What it does                                                            | Where           |
+| ------------ | ----------------------------------------------------------------------- | --------------- |
+| `repair`     | debris, one-voxel gaps, the floor, spindles, near-symmetry — in code    | `gen/repair.ts` |
+| `gates`      | a reject costs a seed, not a slot; rejection sampling, nothing fed back | `gen/gate.ts`   |
+| `onePick`    | one worked example instead of three                                     | `gen/bank.ts`   |
+| `retryEmpty` | one retry carrying the _error_, never a render                          | `gen/llama.ts`  |
+| `silhouette` | `front()`/`side()` — two outlines, extruded and intersected             | `gen/shape.ts`  |
+| `procedural` | `tree()`/`tower()`/`rock()` — numbers in, hundreds of voxels out        | `gen/grow.ts`   |
+| `relational` | parts and attachments instead of coordinates                            | `gen/rig.ts`    |
+
+Five things about how they are wired that are decisions, not plumbing:
+
+- **An experiment's words go in the system prompt _and_ in the reply's scope, or in neither.**
+  `systemFor` and `specFromCode` both take the flags. A function the prompt never mentions is one
+  the model never calls; a function the prompt describes with nothing behind it throws.
+- **A flag that is off leaves the name genuinely undefined**, never a no-op stub. A reply that calls
+  it throws on that line and keeps the ops before it, which is the call `code.ts` already makes
+  about a typo — and it means a batch cannot run an experiment's prompt against none of its code.
+- **Every experiment emits the existing `VoxOp[]`.** No new op, no save-format change, and
+  `rasterise → finish` still reproduces the asset from the record.
+- **The experiments' own worked examples go in _front_ of the bank's**, so the bank's pick still
+  sits nearest the prompt. They are examples rather than more prose because finding 7 is that one
+  worked example took "a cat" from 0 recognisable of 12 to 4 of 4, and no rule in prose has ever
+  done that.
+- **`repair` is measured as a no-op on all five worked examples**, byte for byte, and that is its
+  first test. A rule that fires on the dog is a bug in the rule. The tower's 0.9959 symmetry
+  agreement — one asymmetric window in 1448 voxels — is its own test, so the threshold cannot drift.
+
+Two ideas from the document are **not** built and the reasons are external: the bank still has no
+real assets on this machine, and the TRELLIS-class spike needs llama-server unloaded off both GPUs.
 
 ## Twenty-one seams worth knowing about
 
@@ -328,8 +380,8 @@ fields.
     drawn at.
 
 - **`src/gen/batch.ts`** — one generation batch as a value. Stage order, cancellation and the three
-  status lines. The measured rules live here: naming sorts nothing, CLIP goes last and the grid
-  never waits on it, a dropped model is taught last. `GenerateDialog` holds one `BatchState`.
+  status lines. The measured rules live here: naming sorts nothing, a dropped model is taught last.
+  `GenerateDialog` holds one `BatchState`.
 - **`src/doc/views.ts`** — the camera list as one value: `cameras`, `selected`, `previewed` and
   `serial`, extended by `AppState` the way `Gesture` is. It was eight reducer cases maintaining four
   fields by hand — `capture` and `duplicate` the same five lines twice, `delete` and `directions`
@@ -589,11 +641,11 @@ of it.
 - llama-server on `localhost:8080` — Qwen3.6-27B, vision in, 120k context, 2 slots. It is a separate
   root/container process split across both GPUs. **Do not restart it casually.** It sends permissive
   CORS headers, so the browser calls it directly; no proxy.
-- Both GPUs sit at ~95 % VRAM with that model loaded. Nothing else gets meaningful VRAM; CLIP runs
-  on CPU by necessity. **The browser suite therefore runs one worker.** Two Chromiums starting at
-  once intermittently fail to bring up a hardware Vulkan device and drop to SwiftShader without
-  saying so — measured over eight two-worker runs, five failed, at 58–63 ms per frame or with the
-  viewport reading back an empty canvas. Serially it is stable, and the whole suite is ~1.3 min.
+- Both GPUs sit at ~95 % VRAM with that model loaded. Nothing else gets meaningful VRAM. **The
+  browser suite therefore runs one worker.** Two Chromiums starting at once intermittently fail to
+  bring up a hardware Vulkan device and drop to SwiftShader without saying so — measured over eight
+  two-worker runs, five failed, at 58–63 ms per frame or with the viewport reading back an empty
+  canvas. Serially it is stable, and the whole suite is ~1.3 min.
 - A frame costs 0.17 ms on the idle GPU and up to 2.4 ms while llama-server is busy on the same
   card. Any timing assertion has to clear that 14× spread, not the idle number.
 - WebGL2 under the Tauri webview here is **hardware**, measured 2026-08-06 with

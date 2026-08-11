@@ -1,4 +1,9 @@
-import {MAX_SIZE, readSpec, type VoxSpec} from './ops'
+import {MAX_SIZE, readSpec, type VoxOp, type VoxSpec} from './ops'
+import {DEFAULT_FLAGS, type Flags} from './flags'
+import {silhouetteScope} from './shape'
+import {rock, tower, tree} from './grow'
+import {rig, RIG_NAMES, scopeFor} from './rig'
+import {faceScope} from './face'
 
 /**
  * The model's reply is a program, and this runs it.
@@ -29,7 +34,8 @@ const OP_BUDGET = 4096
 export const specFromCode = (
     source: string,
     name: string,
-    canvas: number = MAX_SIZE
+    canvas: number = MAX_SIZE,
+    flags: Flags = DEFAULT_FLAGS
 ): VoxSpec | undefined => {
     const body = source.replace(/^\s*```\w*\s*\n/, '').replace(/\n?```\s*$/, '')
     const ops: unknown[] = []
@@ -55,12 +61,78 @@ export const specFromCode = (
     const mirrorX = (): void => {
         mirror = true
     }
+    /*
+     * The experiments add words to the reply's vocabulary — `gen/flags.ts`, `docs/GEN_IDEAS.md`.
+     *
+     * Names, not a bag: `new Function` takes its scope as parameters, so a flag that is off leaves
+     * the name genuinely undefined and a reply that calls it throws on that line — keeping the ops
+     * before it, which is the same call this file already makes about a typo. The alternative, a
+     * no-op stub, would let a batch run the experiment's prompt against none of its code and come
+     * back with a model nobody could explain.
+     */
+    const emit = (op: VoxOp): void => {
+        spend()
+        ops.push(op)
+    }
+    /*
+     * §2 replaces the language rather than extending it — `gen/rig.ts`. So it takes the whole scope,
+     * and `box` in it is the rig's own, in the rig's frame. Mixing the two would hand the model two
+     * meanings for one name, which is worse than either language on its own.
+     *
+     * Its ops are read *after* the program has run, not emitted call by call: the rig translates
+     * everything it painted onto the floor and onto its own axis at the end, so an op taken early
+     * would be in coordinates that no longer exist.
+     */
+    if (flags.relational) {
+        const built = rig()
+        try {
+            // eslint-disable-next-line @typescript-eslint/no-implied-eval
+            const program = new Function(...RIG_NAMES, body) as (...fns: unknown[]) => void
+            program(...scopeFor(built))
+        } catch {
+            // The same call as below: what was built before the throw is still a model.
+        }
+        return readSpec(
+            {name, size: [canvas, canvas, canvas], mirror_x: false, ops: [...built.ops]},
+            canvas
+        )
+    }
+    const hull = silhouetteScope(emit)
+    /*
+     * The face scope is handed the live op list, so `face` measures the solid the reply painted on
+     * the lines above it — see `gen/face.ts`. That is what makes "block it out first, then paint the
+     * faces" a rule the code keeps rather than a sentence in the prompt.
+     */
+    const surface = faceScope(ops as VoxOp[], emit)
+    const names = ['box', 'ball', 'erase', 'mirrorX']
+    const values: unknown[] = [box, ball, erase, mirrorX]
+    if (flags.faces) {
+        names.push('face')
+        values.push(surface.face)
+    }
+    if (flags.silhouette) {
+        names.push('front', 'side')
+        values.push(hull.front, hull.side)
+    }
+    if (flags.procedural) {
+        /*
+         * The canvas is put in behind the model's back, and last, so it cannot be argued with —
+         * §6, `gen/grow.ts`. Every generator clamps to it, and a reply that names its own `canvas`
+         * would be choosing the size of a document it is not being asked about.
+         */
+        const grown =
+            (make: (opts: Record<string, unknown>) => readonly VoxOp[]) =>
+            (opts: unknown): void => {
+                const given = typeof opts === 'object' && opts !== null ? opts : {}
+                for (const op of make({...(given as Record<string, unknown>), canvas})) emit(op)
+            }
+        names.push('tree', 'tower', 'rock')
+        values.push(grown(tree), grown(tower), grown(rock))
+    }
     try {
         // eslint-disable-next-line @typescript-eslint/no-implied-eval
-        const program = new Function('box', 'ball', 'erase', 'mirrorX', body) as (
-            ...fns: unknown[]
-        ) => void
-        program(box, ball, erase, mirrorX)
+        const program = new Function(...names, body) as (...fns: unknown[]) => void
+        program(...values)
     } catch {
         // A syntax error before the first op leaves `ops` empty, and empty reads as undefined.
     }
@@ -70,7 +142,13 @@ export const specFromCode = (
             // The code names no size, so the spec records the box it was asked to draw inside.
             size: [canvas, canvas, canvas],
             mirror_x: mirror,
-            ops
+            ops,
+            /*
+             * The reply's own declaration that its content is on its surface — see `gen/face.ts`.
+             * `gate.ts` and `overallScore` both read it, and both are wrong for a prop without it:
+             * measured live, a correct Mario brick block was rejected at 83 % and 95 % solid.
+             */
+            surface: surface.used()
         },
         canvas
     )

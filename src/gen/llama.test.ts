@@ -11,7 +11,8 @@ import {
     type Attempt,
     type Candidate
 } from './llama'
-import {readManifest, type Manifest, type WorkedExample} from './bank'
+import {DEFAULT_FLAGS} from './flags'
+import {MAX_PICKS, readManifest, type Manifest, type WorkedExample} from './bank'
 import MANIFEST from '../assets/examples/examples.json'
 
 const manifest: Manifest = readManifest(MANIFEST) ?? {fallback: 'tower', entries: []}
@@ -301,7 +302,7 @@ test('the picking call sends the manifest as its prompt and reads ids back', asy
         )
     }) as unknown as typeof fetch
     try {
-        const picks = await browserLlama(manifest, 'http://x:8080').pick('a knight')
+        const picks = await browserLlama(manifest, 'http://x:8080').pick('a knight', MAX_PICKS)
         expect(picks).toEqual(['farmer', 'dog'])
     } finally {
         globalThis.fetch = original
@@ -325,23 +326,23 @@ test('a pick that fails falls back rather than sinking the batch', async () => {
         // The server is down.
         globalThis.fetch = (() =>
             Promise.reject(new Error('ECONNREFUSED'))) as unknown as typeof fetch
-        expect(await browserLlama(manifest).pick('a knight')).toEqual(fallback)
+        expect(await browserLlama(manifest).pick('a knight', MAX_PICKS)).toEqual(fallback)
 
         // The server is there and unhappy.
         globalThis.fetch = (() =>
             Promise.resolve(new Response('busy', {status: 503}))) as unknown as typeof fetch
-        expect(await browserLlama(manifest).pick('a knight')).toEqual(fallback)
+        expect(await browserLlama(manifest).pick('a knight', MAX_PICKS)).toEqual(fallback)
 
         // The server answered with nothing an id could be read out of.
         globalThis.fetch = (() =>
             Promise.resolve(
                 new Response(JSON.stringify({choices: [{message: {content: 'no idea'}}]}))
             )) as unknown as typeof fetch
-        expect(await browserLlama(manifest).pick('a knight')).toEqual(fallback)
+        expect(await browserLlama(manifest).pick('a knight', MAX_PICKS)).toEqual(fallback)
 
         // And a reply with no choices at all, which is a proxy answering rather than the server.
         globalThis.fetch = (() => Promise.resolve(new Response('{}'))) as unknown as typeof fetch
-        expect(await browserLlama(manifest).pick('a knight')).toEqual(fallback)
+        expect(await browserLlama(manifest).pick('a knight', MAX_PICKS)).toEqual(fallback)
     } finally {
         globalThis.fetch = original
     }
@@ -358,7 +359,9 @@ test('a cancelled pick carries the signal to the server', async () => {
         )
     }) as unknown as typeof fetch
     try {
-        expect(await browserLlama(manifest).pick('a dog', control.signal)).toEqual(['dog'])
+        expect(await browserLlama(manifest).pick('a dog', MAX_PICKS, control.signal)).toEqual([
+            'dog'
+        ])
     } finally {
         globalThis.fetch = original
     }
@@ -423,4 +426,100 @@ test('the swatches hold a candidate to the palette, after the shading and not be
     // One colour on the palette means one colour in the model — `finish`'s three tones included.
     expect(new Set(volume?.data ?? [])).toEqual(new Set([1]))
     expect([...(volume?.palette.subarray(4, 8) ?? [])]).toEqual([255, 0, 0, 255])
+})
+
+/*
+ * §8, `onePick` — the flag has to move the cap *and* the sentence that states it, which is why the
+ * number travels down the call rather than sitting as a constant in two files. Measured 2026-08-09:
+ * `a knight` read as an armoured figure 3 of 3 with one example and 0 of 3 with three.
+ */
+test('the picking call asks for three examples, and for one when the experiment is on', async () => {
+    const plain = memoryLlama([tower], 'memory', ['dog', 'tower'])
+    await generateMany(plain, 'a knight', 1, {now: at})
+    expect(plain.asked).toEqual([MAX_PICKS])
+
+    const one = memoryLlama([tower], 'memory', ['dog', 'tower'])
+    const attempts = await generateMany(one, 'a knight', 1, {
+        now: at,
+        flags: {...DEFAULT_FLAGS, onePick: true}
+    })
+    expect(one.asked).toEqual([1])
+    // And the batch is taught with what the cap allowed, not with what the bank happened to name.
+    expect(attempts[0]?.ok === true && attempts[0].candidate.record.examples).toEqual(['dog'])
+})
+
+/*
+ * §11, `retryEmpty`. The error goes back, never the render: 3DCodeBench measured error-feedback
+ * retry at 70.2 % → 97.4 % executable and measured a render fed back as doing nothing for geometry,
+ * which is the loop that died here three times.
+ */
+test('a reply that painted nothing is retried once, and only with the experiment on', async () => {
+    const plain = memoryLlama([empty, tower])
+    const cold = await generateMany(plain, 'a tower', 1, {now: at})
+    expect(cold[0]?.ok).toBe(false)
+    expect(plain.seen).toHaveLength(1)
+
+    const retried = memoryLlama([empty, tower])
+    const warm = await generateMany(retried, 'a tower', 1, {
+        now: at,
+        flags: {...DEFAULT_FLAGS, retryEmpty: true}
+    })
+    expect(warm[0]?.ok).toBe(true)
+    expect(retried.seen).toHaveLength(2)
+    // The second call carries the error and nothing else new: same seed, same examples.
+    expect(retried.seen[1]?.sampler).toEqual(retried.seen[0]?.sampler ?? {temperature: 0, seed: 0})
+    expect(retried.seen[0]?.brief.retry).toBeUndefined()
+    expect(retried.seen[1]?.brief.retry).toBe('That reply produced no voxels')
+})
+
+test('one retry, not a loop: a second empty reply is still a failure', async () => {
+    const llama = memoryLlama([empty])
+    const attempts = await generateMany(llama, 'a tower', 1, {
+        now: at,
+        flags: {...DEFAULT_FLAGS, retryEmpty: true}
+    })
+    expect(attempts[0]?.ok).toBe(false)
+    expect(llama.seen).toHaveLength(2)
+})
+
+/*
+ * §4, `gates`. Rejection sampling: a brick costs a seed and not a slot, and the artist still ends
+ * up with `count` cards. Nothing is fed back and the model is never told — see `gen/gate.ts`.
+ */
+test('the gate spends another seed on a brick, and the grid still fills', async () => {
+    const solid: VoxSpec = {
+        name: 'brick',
+        size: [8, 8, 8],
+        mirror_x: false,
+        ops: [{op: 'box', from: [0, 0, 0], to: [7, 7, 7], color: '#808080'}]
+    }
+    const carved: VoxSpec = {
+        name: 'tower',
+        size: [8, 8, 8],
+        mirror_x: false,
+        ops: [
+            {op: 'box', from: [0, 0, 0], to: [7, 7, 7], color: '#808080'},
+            {op: 'erase', from: [1, 2, 1], to: [6, 7, 6]}
+        ]
+    }
+    const llama = memoryLlama([solid, carved])
+    const tallies: number[] = []
+    const attempts = await generateMany(llama, 'a stone tower', 1, {
+        now: at,
+        seed: 40,
+        flags: {...DEFAULT_FLAGS, gates: true},
+        onGate: tally => tallies.push(tally.rejected)
+    })
+
+    expect(attempts).toHaveLength(1)
+    expect(attempts[0]?.ok).toBe(true)
+    // Two seeds spent for one card, and they are consecutive: the reject burned 40.
+    expect(llama.seen.map(call => call.sampler.seed)).toEqual([40, 41])
+    expect(tallies).toEqual([1, 1])
+
+    // Off, the brick is the candidate. The gate is an experiment, not a new default.
+    const open = memoryLlama([solid, carved])
+    const ungated = await generateMany(open, 'a stone tower', 1, {now: at, seed: 40})
+    expect(ungated[0]?.ok).toBe(true)
+    expect(open.seen).toHaveLength(1)
 })

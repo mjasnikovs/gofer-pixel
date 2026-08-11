@@ -19,6 +19,14 @@ export interface ModelScores {
     readonly bboxFill: number
     /** How many palette entries the model actually uses. */
     readonly colorsUsed: number
+    /**
+     * How many distinct colours are visible from outside — see `shellColors`.
+     *
+     * The one term that means anything about a *prop*. A block's silhouette is a square, so
+     * `bboxFill` and `sliceUsage` say nothing about whether it is a good block; what says it is
+     * whether the faces carry a pattern or the whole thing is one flat colour.
+     */
+    readonly shellColors: number
     readonly voxels: number
 }
 
@@ -124,6 +132,50 @@ export const bboxFill = (volume: Volume): number => {
     return count / ((x1 - x0 + 1) * (y1 - y0 + 1) * (z1 - z0 + 1))
 }
 
+/**
+ * Distinct colours on the outer shell — every filled voxel with at least one empty side, or a side
+ * on the edge of the grid.
+ *
+ * The grid's own boundary counts as empty, and it has to: a block drawn at exactly the canvas size
+ * has its front face flush with the wall, and treating that as buried would report a solid cube as
+ * having no surface at all.
+ *
+ * It exists because of the brick measurement (`docs/GEN_RESEARCH.md`, 2026-08-11). Everything else in
+ * `ModelScores` asks about the silhouette, and for a block, a tile or a crate the silhouette is a
+ * square and all of the information is on the faces. `colorsUsed` cannot stand in for this: a model
+ * that painted its mortar lines *through the middle of the cube* — which is what the reply actually
+ * did before `gen/face.ts` existed — uses six colours and shows one.
+ */
+export const shellColors = (volume: Volume): number => {
+    const {sx, sy, sz, data} = volume
+    const seen = new Uint8Array(256)
+    for (let z = 0; z < sz; z += 1) {
+        for (let y = 0; y < sy; y += 1) {
+            for (let x = 0; x < sx; x += 1) {
+                const value = data[voxelIndex(volume, x, y, z)] ?? 0
+                if (value === 0) continue
+                const bare =
+                    x === 0
+                    || y === 0
+                    || z === 0
+                    || x === sx - 1
+                    || y === sy - 1
+                    || z === sz - 1
+                    || (data[voxelIndex(volume, x + 1, y, z)] ?? 0) === 0
+                    || (data[voxelIndex(volume, x - 1, y, z)] ?? 0) === 0
+                    || (data[voxelIndex(volume, x, y + 1, z)] ?? 0) === 0
+                    || (data[voxelIndex(volume, x, y - 1, z)] ?? 0) === 0
+                    || (data[voxelIndex(volume, x, y, z + 1)] ?? 0) === 0
+                    || (data[voxelIndex(volume, x, y, z - 1)] ?? 0) === 0
+                if (bare) seen[value] = 1
+            }
+        }
+    }
+    let count = 0
+    for (let i = 1; i < 256; i += 1) if (seen[i] === 1) count += 1
+    return count
+}
+
 const distinctColors = ({data}: Volume): number => {
     const seen = new Uint8Array(256)
     for (const value of data) seen[value] = 1
@@ -132,7 +184,20 @@ const distinctColors = ({data}: Volume): number => {
     return count
 }
 
-export const scoreModel = (volume: Volume): ModelScores => {
+/**
+ * Every score for one candidate.
+ *
+ * `flat` is the model **as the reply painted it**, before `gen/finish.ts` shaded it, and only
+ * `shellColors` reads it. Measured 2026-08-11 and it is not a nicety: `finish` invents up to two
+ * shade tones per colour, so the shell of *every* candidate comes back at 10 or more colours, the
+ * variety term pins at 1 and the prop branch of `overallScore` becomes a constant that sorts
+ * nothing. That is the same defect the note below records about `bboxFill` — a term that cannot
+ * separate anything is not a score — and it was rebuilt in a new place before this parameter existed.
+ *
+ * It defaults to the volume itself, so a caller with only one grid gets the old behaviour and the
+ * inflated number rather than a crash. The one caller that has both is `generateMany`.
+ */
+export const scoreModel = (volume: Volume, flat: Volume = volume): ModelScores => {
     let voxels = 0
     for (const value of volume.data) if (value !== 0) voxels += 1
     return {
@@ -140,6 +205,7 @@ export const scoreModel = (volume: Volume): ModelScores => {
         sliceUsage: sliceUsage(volume),
         bboxFill: bboxFill(volume),
         colorsUsed: distinctColors(volume),
+        shellColors: shellColors(flat),
         voxels
     }
 }
@@ -155,9 +221,26 @@ export const scoreModel = (volume: Volume): ModelScores => {
  * silhouette; carving is the whole of the work. So the term is `1 - bboxFill`, and connectivity is
  * what stops that rewarding a cloud of debris.
  *
+ * The third term is the one that switches. `surface` is a reply that called `face` — see
+ * `gen/face.ts` — and for that subject `1 - bboxFill` is not caution, it is wrong: a Mario brick
+ * block is *supposed* to be a solid cube, and this score sorted the correct answer last until
+ * 2026-08-11. What replaces it is `variety`, because a prop's whole content is on its shell.
+ *
  * Symmetry is deliberately absent: plenty of good subjects are not symmetric. It used to be
  * *measured* anyway — a full pass over every voxel of every candidate, excluded from this sum by
  * design and shown on no card. Computed and never read is not a spare part; it is a cost.
  */
-export const overallScore = (scores: ModelScores): number =>
-    0.4 * scores.connectivity + 0.3 * scores.sliceUsage + 0.3 * (1 - scores.bboxFill)
+/**
+ * How much of a prop's surface reads as a pattern rather than as one flat colour.
+ *
+ * Six colours or more on the shell is 1, one colour is 0. Invented, like the weights below — three
+ * tones is a bevel, four or five is a bevel with courses, and the DB32 ramp under any one colour is
+ * three deep, so six is where a prop stops looking hand-shaded and starts looking noisy.
+ */
+const variety = (scores: ModelScores): number =>
+    Math.min(1, Math.max(0, (scores.shellColors - 1) / 5))
+
+export const overallScore = (scores: ModelScores, surface = false): number =>
+    0.4 * scores.connectivity
+    + 0.3 * scores.sliceUsage
+    + 0.3 * (surface ? variety(scores) : 1 - scores.bboxFill)
