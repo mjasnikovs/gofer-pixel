@@ -1,8 +1,25 @@
 import {expect, test} from 'bun:test'
-import {drop, fade, lock, place, readReference, type Reference} from './reference'
+import {applyReference, readReference, type Reference} from './reference'
 
 const PIXEL = 'data:image/png;base64,iVBORw0KGgo='
 const OTHER = 'data:image/png;base64,QUJDREVGRw=='
+
+/*
+ * Through `applyReference`, which is the whole interface — the four operations are not reachable
+ * from outside the module, and neither is `refuses`. That is the point: the lock cannot be spelled
+ * a second way by a caller that never sees the first one.
+ */
+const place = (references: readonly Reference[], plane: 0 | 1 | 2, url: string) =>
+    applyReference(references, {kind: 'place', plane, url})
+
+const fade = (references: readonly Reference[], plane: 0 | 1 | 2, opacity: number) =>
+    applyReference(references, {kind: 'fade', plane, opacity})
+
+const lock = (references: readonly Reference[], plane: 0 | 1 | 2, on: boolean) =>
+    applyReference(references, {kind: 'lock', plane, on})
+
+const drop = (references: readonly Reference[], plane: 0 | 1 | 2) =>
+    applyReference(references, {kind: 'drop', plane})
 
 const front = (): readonly Reference[] => place([], 1, PIXEL)
 

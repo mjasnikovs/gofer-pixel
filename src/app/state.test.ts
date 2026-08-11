@@ -1252,58 +1252,86 @@ test('padding is clamped to a whole number of pixels and marks the document dirt
 
 test('a saved preset joins the list and can be taken back out of it', () => {
     const state = fresh()
-    const saved = reduce(state, {type: 'save-preset', name: 'My rig', maps: ['color', 'ao']})
+    const saved = reduce(state, {
+        type: 'preset',
+        op: {kind: 'save', name: 'My rig', maps: ['color', 'ao']}
+    })
     expect(saved.output.preset).toBe('My rig')
     expect(allPresets(saved.output).map(entry => entry.name)).toContain('My rig')
     expect(presetMaps(saved.output, 'My rig')).toEqual(['color', 'ao'])
 
     // A built-in name is not available, and a blank one is not a name.
-    expect(reduce(state, {type: 'save-preset', name: 'Every map', maps: ['color']})).toBe(state)
-    expect(reduce(state, {type: 'save-preset', name: '  ', maps: ['color']})).toBe(state)
+    expect(
+        reduce(state, {type: 'preset', op: {kind: 'save', name: 'Every map', maps: ['color']}})
+    ).toBe(state)
+    expect(reduce(state, {type: 'preset', op: {kind: 'save', name: '  ', maps: ['color']}})).toBe(
+        state
+    )
 
     // Saving the same name twice replaces rather than doubling.
-    const again = reduce(saved, {type: 'save-preset', name: 'My rig', maps: ['color']})
+    const again = reduce(saved, {
+        type: 'preset',
+        op: {kind: 'save', name: 'My rig', maps: ['color']}
+    })
     expect(again.output.presets).toHaveLength(1)
 
-    const dropped = reduce(again, {type: 'drop-preset', name: 'My rig'})
+    const dropped = reduce(again, {type: 'preset', op: {kind: 'drop', name: 'My rig'}})
     expect(dropped.output.presets).toHaveLength(0)
     expect(dropped.output.preset).toBe('Sprite Sheet (Auto)')
-    expect(reduce(dropped, {type: 'drop-preset', name: 'My rig'})).toBe(dropped)
+    expect(reduce(dropped, {type: 'preset', op: {kind: 'drop', name: 'My rig'}})).toBe(dropped)
 })
 
 test('one reference per plane, and a locked one refuses to be dimmed or dropped', () => {
     const state = fresh()
-    const front = reduce(state, {type: 'reference', plane: 1, url: 'data:image/png;base64,AA'})
+    const front = reduce(state, {
+        type: 'reference',
+        op: {kind: 'place', plane: 1, url: 'data:image/png;base64,AA'}
+    })
     expect(front.references).toHaveLength(1)
     expect(front.references[0]?.opacity).toBe(0.5)
 
     // A second front view replaces the first rather than stacking on it.
-    const again = reduce(front, {type: 'reference', plane: 1, url: 'data:image/png;base64,BB'})
+    const again = reduce(front, {
+        type: 'reference',
+        op: {kind: 'place', plane: 1, url: 'data:image/png;base64,BB'}
+    })
     expect(again.references).toHaveLength(1)
     expect(again.references[0]?.url).toBe('data:image/png;base64,BB')
 
-    const both = reduce(again, {type: 'reference', plane: 2, url: 'data:image/png;base64,CC'})
+    const both = reduce(again, {
+        type: 'reference',
+        op: {kind: 'place', plane: 2, url: 'data:image/png;base64,CC'}
+    })
     expect(both.references).toHaveLength(2)
 
-    const dimmer = reduce(both, {type: 'reference-opacity', plane: 1, opacity: 0.2})
+    const dimmer = reduce(both, {type: 'reference', op: {kind: 'fade', plane: 1, opacity: 0.2}})
     expect(dimmer.references.find(entry => entry.plane === 1)?.opacity).toBe(0.2)
     // Opacity is a fraction, whatever the stepper asks for.
     expect(
-        reduce(both, {type: 'reference-opacity', plane: 1, opacity: 9}).references[0]?.opacity
+        reduce(both, {type: 'reference', op: {kind: 'fade', plane: 1, opacity: 9}}).references[0]
+            ?.opacity
     ).toBe(1)
 
-    const locked = reduce(both, {type: 'reference-lock', plane: 1, on: true})
+    const locked = reduce(both, {type: 'reference', op: {kind: 'lock', plane: 1, on: true}})
     expect(
-        reduce(locked, {type: 'reference-opacity', plane: 1, opacity: 0.1}).references[0]?.opacity
+        reduce(locked, {type: 'reference', op: {kind: 'fade', plane: 1, opacity: 0.1}})
+            .references[0]?.opacity
     ).toBe(0.5)
-    expect(reduce(locked, {type: 'reference-drop', plane: 1}).references).toHaveLength(2)
-    expect(reduce(both, {type: 'reference-drop', plane: 1}).references).toHaveLength(1)
+    expect(
+        reduce(locked, {type: 'reference', op: {kind: 'drop', plane: 1}}).references
+    ).toHaveLength(2)
+    expect(reduce(both, {type: 'reference', op: {kind: 'drop', plane: 1}}).references).toHaveLength(
+        1
+    )
 })
 
 test('importing a PNG opens it as a document and keeps the references and presets', () => {
     const saved = reduce(
-        reduce(fresh(), {type: 'reference', plane: 1, url: 'data:image/png;base64,AA'}),
-        {type: 'save-preset', name: 'Mine', maps: ['color']}
+        reduce(fresh(), {
+            type: 'reference',
+            op: {kind: 'place', plane: 1, url: 'data:image/png;base64,AA'}
+        }),
+        {type: 'preset', op: {kind: 'save', name: 'Mine', maps: ['color']}}
     )
     const {volume: built} = voxelsFromImage(
         Uint8Array.from([255, 0, 0, 255, 0, 0, 255, 255]),
@@ -1808,7 +1836,10 @@ test('changing the model makes the document dirty; changing the session does not
     expect(reduce(state, {type: 'palette-color', color: 1, css: '#ff0000'}).doc.dirty).toBe(true)
     expect(reduce(state, {type: 'object', op: {kind: 'add'}}).doc.dirty).toBe(true)
     expect(
-        reduce(state, {type: 'reference', plane: 1, url: 'data:image/png;base64,aa'}).doc.dirty
+        reduce(state, {
+            type: 'reference',
+            op: {kind: 'place', plane: 1, url: 'data:image/png;base64,aa'}
+        }).doc.dirty
     ).toBe(true)
 })
 
@@ -1884,8 +1915,7 @@ test('a new project is empty, its own size, and clean', () => {
 test('opening a document takes its references and presets, not the ones already on screen', () => {
     const mine = reduce(fresh(), {
         type: 'reference',
-        plane: 0,
-        url: 'data:image/png;base64,mine'
+        op: {kind: 'place', plane: 0, url: 'data:image/png;base64,mine'}
     })
     expect(mine.references).toHaveLength(1)
 
@@ -1926,8 +1956,7 @@ test('a PNG becomes a document that has never been saved, and knows it', () => {
 test('a generated candidate becomes an ordinary unsaved document, with what made it', () => {
     const state = reduce(fresh(), {
         type: 'reference',
-        plane: 0,
-        url: 'data:image/png;base64,mine'
+        op: {kind: 'place', plane: 0, url: 'data:image/png;base64,mine'}
     })
     const record = {
         prompt: 'a stone tower',

@@ -36,13 +36,18 @@ export const ScenePanel = ({state, dispatch}: {state: AppState; dispatch: Dispat
     const onReference = (onto: Axis, op: 'fainter' | 'brighter' | 'lock' | 'drop'): void => {
         const found = references.find(entry => entry.plane === onto)
         if (!found) return
-        if (op === 'lock') dispatch({type: 'reference-lock', plane: onto, on: !found.locked})
-        else if (op === 'drop') dispatch({type: 'reference-drop', plane: onto})
-        else {
+        if (op === 'lock') {
+            dispatch({type: 'reference', op: {kind: 'lock', plane: onto, on: !found.locked}})
+        } else if (op === 'drop') {
+            dispatch({type: 'reference', op: {kind: 'drop', plane: onto}})
+        } else {
             dispatch({
-                type: 'reference-opacity',
-                plane: onto,
-                opacity: found.opacity + (op === 'brighter' ? 0.15 : -0.15)
+                type: 'reference',
+                op: {
+                    kind: 'fade',
+                    plane: onto,
+                    opacity: found.opacity + (op === 'brighter' ? 0.15 : -0.15)
+                }
             })
         }
     }

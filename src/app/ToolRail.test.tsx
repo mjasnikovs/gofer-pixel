@@ -51,7 +51,7 @@ const open = (): Promise<Panel> =>
 /** One already dropped, because three of these tests are about what happens to it afterwards. */
 const withReference = async (): Promise<Panel> => {
     const panel = await open()
-    await panel.dispatch({type: 'reference', plane: 1, url: PICTURE})
+    await panel.dispatch({type: 'reference', op: {kind: 'place', plane: 1, url: PICTURE}})
     return panel
 }
 
@@ -90,7 +90,7 @@ test('a reference appears with its row, and only once something has been dropped
     expect(panel.host.textContent).not.toContain(' ref')
     expect(panel.host.querySelector('.reference-layer')).toBeNull()
 
-    await panel.dispatch({type: 'reference', plane: 1, url: PICTURE})
+    await panel.dispatch({type: 'reference', op: {kind: 'place', plane: 1, url: PICTURE}})
 
     expect(referencesOf(panel)).toEqual([{plane: 1, url: PICTURE, opacity: 0.5, locked: false}])
     expect(panel.host.querySelector('.reference-layer image')?.getAttribute('href')).toBe(PICTURE)
@@ -150,12 +150,12 @@ test('a second picture on the same plane replaces the first rather than stacking
     const panel = await withReference()
     const other = 'data:image/png;base64,iVBORw0KGgoAAAA='
 
-    await panel.dispatch({type: 'reference', plane: 1, url: other})
+    await panel.dispatch({type: 'reference', op: {kind: 'place', plane: 1, url: other}})
     expect(referencesOf(panel)).toEqual([{plane: 1, url: other, opacity: 0.5, locked: false}])
     expect(panel.host.querySelectorAll('.reference-layer image')).toHaveLength(1)
 
     // A different plane is a different picture and both stay.
-    await panel.dispatch({type: 'reference', plane: 2, url: PICTURE})
+    await panel.dispatch({type: 'reference', op: {kind: 'place', plane: 2, url: PICTURE}})
     expect(referencesOf(panel)).toHaveLength(2)
     expect(panel.host.querySelectorAll('.reference-layer image')).toHaveLength(2)
     expect(panel.host.textContent).toContain('XY ref')

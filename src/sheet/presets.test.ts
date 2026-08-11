@@ -1,21 +1,26 @@
 import {expect, test} from 'bun:test'
 import {DEFAULT_OUTPUT, type SavedOutput} from '../doc/save'
-import {
-    allPresets,
-    DEFAULT_PRESET,
-    dropPreset,
-    PRESETS,
-    presetMaps,
-    presetNamed,
-    savePreset
-} from './presets'
+import {allPresets, applyPreset, DEFAULT_PRESET, PRESETS, presetMaps, presetNamed} from './presets'
+import type {SheetMap} from './sheet'
 
 /**
  * The four rules a list of export presets keeps. They were four expressions scattered through
  * `app/state.ts`, each one a chance for the next case to spell the fallback differently.
+ *
+ * Through `applyPreset`, which is the whole of the write interface. `undefined` back means refused,
+ * and a caller has nowhere else to go for a different answer.
  */
 
 const output = (): SavedOutput => ({...DEFAULT_OUTPUT, preset: DEFAULT_PRESET.name})
+
+const savePreset = (
+    from: SavedOutput,
+    name: string,
+    maps: readonly SheetMap[]
+): SavedOutput | undefined => applyPreset(from, {kind: 'save', name, maps})
+
+const dropPreset = (from: SavedOutput, name: string): SavedOutput | undefined =>
+    applyPreset(from, {kind: 'drop', name})
 
 const named = (saved: SavedOutput | undefined): string[] =>
     saved === undefined ? [] : saved.presets.map(entry => entry.name)

@@ -221,9 +221,10 @@ test('a dropped picture becomes reference art on the plane it was aimed at', asy
         const action = await dropPicture(asPng(), false, 0)
         expect(action?.type).toBe('reference')
         if (action?.type !== 'reference') throw new Error('not a reference')
-        expect(action.plane).toBe(0)
+        if (action.op.kind !== 'place') throw new Error('not a placement')
+        expect(action.op.plane).toBe(0)
         // A `data:` URL, so it survives a reload and can be written into a `.gpix`.
-        expect(action.url).toStartWith('data:image/png;base64,')
+        expect(action.op.url).toStartWith('data:image/png;base64,')
     })
 })
 

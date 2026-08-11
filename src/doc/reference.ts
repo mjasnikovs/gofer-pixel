@@ -41,11 +41,7 @@ const onPlane = (references: readonly Reference[], plane: Axis): Reference | und
  * plainly meant the new one. Unless they locked the old one, which is exactly the sentence
  * `FEATURESET.md` §33 writes as "lock it".
  */
-export const place = (
-    references: readonly Reference[],
-    plane: Axis,
-    url: string
-): readonly Reference[] =>
+const place = (references: readonly Reference[], plane: Axis, url: string): readonly Reference[] =>
     refuses(onPlane(references, plane)) ? references : (
         [
             ...references.filter(entry => entry.plane !== plane),
@@ -54,7 +50,7 @@ export const place = (
     )
 
 /** How strongly the picture shows through. Clamped here, so no caller can put it out of range. */
-export const fade = (
+const fade = (
     references: readonly Reference[],
     plane: Axis,
     opacity: number
@@ -65,15 +61,43 @@ export const fade = (
         :   entry
     )
 
-export const lock = (
-    references: readonly Reference[],
-    plane: Axis,
-    on: boolean
-): readonly Reference[] =>
+const lock = (references: readonly Reference[], plane: Axis, on: boolean): readonly Reference[] =>
     references.map(entry => (entry.plane === plane ? {...entry, locked: on} : entry))
 
-export const drop = (references: readonly Reference[], plane: Axis): readonly Reference[] =>
+const drop = (references: readonly Reference[], plane: Axis): readonly Reference[] =>
     references.filter(entry => entry.plane !== plane || refuses(entry))
+
+/** The four things the scene panel and a dropped picture can do to the list. */
+export type ReferenceOp =
+    | {kind: 'place'; plane: Axis; url: string}
+    | {kind: 'fade'; plane: Axis; opacity: number}
+    | {kind: 'lock'; plane: Axis; on: boolean}
+    | {kind: 'drop'; plane: Axis}
+
+/**
+ * The one way anything outside this file changes the list.
+ *
+ * One entry point rather than four exports, for the reason `TransformOp` and `ObjectOp` are one
+ * each: four reducer cases whose whole body was `{...state, references: f(...)}` are four chances
+ * for the next one to spell a rule differently — which is exactly how the lock came to be written
+ * three ways and left out of the fourth. `refuses` is not reachable from outside, and neither are
+ * the four operations, so there is nowhere else for the rule to be re-stated.
+ */
+export const applyReference = (
+    references: readonly Reference[],
+    op: ReferenceOp
+): readonly Reference[] => {
+    switch (op.kind) {
+        case 'place':
+            return place(references, op.plane, op.url)
+        case 'fade':
+            return fade(references, op.plane, op.opacity)
+        case 'lock':
+            return lock(references, op.plane, op.on)
+        case 'drop':
+            return drop(references, op.plane)
+    }
+}
 
 const isAxis = (value: unknown): value is Axis => value === 0 || value === 1 || value === 2
 

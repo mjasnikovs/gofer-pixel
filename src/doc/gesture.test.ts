@@ -10,11 +10,10 @@ import type {Volume} from '../render/volume'
 import {EMPTY_SELECTION} from './selection'
 import {NO_SYMMETRY} from './symmetry'
 import {
-    beginStroke,
     changedAim,
-    endStroke,
     forgetAim,
     hoverAt,
+    pointerAt,
     slicedFor,
     visible,
     type Gesture
@@ -23,11 +22,15 @@ import {
 /**
  * The pointer gestures against `Gesture` itself, with no `AppState` anywhere.
  *
- * `state.test.ts` drives all of this through `reduce`, which is the right place for it: what an
- * artist does is dispatch actions. What this file is for is the *interface* — proving that the
- * eighteen fields below are the whole of what a gesture needs, and that a caller with only those
- * fields gets working outlines and working strokes. If a field creeps back in, this stops
- * compiling here rather than being noticed a hundred lines into `reduce`.
+ * `state.test.ts` drives a lot of this through `reduce`, which is fair: what an artist does is
+ * dispatch actions. What this file is for is the *interface* — proving that the eighteen fields
+ * below are the whole of what a gesture needs, and that a caller with only those fields gets
+ * working outlines and working strokes. If a field creeps back in, this stops compiling here rather
+ * than being noticed a hundred lines into `reduce`.
+ *
+ * The ordering between the gestures is here too, now that `pointerAt` owns it. It used to be forty
+ * lines of the reducer, so the only way to ask "can a stroke be re-armed halfway through?" was to
+ * build an `AppState`.
  */
 
 const volume = readVox(
@@ -107,7 +110,10 @@ test('the outline says what the press would do, and the press does it', () => {
     const promised = aimed.hover?.cells[0]
 
     // Down and up, with no move between: a click, which is the gesture the outline described.
-    const up = endStroke(beginStroke(aimed, pointer('down', x, y)))
+    // Through `pointerAt`, because the ordering between down and up is part of what is claimed.
+    const down = pointerAt(aimed, pointer('down', x, y))
+    expect(down.took).toBe(true)
+    const up = pointerAt(down.state, pointer('up', x, y)).state
 
     expect(occupied(up.volume.data)).toBe(occupied(state.volume.data) + 1)
     expect(up.history.past).toHaveLength(1)
@@ -115,6 +121,69 @@ test('the outline says what the press would do, and the press does it', () => {
     // `beginStroke` rather than approximating them.
     const [px, py, pz] = promised ?? [-1, -1, -1]
     expect(up.volume.data[px + py * up.volume.sx + pz * up.volume.sx * up.volume.sy]).toBe(1)
+})
+
+/*
+ * The ordering, which is the part `pointerAt` exists to own. Every one of these used to need a
+ * whole `AppState` and a `reduce` to ask, and two of them were not asked at all.
+ */
+
+test('the camera keeps every press a tool did not want', () => {
+    const state = fresh()
+    const {x, y} = onModel(state)
+
+    // Shift, the middle button and the right button, whatever is armed — otherwise arming Draw
+    // would cost the artist the ability to look at what they are drawing.
+    expect(pointerAt(state, pointer('down', x, y, {shift: true})).took).toBe(false)
+    expect(pointerAt(state, pointer('down', x, y, {button: 1})).took).toBe(false)
+    expect(pointerAt(state, pointer('down', x, y, {button: 2})).took).toBe(false)
+
+    // And a tool that is not built takes nothing, rather than silently swallowing the gesture.
+    const measuring: Gesture = {...state, tool: 'measure'}
+    expect(pointerAt(measuring, pointer('down', x, y)).took).toBe(false)
+
+    // Every one of them still re-aims: an event the camera took is still a sighting of the pointer.
+    expect(pointerAt(measuring, pointer('down', x, y)).state.aim).toBeDefined()
+})
+
+test('a stroke in progress owns the pointer, and cannot be re-armed halfway through', () => {
+    const state = fresh()
+    const {x, y} = onModel(state)
+    const down = pointerAt(state, pointer('down', x, y)).state
+    expect(down.stroke).toBeDefined()
+
+    // Arming a grab tool mid-stroke must not turn the rest of the drag into a selection: the three
+    // in-progress checks come before the tool is looked at.
+    const switched: Gesture = {...down, tool: 'move'}
+    const moved = pointerAt(switched, pointer('move', x + 2, y + 2))
+    expect(moved.took).toBe(true)
+    expect(moved.state.stroke).toBeDefined()
+    expect(moved.state.band).toBeUndefined()
+
+    const up = pointerAt(moved.state, pointer('up', x + 2, y + 2)).state
+    expect(up.stroke).toBeUndefined()
+    expect(up.history.past).toHaveLength(1)
+})
+
+/**
+ * The transition that had no owner. `beginSelect` puts the viewport's size on the band and
+ * `endBand` projects the corners back through a basis built from it, but the step between them was
+ * an inline spread in the reducer that wrote `x1`/`y1` and nothing else — so a band sampled across
+ * a resize described a rectangle that was never on screen.
+ */
+test('a rubber band carries the viewport it is being dragged in, not just its corner', () => {
+    const state: Gesture = {...fresh(), tool: 'move'}
+    // A corner of the frame: no model there, so the press starts a band rather than a grab.
+    const down = pointerAt(state, pointer('down', 0, 0)).state
+    expect(down.band).toBeDefined()
+
+    const wider = pointerAt(down, pointer('move', 20, 20, {width: 128, height: 128}))
+    expect(wider.state.band?.x1).toBe(20)
+    expect(wider.state.band?.width).toBe(128)
+    expect(wider.state.band?.height).toBe(128)
+
+    const up = pointerAt(wider.state, pointer('up', 20, 20, {width: 128, height: 128}))
+    expect(up.state.band).toBeUndefined()
 })
 
 test('changing the tool re-aims without the mouse moving', () => {

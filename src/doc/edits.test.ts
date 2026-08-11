@@ -9,8 +9,8 @@ import {
     connected,
     fillRegion,
     revertEdit,
-    stampBrush,
-    strokeBrush,
+    strokeCells,
+    writeCells,
     writeVoxel
 } from './edits'
 import {EMPTY_HISTORY, HISTORY_LIMIT, canRedo, canUndo, record, redo, undo} from './history'
@@ -63,7 +63,7 @@ test('a stroke that ends where it began is not an undo step', () => {
 test('a fast drag leaves a line, not a dotted line', () => {
     const volume = createVolume(32, 32, 32)
     const draft = beginEdit(volume)
-    strokeBrush(draft, brush(), FACE_Z_POS, [2, 2, 2], [20, 9, 2], 4)
+    writeCells(draft, strokeCells(brush(), FACE_Z_POS, [2, 2, 2], [20, 9, 2]), 4)
 
     // Every step of the line is occupied — no gap anywhere along it.
     for (let x = 2; x <= 20; x += 1) {
@@ -123,12 +123,16 @@ test('fill on empty space does nothing at all', () => {
 test('undo and redo walk a stack of strokes and land on the same bytes', () => {
     const volume = createVolume(8, 8, 8)
     const first = beginEdit(volume)
-    stampBrush(first, brush({size: 3, shape: 'square'}), FACE_Z_POS, 4, 4, 4, 6)
+    writeCells(
+        first,
+        strokeCells(brush({size: 3, shape: 'square'}), FACE_Z_POS, [4, 4, 4], [4, 4, 4]),
+        6
+    )
     const one = commitEdit(first)
     if (!one) throw new Error('the first stroke changed cells')
 
     const second = beginEdit(first.volume)
-    stampBrush(second, brush(), FACE_Z_POS, 0, 0, 0, 7)
+    writeCells(second, strokeCells(brush(), FACE_Z_POS, [0, 0, 0], [0, 0, 0]), 7)
     const two = commitEdit(second)
     if (!two) throw new Error('the second stroke changed cells')
 
@@ -177,7 +181,11 @@ test('an edit applied and reverted is the identity, cell for cell', () => {
         setVoxel(volume, i % 16, (i * 7) % 16, (i * 3) % 16, (i % 5) + 1)
 
     const draft = beginEdit(volume)
-    stampBrush(draft, brush({size: 5, shape: 'circle'}), FACE_Z_POS, 8, 8, 8, 12)
+    writeCells(
+        draft,
+        strokeCells(brush({size: 5, shape: 'circle'}), FACE_Z_POS, [8, 8, 8], [8, 8, 8]),
+        12
+    )
     const edit = commitEdit(draft)
     if (!edit) throw new Error('the stamp changed cells')
 

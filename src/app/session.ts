@@ -252,7 +252,7 @@ export const dropPicture = async (
          * project saved with reference art would have opened blank. The cost is the PNG's own bytes,
          * base64'd, inside the file.
          */
-        return {type: 'reference', plane: onto, url: await dataUrl(blob)}
+        return {type: 'reference', op: {kind: 'place', plane: onto, url: await dataUrl(blob)}}
     }
     const canvas = document.createElement('canvas')
     canvas.width = bitmap.width

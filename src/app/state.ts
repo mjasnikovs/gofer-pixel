@@ -22,7 +22,7 @@ import {
 } from '../doc/views'
 import {beginEdit, writeCells, writeOwned, type Draft} from '../doc/edits'
 import type {GenerationRecord} from '../gen/llama'
-import {drop, fade, lock, place, type Reference} from '../doc/reference'
+import {applyReference, type Reference, type ReferenceOp} from '../doc/reference'
 import {DEFAULT_OUTPUT, type Document, type SavedOutput} from '../doc/save'
 import {DEFAULT_LIGHTING, withLight, type Lighting} from '../render/light'
 import {
@@ -78,25 +78,16 @@ import {
 import {createCamera, type Camera} from '../render/camera'
 import {MODE_COLOR} from '../render/raycast.glsl'
 import {voxelAt, type Volume} from '../render/volume'
-import {dropPreset, presetNamed, savePreset} from '../sheet/presets'
-import type {SheetMap} from '../sheet/sheet'
+import {applyPreset, presetNamed, type PresetOp} from '../sheet/presets'
 import {
-    beginSelect,
-    beginStroke,
     changedAim,
-    continueDrag,
-    continueStroke,
-    endBand,
-    endDrag,
-    endStroke,
     GHOST_CELLS,
     hoverAt,
     openDraft,
+    pointerAt,
     previewVolume,
-    SELECTS,
     slicedFor,
     TOOLS,
-    WRITES,
     type Gesture,
     USES_BRUSH,
     type Band,
@@ -368,13 +359,9 @@ export type AppAction =
      * keyboard and a loaded file all wrap the azimuth the same way.
      */
     | {type: 'lighting'; lighting: Partial<Lighting>}
-    | {type: 'save-preset'; name: string; maps: readonly SheetMap[]}
-    | {type: 'drop-preset'; name: string}
+    | {type: 'preset'; op: PresetOp}
     | {type: 'reorder-camera'; id: string; to: number}
-    | {type: 'reference'; plane: Axis; url: string}
-    | {type: 'reference-opacity'; plane: Axis; opacity: number}
-    | {type: 'reference-lock'; plane: Axis; on: boolean}
-    | {type: 'reference-drop'; plane: Axis}
+    | {type: 'reference'; op: ReferenceOp}
     | {type: 'import-image'; volume: Volume; name: string}
     | {type: 'generate'; volume: Volume; name: string; record: GenerationRecord}
     | {type: 'open'; document: OpenedDocument}
@@ -501,6 +488,27 @@ const withCamera = (state: AppState, camera: Camera, selected: string | undefine
     orbit: {camera, gesture: undefined}
 })
 
+/**
+ * A viewport event no gesture took, as the camera's own event.
+ *
+ * The button and the modifier are read here rather than in `pointerAt`, because "secondary" is a
+ * fact about orbiting — right and middle pan, left orbits — and `doc/gesture.ts` has no camera to
+ * have an opinion about.
+ */
+const orbitFrom = (event: ViewportPointer): OrbitEvent => {
+    if (event.type === 'down') {
+        return {
+            type: 'pointerdown',
+            x: event.x,
+            y: event.y,
+            secondary: event.shift || event.button === 1
+        }
+    }
+    return event.type === 'move' ?
+            {type: 'pointermove', x: event.x, y: event.y}
+        :   {type: 'pointerup'}
+}
+
 const applyTransform = (draft: Draft, state: AppState, op: TransformOp): Selection => {
     const {selection} = state
     switch (op.kind) {
@@ -568,51 +576,23 @@ const step = (state: AppState, action: AppAction): AppState => {
         }
 
         /*
-         * One entry point for the viewport, so the choice between moving the camera and writing
-         * voxels is made in the tested pure function rather than in a JSX handler. The right and
-         * middle buttons and Shift always move the camera, whatever is armed — otherwise arming
-         * Draw would cost the artist the ability to look at what they are drawing.
+         * One entry point for the viewport, and the choice between moving the camera and writing
+         * voxels is `doc/gesture.ts`'s, not this file's.
+         *
+         * The forty lines that used to be here were the pointer state machine — which of that
+         * module's twelve functions an event belongs to, and in what order. They are none of them
+         * exported now: `pointerAt` is the interface, so the ordering is tested where the gestures
+         * are, in single-digit milliseconds, instead of through `reduce` against a whole window.
+         *
+         * What stays is the half a gesture may not decide. Turning the view means saying which
+         * stored camera the result is no longer, and a click on the model does not get to reach the
+         * camera list — so `took: false` comes back here and the orbit case has it.
          */
         case 'pointer': {
             const {event} = action
-            // Every viewport event is a sighting of the pointer, whatever else it turns out to be.
-            // `reduce` re-aims the outline from it once this case has decided what happened.
-            const seen: AppState = {...state, aim: event}
-            if (event.type === 'down') {
-                if (event.button === 0 && !event.shift) {
-                    if (WRITES.has(seen.tool)) return beginStroke(seen, event)
-                    if (SELECTS.has(seen.tool)) return beginSelect(seen, event)
-                }
-                return reduce(seen, {
-                    type: 'orbit',
-                    event: {
-                        type: 'pointerdown',
-                        x: event.x,
-                        y: event.y,
-                        secondary: event.shift || event.button === 1
-                    },
-                    height: event.height
-                })
-            }
-            if (seen.stroke) {
-                return event.type === 'move' ? continueStroke(seen, event) : endStroke(seen)
-            }
-            if (seen.band) {
-                return event.type === 'move' ?
-                        {...seen, band: {...seen.band, x1: event.x, y1: event.y}}
-                    :   endBand(seen)
-            }
-            if (seen.drag) {
-                return event.type === 'move' ? continueDrag(seen, event) : endDrag(seen)
-            }
-            return reduce(seen, {
-                type: 'orbit',
-                event:
-                    event.type === 'move' ?
-                        {type: 'pointermove', x: event.x, y: event.y}
-                    :   {type: 'pointerup'},
-                height: event.height
-            })
+            const {state: seen, took} = pointerAt(state, event)
+            if (took) return seen
+            return reduce(seen, {type: 'orbit', event: orbitFrom(event), height: event.height})
         }
 
         /** The pointer has left the viewport, so there is no next click to point at. */
@@ -655,9 +635,18 @@ const step = (state: AppState, action: AppAction): AppState => {
         case 'transform': {
             if (state.selection.size === 0) return state
             const {op} = action
-            // A nudge that would push part of the selection off the grid is refused whole, rather
-            // than dropping the voxels that fell off — that is the one loss undo cannot make
-            // obvious, because nothing on screen says how many went.
+            /*
+             * A nudge that would push part of the selection off the grid is refused whole, rather
+             * than dropping the voxels that fell off — that is the one loss undo cannot make
+             * obvious, because nothing on screen says how many went.
+             *
+             * The count check below would refuse exactly the same nudges, and deliberately so: a
+             * bounding-box extreme is attained by a real cell, so "the box leaves the grid" and
+             * "`moveCells` came back smaller" are the same set. This one is here only to answer
+             * before `openDraft` copies the whole grid — a held arrow key against the edge of a
+             * 128³ model is 4 MB a repeat otherwise. It is an early-out over one rule, not a second
+             * rule, and a third spelling of it does not belong anywhere.
+             */
             if (op.kind === 'move' && !fitsAfter(state.volume, state.selection, op.delta)) {
                 return state
             }
@@ -872,32 +861,19 @@ const step = (state: AppState, action: AppAction): AppState => {
          * A preset the artist saved, and one they dropped — `FEATURESET.md` §38. Both rules and
          * both fallbacks are `sheet/presets.ts`; `undefined` back means the name was refused.
          */
-        case 'save-preset': {
-            const output = savePreset(state.output, action.name, action.maps)
-            return output ? {...state, output} : state
-        }
-
-        case 'drop-preset': {
-            const output = dropPreset(state.output, action.name)
+        case 'preset': {
+            const output = applyPreset(state.output, action.op)
             return output ? {...state, output} : state
         }
 
         /*
          * The pictures the artist builds against — every rule about them is `doc/reference.ts`,
-         * including the one word that used to be spelled three ways across these four cases and
-         * left out of the first of them: what a lock refuses.
+         * including the one word that used to be spelled three ways across four cases and left out
+         * of the first of them: what a lock refuses. Four cases, because the whole of each was
+         * `{...state, references: f(...)}` — one now, for the reason `TransformOp` is one.
          */
         case 'reference':
-            return {...state, references: place(state.references, action.plane, action.url)}
-
-        case 'reference-opacity':
-            return {...state, references: fade(state.references, action.plane, action.opacity)}
-
-        case 'reference-lock':
-            return {...state, references: lock(state.references, action.plane, action.on)}
-
-        case 'reference-drop':
-            return {...state, references: drop(state.references, action.plane)}
+            return {...state, references: applyReference(state.references, action.op)}
 
         /*
          * A PNG imported as voxels is a *new document* — `FEATURESET.md` §34 calls it a starting

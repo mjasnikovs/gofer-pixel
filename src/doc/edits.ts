@@ -73,6 +73,66 @@ export const writeVoxel = (draft: Draft, x: number, y: number, z: number, value:
     writeOwned(draft, x, y, z, value, value === 0 ? 0 : draft.object)
 }
 
+/**
+ * Why a write is about to do nothing.
+ *
+ * One boolean used to carry all of these, and one boolean is what made a locked object read as a
+ * broken tool: the ghost went dashed for "locked", for "already that colour" and for "off the edge
+ * of the grid" alike, so the one case the artist can actually fix looked like the two they cannot.
+ *
+ * - **`locked`** — a locked object owns the cell. `object` names it, so the message can too.
+ * - **`outside`** — the cell is off the grid.
+ * - **`nothing`** — the cell already holds exactly what the write would put there. For Erase that is
+ *   empty space; for Draw and Fill it is the loaded colour; for a grab it is nothing to take hold of.
+ *
+ * It lives here rather than in `doc/gesture.ts` because this is the module that does the dropping,
+ * and the outline may not have a second opinion about it — see `writeBlock`.
+ */
+export interface Blocked {
+    readonly reason: 'locked' | 'outside' | 'nothing'
+    /** The locked object standing in the way, when that is the reason. */
+    readonly object: number | undefined
+}
+
+/** The two reasons that name nothing. Shared rather than rebuilt, so a hover allocates less. */
+const NOTHING: Blocked = {reason: 'nothing', object: undefined}
+const OUTSIDE: Blocked = {reason: 'outside', object: undefined}
+
+/**
+ * Why writing `value` here would be dropped, or `undefined` when it would land.
+ *
+ * The one statement of the three rules — out of bounds, owned by a locked object, or already
+ * exactly what is being written. `writeOwned` asks it before writing and the outline asks it
+ * without writing, so **the outline cannot disagree with the edit**: they are not two predictions
+ * that have to be kept in step, they are one predicate with two callers.
+ *
+ * It used to be written twice, line for line, in two files — and they agreed only by coincidence of
+ * what `openDraft` happened to pass, because one read the draft's object and the other the active
+ * one. A tool whose click does nothing is not a bug on its own; a tool that gives no sign of it
+ * beforehand is, and an outline that gives the *wrong* sign is worse than both.
+ *
+ * Over a `Volume` and not a `Draft`, because the outline has no draft: opening one copies the whole
+ * grid, which is a megabyte a pointer-move for an answer nothing writes.
+ */
+export const writeBlock = (
+    volume: Volume,
+    locked: ReadonlySet<number>,
+    x: number,
+    y: number,
+    z: number,
+    value: number,
+    object: number
+): Blocked | undefined => {
+    const {sx, sy, sz, data, owner} = volume
+    if (x < 0 || y < 0 || z < 0 || x >= sx || y >= sy || z >= sz) return OUTSIDE
+    const index = voxelIndex(volume, x, y, z)
+    const wasOwner = owner[index] ?? 0
+    if (locked.has(wasOwner)) return {reason: 'locked', object: wasOwner}
+    const nowOwner = value === 0 ? 0 : object
+    if ((data[index] ?? 0) === value && wasOwner === nowOwner) return NOTHING
+    return undefined
+}
+
 /** A write that names the object the cell joins, for transforms that carry ownership with them. */
 export const writeOwned = (
     draft: Draft,
@@ -83,22 +143,17 @@ export const writeOwned = (
     object: number
 ): void => {
     const {volume, before, beforeOwner, locked} = draft
-    const {sx, sy, sz, data, owner} = volume
-    if (x < 0 || y < 0 || z < 0 || x >= sx || y >= sy || z >= sz) return
+    if (writeBlock(volume, locked, x, y, z, value, object)) return
+    const {data, owner} = volume
     const index = voxelIndex(volume, x, y, z)
-    const wasOwner = owner[index] ?? 0
-    if (locked.has(wasOwner)) return
-    const was = data[index] ?? 0
-    const nowOwner = value === 0 ? 0 : object
-    if (was === value && wasOwner === nowOwner) return
     // Only the *first* value seen is kept: a stroke that crosses itself must undo to where it
     // started, not to the middle of itself.
     if (!before.has(index)) {
-        before.set(index, was)
-        beforeOwner.set(index, wasOwner)
+        before.set(index, data[index] ?? 0)
+        beforeOwner.set(index, owner[index] ?? 0)
     }
     data[index] = value
-    owner[index] = nowOwner
+    owner[index] = value === 0 ? 0 : object
 }
 
 /**
@@ -140,30 +195,15 @@ export const writeCells = (draft: Draft, cells: Iterable<Offset>, value: number)
     for (const [x, y, z] of cells) writeVoxel(draft, x, y, z, value)
 }
 
-/** One click of the brush, oriented by the face the ray struck. */
-export const stampBrush = (
-    draft: Draft,
-    brush: Brush,
-    face: number,
-    x: number,
-    y: number,
-    z: number,
-    value: number
-): void => {
-    writeCells(draft, strokeCells(brush, face, [x, y, z], [x, y, z]), value)
-}
-
-/** A dragged brush, leaving no gaps. */
-export const strokeBrush = (
-    draft: Draft,
-    brush: Brush,
-    face: number,
-    from: Offset,
-    to: Offset,
-    value: number
-): void => {
-    writeCells(draft, strokeCells(brush, face, from, to), value)
-}
+/*
+ * There is deliberately no `stampBrush(draft, brush, …)` here, and there was until it was found to
+ * be a second, wrong spelling of the stroke. Nothing in the app could call it: a stroke has to
+ * interpose symmetry between the cells and the write — `writeCells(draft, mirrored(state, cells))`
+ * — and a helper that goes straight from a brush to a write has nowhere to put the mirror. It had
+ * no production caller and four tests, so what the tests covered was a path that would have left a
+ * one-voxel seam down the middle of every symmetric model. `strokeCells` and `writeCells` are the
+ * two halves, and the gap between them is where symmetry goes.
+ */
 
 /**
  * The cells reachable from a seed through faces, all carrying the value the seed carries.

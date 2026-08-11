@@ -1,5 +1,14 @@
 import {faceAxis, type Axis, type Brush, type Offset} from './brush'
-import {beginEdit, connected, fillRegion, strokeCells, writeCells, type Draft} from './edits'
+import {
+    beginEdit,
+    connected,
+    fillRegion,
+    strokeCells,
+    writeBlock,
+    writeCells,
+    type Blocked,
+    type Draft
+} from './edits'
 import {figureCells} from './figures'
 import {commit, type History} from './history'
 import {lockedIds, objectCells, ownerAt, shownVolume, type Objects} from './objects'
@@ -329,26 +338,13 @@ export interface Hover {
 }
 
 /**
- * Why a press is about to do nothing.
- *
- * One boolean used to carry all of these, and one boolean is what made a locked object read as a
- * broken tool: the ghost went dashed for "locked", for "already that colour" and for "off the edge
- * of the grid" alike, so the one case the artist can actually fix looked like the two they cannot.
- *
- * - **`locked`** — a locked object owns the cells. `object` names it, so the message can too.
- * - **`outside`** — the whole footprint is off the grid.
- * - **`nothing`** — the cells already hold exactly what the press would write. For Erase that is
- *   empty space; for Draw and Fill it is the loaded colour; for a grab it is nothing to take hold of.
+ * Why a press is about to do nothing — `doc/edits.ts`'s `Blocked`, asked of a whole footprint
+ * rather than of one cell. Re-exported here because this is where the outline reads it from.
  */
-export interface Blocked {
-    readonly reason: 'locked' | 'outside' | 'nothing'
-    /** The locked object standing in the way, when that is the reason. */
-    readonly object: number | undefined
-}
+export type {Blocked}
 
-/** The two reasons that name nothing. Shared rather than rebuilt, so a hover allocates less. */
+/** The one reason that names nothing and is answered here rather than by a write. */
 const NOTHING: Blocked = {reason: 'nothing', object: undefined}
-const OUTSIDE: Blocked = {reason: 'outside', object: undefined}
 
 /**
  * The volume as it now stands mid-stroke: a fresh identity over the draft's own buffer.
@@ -410,29 +406,6 @@ export const mirrored = (state: Gesture, cells: readonly Offset[]): readonly Off
 }
 
 /**
- * Why writing `value` here would be dropped, or `undefined` when it would land. The ways a write is
- * silently dropped, asked in one place — see `writeOwned`, which is where they are actually enforced.
- *
- * Out of bounds, owned by a locked object, or already exactly what is being written. A tool whose
- * click does nothing is not a bug on its own; a tool that gives no sign of it beforehand is.
- */
-const writeBlock = (
-    state: Gesture,
-    locked: ReadonlySet<number>,
-    [x, y, z]: Offset,
-    value: number
-): Blocked | undefined => {
-    const {sx, sy, sz, data, owner} = state.volume
-    if (x < 0 || y < 0 || z < 0 || x >= sx || y >= sy || z >= sz) return OUTSIDE
-    const index = voxelIndex(state.volume, x, y, z)
-    const wasOwner = owner[index] ?? 0
-    if (locked.has(wasOwner)) return {reason: 'locked', object: wasOwner}
-    const nowOwner = value === 0 ? 0 : state.objects.active
-    if ((data[index] ?? 0) !== value || wasOwner !== nowOwner) return undefined
-    return NOTHING
-}
-
-/**
  * How informative each reason is, when a footprint straddles more than one of them.
  *
  * `locked` wins outright, because it is the only one of the three the artist can do something about
@@ -456,8 +429,9 @@ const blockedBy = (
     value: number
 ): Blocked | undefined => {
     let worst: Blocked | undefined
-    for (const cell of cells) {
-        const block = writeBlock(state, locked, cell, value)
+    for (const [x, y, z] of cells) {
+        // The same predicate the write itself asks, not a second reading of the same rules.
+        const block = writeBlock(state.volume, locked, x, y, z, value, state.objects.active)
         if (!block) return undefined
         if (!worst || RANK[block.reason] > RANK[worst.reason]) worst = block
     }
@@ -814,7 +788,7 @@ const solveRegion = (
     }
 }
 
-export const beginStroke = <S extends Gesture>(state: S, event: ViewportPointer): S => {
+const beginStroke = <S extends Gesture>(state: S, event: ViewportPointer): S => {
     const {tool, color, brush} = state
     // A viewport with no size has no pixels to cast a ray through, and `zoom / 0` would send one
     // off to infinity. happy-dom reports exactly this, so it is a real case and not a guard.
@@ -943,7 +917,7 @@ const extrudeStroke = <S extends Gesture>(
     return changed(state, {volume: live(draft), stroke: {...stroke, draft, depth}})
 }
 
-export const continueStroke = <S extends Gesture>(state: S, event: ViewportPointer): S => {
+const continueStroke = <S extends Gesture>(state: S, event: ViewportPointer): S => {
     const {stroke} = state
     if (!stroke) return state
     const basis = basisFor(state.orbit.camera, state.volume, event.height)
@@ -1004,7 +978,7 @@ export const continueStroke = <S extends Gesture>(state: S, event: ViewportPoint
  * connected solid. A click on air starts a rubber band instead — the only reading of a drag over
  * nothing that does not throw the current selection away by accident.
  */
-export const beginSelect = <S extends Gesture>(state: S, event: ViewportPointer): S => {
+const beginSelect = <S extends Gesture>(state: S, event: ViewportPointer): S => {
     if (event.height <= 0 || event.width <= 0) return state
     const volume = visible(state)
     const basis = basisFor(state.orbit.camera, volume, event.height)
@@ -1127,7 +1101,7 @@ const quartersTurned = (state: Gesture, drag: Drag, event: ViewportPointer): num
     return facing * Math.sign(dx)
 }
 
-export const continueDrag = <S extends Gesture>(state: S, event: ViewportPointer): S => {
+const continueDrag = <S extends Gesture>(state: S, event: ViewportPointer): S => {
     const {drag} = state
     if (!drag) return state
     const draft = openDraft(state, drag.volume)
@@ -1187,7 +1161,7 @@ export const continueDrag = <S extends Gesture>(state: S, event: ViewportPointer
     return changed(state, {volume: draft.volume, selection, losing})
 }
 
-export const endDrag = <S extends Gesture>(state: S): S => {
+const endDrag = <S extends Gesture>(state: S): S => {
     const {drag} = state
     if (!drag) return state
     // The document already shows the result, so the commit is only about the history: replay the
@@ -1212,7 +1186,7 @@ export const endDrag = <S extends Gesture>(state: S): S => {
     })
 }
 
-export const endBand = <S extends Gesture>(state: S): S => {
+const endBand = <S extends Gesture>(state: S): S => {
     const {band} = state
     if (!band) return state
     const basis = basisFor(state.orbit.camera, state.volume, band.height)
@@ -1225,10 +1199,79 @@ export const endBand = <S extends Gesture>(state: S): S => {
     })
 }
 
-export const endStroke = <S extends Gesture>(state: S): S => {
+const endStroke = <S extends Gesture>(state: S): S => {
     const {stroke} = state
     if (!stroke) return state
     return changed(state, {stroke: undefined, ...commit(state, stroke.draft)})
+}
+
+/**
+ * A rubber band that has been dragged to a new corner.
+ *
+ * `width` and `height` travel with it, not just `x1`/`y1`. The corners are in the viewport's own
+ * pixels, and `endBand` projects them back through a basis built from `height` — so a band whose
+ * two corners were sampled at two different viewport sizes describes a rectangle that was never on
+ * screen. This transition had no owner at all until now: it was an inline spread in the reducer
+ * that wrote the two coordinates, four hundred lines from the `endBand` that reads the other two.
+ */
+const continueBand = <S extends Gesture>(state: S, event: ViewportPointer): S => {
+    const {band} = state
+    if (!band) return state
+    return changed(state, {
+        band: {...band, x1: event.x, y1: event.y, width: event.width, height: event.height}
+    })
+}
+
+/** What a viewport pointer event turned out to be. See `pointerAt`. */
+export interface Pointed<S> {
+    /** The state after it, re-aimed either way — every event is a sighting of the pointer. */
+    readonly state: S
+    /** Whether a gesture took it. `false` means nothing armed wanted it, so it is a camera move. */
+    readonly took: boolean
+}
+
+/**
+ * The pointer state machine: which of this module's gestures a viewport event belongs to.
+ *
+ * This is the interface. The twelve functions above are the implementation, and the *order* between
+ * them is the part with the bugs in it — which is why it lives here and not in the caller. It used
+ * to be forty lines of `app/state.ts`, so a module written to be testable without a window had five
+ * tests while forty of its own claims were made through `reduce` against a whole `AppState`.
+ *
+ * Two rules are stated by the shape rather than by a comment. **A gesture in progress owns every
+ * event until it ends** — the three `if`s below are checked before anything else, so a tool cannot
+ * be re-armed mid-stroke into a different one. And **the right and middle buttons and Shift always
+ * move the camera, whatever is armed** — otherwise arming Draw would cost the artist the ability to
+ * look at what they are drawing.
+ *
+ * `took: false` rather than a camera move made here: turning the view is not something a gesture
+ * over voxels may do, and this module cannot reach the camera list to say which stored view the
+ * result is no longer.
+ */
+export const pointerAt = <S extends Gesture>(state: S, event: ViewportPointer): Pointed<S> => {
+    // Every viewport event is a sighting of the pointer, whatever else it turns out to be. The
+    // caller re-aims the outline from it once this has decided what happened.
+    const seen = changed(state, {aim: event})
+    const camera = {state: seen, took: false}
+
+    if (event.type === 'down') {
+        if (event.button !== 0 || event.shift) return camera
+        if (WRITES.has(seen.tool)) return {state: beginStroke(seen, event), took: true}
+        if (SELECTS.has(seen.tool)) return {state: beginSelect(seen, event), took: true}
+        return camera
+    }
+
+    const moving = event.type === 'move'
+    if (seen.stroke) {
+        return {state: moving ? continueStroke(seen, event) : endStroke(seen), took: true}
+    }
+    if (seen.band) {
+        return {state: moving ? continueBand(seen, event) : endBand(seen), took: true}
+    }
+    if (seen.drag) {
+        return {state: moving ? continueDrag(seen, event) : endDrag(seen), took: true}
+    }
+    return camera
 }
 
 /**

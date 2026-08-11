@@ -575,10 +575,10 @@ test('reference art survives a save and reopen', async () => {
     const mounted = await mount(memoryStore(), memoryFiles(disk))
 
     await act(async () => {
-        handle.dispatch?.({type: 'reference', plane: 0, url: PICTURE})
+        handle.dispatch?.({type: 'reference', op: {kind: 'place', plane: 0, url: PICTURE}})
     })
     await act(async () => {
-        handle.dispatch?.({type: 'reference-lock', plane: 0, on: true})
+        handle.dispatch?.({type: 'reference', op: {kind: 'lock', plane: 0, on: true}})
     })
     await act(async () => {
         control(mounted.host, 'Main menu').click()

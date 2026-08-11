@@ -9,14 +9,15 @@ import {Switch} from '@astryxdesign/core/Switch'
 import {Text} from '@astryxdesign/core/Text'
 import {useEffect, useMemo, useRef, useState, type Dispatch} from 'react'
 import type {Files} from '../doc/files'
+import {shownVolume} from '../doc/objects'
 import {reseeded, seeded, shipped, toggled} from '../sheet/choice'
 import {emptyMaps} from '../sheet/empty'
+import {sheetMetadata, type SheetMetadata} from '../sheet/metadata'
 import {allPresets} from '../sheet/presets'
 import {cutCell, renderSheet, SHEET_MAPS, type SheetMap} from '../sheet/sheet'
 import {evenCell, unevenCount} from '../render/perfect'
 import type {Volume} from '../render/volume'
-import {writeSheetMap} from './download'
-import {writeExportPack, writeLoose, writeSheetMetadata, writeSprites} from './export'
+import {writeMetadata, writePack, writeSheet, writeSheetMap, writeSprites} from './download'
 import {GearIcon} from './icons'
 import {PixelCanvas, type Pixels} from './PixelCanvas'
 import {previewScale, wholeRows} from './preview'
@@ -231,6 +232,22 @@ export const ExportDialog = ({
     const maps = shipped(choice, empty)
 
     /*
+     * The JSON an engine reads next to the sheet — `FEATURESET.md` §37.
+     *
+     * `shownVolume(state.volume, …)` and deliberately not the `volume` prop, which is sliced — the
+     * one place in the app that measures something other than the grid as the artist sees it. The
+     * bake itself honours slice mode, so a sheet baked in slice mode has boxes described from a
+     * fuller model than the pixels came from. Left as it was: changing it changes exported files,
+     * which is a decision about the format rather than about where this code lives. It is an opt-out
+     * from `doc/gesture.ts`'s derivation, not a second spelling of it.
+     *
+     * Called from the two menu items that need it rather than memoised, because `shownVolume` walks
+     * the whole grid and no render of this dialog reads the answer.
+     */
+    const metadata = (): SheetMetadata =>
+        sheetMetadata(shownVolume(state.volume, state.objects), cameras, sheet, bounds)
+
+    /*
      * One cut per camera of the map on screen, behind a closure — see `PixelCanvas`.
      *
      * Memoised together so the buffers keep their identity across a re-render. A fresh closure per
@@ -343,7 +360,10 @@ export const ExportDialog = ({
                                 if (named === null) return
                                 // The ticks, not the sheet's blanks: a preset is a set of choices
                                 // and travels to models that do have something glowing in them.
-                                dispatch({type: 'save-preset', name: named, maps: choice.maps})
+                                dispatch({
+                                    type: 'preset',
+                                    op: {kind: 'save', name: named, maps: choice.maps}
+                                })
                             }}
                         />
                     </div>
@@ -557,19 +577,23 @@ export const ExportDialog = ({
                         {
                             label: 'Download the maps as loose PNGs',
                             onClick: () => {
-                                void writeLoose(files, sheet, maps)
+                                void writeSheet(files, sheet, maps)
                             }
                         },
                         {
                             label: 'Download every sprite separately',
                             onClick: () => {
-                                void writeSprites(files, state, sheet)
+                                void writeSprites(
+                                    files,
+                                    sheet,
+                                    cameras.map(entry => entry.name)
+                                )
                             }
                         },
                         {
                             label: 'Download metadata JSON',
                             onClick: () => {
-                                void writeSheetMetadata(files, state, sheet)
+                                void writeMetadata(files, metadata())
                             }
                         },
                         {type: 'divider'},
@@ -597,7 +621,7 @@ export const ExportDialog = ({
                     variant='primary'
                     size='md'
                     onClick={() => {
-                        void writeExportPack(files, state, sheet, maps)
+                        void writePack(files, sheet, maps, metadata(), state.doc.name)
                     }}
                 />
             </div>

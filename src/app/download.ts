@@ -56,6 +56,22 @@ export const writeSprite = async (
     )
 }
 
+/**
+ * Every camera's sprite, cut out of the one sheet — `FEATURESET.md` §17.
+ *
+ * Names rather than the camera list, and certainly rather than the state: the only thing this needs
+ * from a camera is what to call its file, and the cell it cuts is found by position. Encoded
+ * together for the reason `mapFiles` is — a second `CompressionStream` started after the first has
+ * drained waits on the task queue rather than on any work.
+ */
+export const writeSprites = async (
+    files: Files,
+    sheet: Sheet,
+    names: readonly string[]
+): Promise<void> => {
+    await Promise.all(names.map((name, index) => writeSprite(files, sheet, index, name)))
+}
+
 /** A camera's name, or a document's, as something a file system and a zip entry both accept. */
 export const slug = (name: string): string =>
     name

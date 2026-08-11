@@ -54,7 +54,7 @@ export const presetMaps = (output: SavedOutput, name: string): readonly SheetMap
  *
  * `undefined` means the name was refused, so the caller can leave the state exactly as it was.
  */
-export const savePreset = (
+const savePreset = (
     output: SavedOutput,
     name: string,
     maps: readonly SheetMap[]
@@ -75,7 +75,7 @@ export const savePreset = (
  * `undefined` means there was nothing by that name, including every built-in: those cannot be
  * dropped, and the reason is the same as why they cannot be overwritten.
  */
-export const dropPreset = (output: SavedOutput, name: string): SavedOutput | undefined => {
+const dropPreset = (output: SavedOutput, name: string): SavedOutput | undefined => {
     const presets = output.presets.filter(entry => entry.name !== name)
     if (presets.length === output.presets.length) return undefined
     return {
@@ -84,6 +84,21 @@ export const dropPreset = (output: SavedOutput, name: string): SavedOutput | und
         preset: output.preset === name ? DEFAULT_PRESET.name : output.preset
     }
 }
+
+/** Saving one and dropping one — the two things the export dialog does to the list. */
+export type PresetOp =
+    {kind: 'save'; name: string; maps: readonly SheetMap[]} | {kind: 'drop'; name: string}
+
+/**
+ * The one way anything outside this file changes the list.
+ *
+ * `undefined` still means refused, and that is the whole of the interface: the caller leaves the
+ * state exactly as it was and does not get to invent a different fallback. One entry point rather
+ * than two exports for the same reason `applyReference` is one — a reducer case per operation is a
+ * place for the next one to answer "refused" differently.
+ */
+export const applyPreset = (output: SavedOutput, op: PresetOp): SavedOutput | undefined =>
+    op.kind === 'save' ? savePreset(output, op.name, op.maps) : dropPreset(output, op.name)
 
 /**
  * The preset a file's `preset` field means.

@@ -185,9 +185,25 @@ tested by mounting something, or by building a whole `AppState` to ask a questio
   (`AimKey` and `AIMED_AT`) that sat a thousand lines apart; `changedAim` is now the one comparison,
   and `forgetAim()` gives the hover cache an owner. The rule it exists to keep: **the outline cannot
   disagree with the edit** — every branch of `hoverAt` is a branch of `beginStroke` or
-  `beginSelect`. `visible(state)` and `slicedFor(state, shown)` are the one derivation of "the grid
-  as the artist sees it": the app used to spell the first half itself and draw from that, so in
-  slice mode the picture was the whole model while the click landed on the sliced one.
+  `beginSelect`, and both of those reach `edits.ts`'s `writeBlock`, which is the one statement of
+  what a write drops. That predicate was written out twice, line for line, in two files, and it
+  agreed only by coincidence of what `openDraft` happened to pass; `writeOwned` asks it before
+  writing and the outline asks it without writing. `visible(state)` and `slicedFor(state, shown)`
+  are the one derivation of "the grid as the artist sees it": the app used to spell the first half
+  itself and draw from that, so in slice mode the picture was the whole model while the click landed
+  on the sliced one.
+
+    **`pointerAt(state, event)` is the interface, and the twelve gestures behind it are not
+    exported.** The ordering between them — which of them an event belongs to — was forty lines of
+    `app/state.ts`, so a module written to be testable without a window had five tests while forty
+    of its own claims were made through `reduce`. Two rules are now stated by the shape: a gesture
+    in progress owns every event until it ends, and the right and middle buttons and Shift always
+    move the camera. `took: false` comes back rather than a camera move being made here, because
+    turning the view means saying which stored camera the result is no longer, and a click on the
+    model may not reach the camera list. The rubber band's _continue_ step had no owner at all
+    before this and carried only `x1`/`y1`, four hundred lines from the `endBand` that reads
+    `width`/`height`.
+
 - **`src/render/light.ts`** — the viewport's sun and ambient floor, `FEATURESET.md` §21, which used
   to be a disabled button in the header. **Nothing it does is exported, and that is the feature, not
   a limitation.** Lighting is the game engine's job — that is what §21 said and what the normal,
@@ -264,15 +280,18 @@ tested by mounting something, or by building a whole `AppState` to ask a questio
   may name a camera that is not on the list.** A dead `selected` becomes nothing, because the
   strip's highlight is a claim about the view; a dead `previewed` falls to the first camera, because
   the render panel has to point at something.
-- **`src/doc/reference.ts`** — the pictures the artist builds against, not just their type. `place`,
-  `fade`, `lock` and `drop` over `readonly Reference[]`, with one `refuses` predicate. The lock used
-  to be spelled three different ways across four reducer cases and left out of the fourth, so
-  **dropping a new picture onto a locked plane silently replaced it.** It does not now.
+- **`src/doc/reference.ts`** — the pictures the artist builds against, not just their type. One
+  `applyReference(references, op)` over `readonly Reference[]`, with one `refuses` predicate; place,
+  fade, lock and drop are behind it and not reachable from outside. The lock used to be spelled
+  three different ways across four reducer cases and left out of the fourth, so **dropping a new
+  picture onto a locked plane silently replaced it.** Those four cases were also four bodies that
+  each read `{...state, references: f(...)}` — one `{type: 'reference'; op}` now, the same fold
+  `TransformOp` and `ObjectOp` got, for the same reason.
 - **`src/sheet/presets.ts`** — export presets and their four rules: a built-in name cannot be taken,
   saving over your own replaces it, dropping the selected one falls back to the default, an empty
-  name is refused. `savePreset` and `dropPreset` return `undefined` for "refused", so the reducer
-  case cannot invent a different fallback. `presetNamed` is the one place a version-1 file's empty
-  string becomes a name.
+  name is refused. `applyPreset` returns `undefined` for "refused", so the reducer case cannot
+  invent a different fallback. `presetNamed` is the one place a version-1 file's empty string
+  becomes a name.
 - **`src/gen/connect.ts`** — how far the generate dialog has got in reaching the local model, as one
   `Connection` union. It was four `useState`s set in sequence inside one effect: sixteen
   combinations, three reachable, and the offline path could only be seen by mounting the dialog. The
@@ -379,6 +398,15 @@ More things about the app layer that are not modules:
   for the viewport, covers five of the eight maps, and its depth is a _view_ mode its own comment
   says is not what gets exported. A preview built on it would have disagreed with the download for
   three maps out of eight, silently, in the one panel whose job is to show what lands on disk.
+
+    The dialog calls `app/download.ts` directly. There was an `app/export.ts` between them for a
+    while, four functions over `AppState` and the sheet, and one of them — `writeLoose` — was
+    `writeSheet` with the same three parameters in the same order and no transformation. The dialog
+    imported from both files, so the split it was meant to make did not exist at the call site, and
+    its tests asserted on bytes `download.ts` produced. The one thing in it with a decision in it
+    was `exportMetadata`, which is a function in the dialog now, called from the two menu items that
+    need it rather than memoised: `shownVolume` walks the whole grid and no render reads the answer.
+
 - **`Chrome` in `state.ts`** is what the artist sees and does not ship — twelve fields behind one
   `{type: 'chrome'}` action, including both list drags: the views strip's camera and the objects
   panel's row are one gesture, and one of them used to be a `useState` inside the panel.
@@ -448,10 +476,12 @@ bun run format       # prettier --write
 
 `lint` and `format` are cached (`.eslintcache`, prettier's own).
 
-**Measured 2026-08-10:** `bun test` is 6.5 s for 627 tests across 65 files, and `App.test.tsx` is
-4.5 s of it. The cost is 30 whole-window mounts, and **the mount is what costs under happy-dom, not
+**Measured 2026-08-11:** `bun test` is 6.5 s for 713 tests across 69 files, and `App.test.tsx` is
+most of it. The cost is the whole-window mounts, and **the mount is what costs under happy-dom, not
 the assertions** — mounting one astryx panel is ~50 ms and mounting a bare SVG component is ~1 ms.
-It was 13.1 s for 536 tests and 55 mounts before `test/panel.tsx`.
+It was 13.1 s for 536 tests and 55 mounts before `test/panel.tsx`. For scale at the other end:
+`state.test.ts` is 95 tests in 271 ms, because `reduce` mounts nothing — a reducer test is not a
+window test, and moving one to a `doc/` module buys correctness of interface, never time.
 
 **`test/panel.tsx` is the harness under the panel seam.** `mountPanel(volume, draw)` puts one panel
 over a real `useReducer(reduce, …)` and hands the test `state()`, `dispatch`, `click` and `act`. A
