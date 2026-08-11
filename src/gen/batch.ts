@@ -1,5 +1,6 @@
 import {DEFAULT_FLAGS, type Flags} from './flags'
 import {gateStatus, NOTHING_GATED, type GateTally} from './gate'
+import {autoNote, type Language} from './auto'
 import {generateMany, randomSeed, type Candidate, type Llama} from './llama'
 import {overallScore, type ModelScores} from './score'
 import {judge, type Veto, type Verdict} from './veto'
@@ -71,6 +72,11 @@ export interface BatchState {
     readonly taughtBy: readonly string[]
     /** Every failed attempt's message, in the order they failed. */
     readonly failures: readonly string[]
+    /**
+     * The language `auto` chose for this batch — see `gen/auto.ts`. `undefined` covers both "auto is
+     * off" and "auto said none", which the status line tells apart by reading the flags.
+     */
+    readonly language: Language | undefined
     readonly naming: NamingProgress | undefined
     /** What the gate did, when the `gates` experiment is on — see `gen/gate.ts`. */
     readonly gate: GateTally
@@ -83,6 +89,7 @@ export const idleBatch = (count: number): BatchState => ({
     count,
     taughtBy: [],
     failures: [],
+    language: undefined,
     naming: undefined,
     gate: NOTHING_GATED
 })
@@ -173,6 +180,15 @@ export const runBatch = async (
          */
         onPick: ids => {
             publish({taughtBy: [...ids, ...(reference ? [OWN_MODEL] : [])]})
+        },
+        /*
+         * What auto chose, before any candidate lands, so the line is there while they generate.
+         * Only when it chose something: `language` starts `undefined`, so publishing "none" would be
+         * a snapshot that changed nothing, and every snapshot is a render. The status line tells
+         * "none" from "not asked" by reading the flags, not this field.
+         */
+        onLanguage: chosen => {
+            if (chosen !== undefined) publish({language: chosen})
         },
         // The gate's running tally, so the line under the grid moves while seeds are being spent.
         onGate: gate => {
@@ -292,3 +308,7 @@ export const namingNote = (state: BatchState): string => {
 
 /** The gate's line, or nothing at all when the experiment is off — see `gen/gate.ts`. */
 export const gateNote = (state: BatchState): string => gateStatus(state.gate)
+
+/** What `auto` chose, or nothing at all when it was not asked — see `gen/auto.ts`. */
+export const languageNote = (state: BatchState, flags: Flags): string =>
+    autoNote(state.language, flags)

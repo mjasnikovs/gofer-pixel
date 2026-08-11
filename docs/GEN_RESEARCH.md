@@ -150,6 +150,43 @@ generate dialog. Off is the generator every number above was measured with, and 
 experiment graduates is that its numbers land in this file and the flag is deleted with the branch
 it guarded.
 
+### Auto picks the language, and picks it right (2026-08-11)
+
+Four languages now exist and exactly one fits any given subject, which makes choosing between them a
+thing the artist should not have to do. `src/gen/auto.ts`, behind the `auto` flag: one call per
+batch, a one-word answer, and the chosen language is switched on while the other three are switched
+off. **It picks one or none, never a set** — the example picking call is measured to pad when unsure
+(`a knight → farmer, chicken, dog`, above), and here padding is a contradiction rather than a wash,
+because `relational` replaces the example set and would send the face help with nothing teaching it.
+
+The four _policy_ switches — `repair`, `gates`, `retryEmpty`, `onePick` — are deliberately out of
+reach. They are about what to do with output that came back broken, not about the subject.
+
+Measured live against Qwen3.6-27B, fifteen prompts, temp 0:
+
+| prompt              | chose        |     | prompt              | chose        |
+| ------------------- | ------------ | --- | ------------------- | ------------ |
+| a Mario brick block | `faces`      |     | a pine tree         | `procedural` |
+| a wooden crate      | `faces`      |     | a stone tower       | `procedural` |
+| a treasure chest    | `faces`      |     | a mossy boulder     | `procedural` |
+| a stone floor tile  | `faces`      |     | a knight            | `relational` |
+| a fish              | `silhouette` |     | a dog               | `relational` |
+| a mushroom          | `silhouette` |     | a chicken           | `relational` |
+| a clay pot          | `silhouette` |     | a farmer with a hoe | `relational` |
+
+**14 of 14, at 0.36 s a call.** That is the highest hit rate anything in this record has produced,
+and it is not surprising: it is a one-word classification from a written description, which is the
+shape of question findings 2 and 8 both say the model is good at.
+
+**The one caveat, and it is the padding again in a milder form: `none` was never chosen.** "a cheese
+sandwich" — put in the set precisely because none of the four is built for it — came back `faces`.
+So auto always picks something, and a subject that fits nothing gets an arbitrary language rather
+than falling back to the generator every other number here was measured on. Whether that costs
+anything is unmeasured; a sandwich is a boxy thing and `faces` may even be the least wrong answer.
+
+The chosen language travels in `GenerationRecord.language`, for the same reason `examples` does: the
+choice is its own model call, so prompt and seed alone no longer reproduce a candidate.
+
 ### The brick block, and the face language it produced (2026-08-11)
 
 "It cannot even generate a Mario brick block." Measured, and **the model generates it perfectly

@@ -523,3 +523,50 @@ test('the gate spends another seed on a brick, and the grid still fills', async 
     expect(ungated[0]?.ok).toBe(true)
     expect(open.seen).toHaveLength(1)
 })
+
+/*
+ * `auto` — one call per batch chooses the language, and everything after it reads the resolved
+ * flags: the system prompt, the reply's scope and which worked examples are sent. See `gen/auto.ts`.
+ */
+test('auto turns the chosen language on and the artist’s other one off', async () => {
+    const llama = memoryLlama([tower], 'memory', ['dog'], 'faces')
+    const attempts = await generateMany(llama, 'a brick block', 1, {
+        now: at,
+        // Relational switched on by hand, and auto disagrees. Auto wins, or the prompt describes one
+        // language while the examples teach another.
+        flags: {...DEFAULT_FLAGS, auto: true, relational: true}
+    })
+
+    expect(llama.seen[0]?.brief.flags?.faces).toBe(true)
+    expect(llama.seen[0]?.brief.flags?.relational).toBe(false)
+    // The choice travels with the asset: the pick is its own model call, so prompt plus seed no
+    // longer reproduce a candidate without it.
+    expect(attempts[0]?.ok === true && attempts[0].candidate.record.language).toBe('faces')
+})
+
+test('auto is not asked at all when it is off, and the record says nothing', async () => {
+    const llama = memoryLlama([tower], 'memory', ['dog'], 'faces')
+    const attempts = await generateMany(llama, 'a brick block', 1, {
+        now: at,
+        flags: {...DEFAULT_FLAGS, silhouette: true}
+    })
+
+    // The switches mean exactly what they say, which is what every measurement was taken with.
+    expect(llama.seen[0]?.brief.flags?.silhouette).toBe(true)
+    expect(llama.seen[0]?.brief.flags?.faces).toBe(false)
+    expect(attempts[0]?.ok === true && attempts[0].candidate.record.language).toBeUndefined()
+})
+
+test('auto choosing nothing is the plain generator, not a broken one', async () => {
+    const llama = memoryLlama([tower], 'memory', ['dog'], undefined)
+    const attempts = await generateMany(llama, 'a cheese sandwich', 1, {
+        now: at,
+        flags: {...DEFAULT_FLAGS, auto: true, faces: true}
+    })
+
+    const sent = llama.seen[0]?.brief.flags
+    expect(sent?.faces).toBe(false)
+    expect(sent?.silhouette).toBe(false)
+    expect(attempts[0]?.ok).toBe(true)
+    expect(attempts[0]?.ok === true && attempts[0].candidate.record.language).toBeUndefined()
+})

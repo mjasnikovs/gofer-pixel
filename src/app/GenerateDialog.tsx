@@ -15,6 +15,7 @@ import {choose, forget, recall, takeFile, type Outcome} from '../gen/reference'
 import {
     gateNote,
     generateNote,
+    languageNote,
     idleBatch,
     namingNote,
     ordered,
@@ -548,6 +549,12 @@ export const GenerateDialog = ({
                         color='disabled'
                     >
                         <span data-testid='gate-status'>{gateNote(batch)}</span>
+                    </Text>
+                    <Text
+                        type='supporting'
+                        color='secondary'
+                    >
+                        <span data-testid='auto-status'>{languageNote(batch, flags)}</span>
                     </Text>
                     {/*
                      * What is switched on, next to the pictures rather than only inside the folded

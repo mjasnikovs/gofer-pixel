@@ -197,6 +197,7 @@ test('with no server there is nothing to press, and the dialog says why', async 
     const down: Llama = {
         probe: () => Promise.resolve(undefined),
         pick: () => Promise.resolve(['dog']),
+        pickLanguage: () => Promise.resolve(undefined),
         generate: () => Promise.reject(new Error('not running'))
     }
     const {root, host} = await open(down)
@@ -279,6 +280,7 @@ test('the slots a batch will fill are on screen before the model answers', async
     const held: Llama = {
         probe: () => Promise.resolve('qwen'),
         pick: () => Promise.resolve(['dog']),
+        pickLanguage: () => Promise.resolve(undefined),
         generate: (_prompt, _sampler, _plan, signal) => {
             asked += 1
             if (signal?.aborted === true) return Promise.reject(new Error('cancelled'))
@@ -345,6 +347,7 @@ test('closing the dialog mid-batch stops asking the model for models', async () 
     const slow: Llama = {
         probe: () => Promise.resolve('qwen'),
         pick: () => Promise.resolve(['dog']),
+        pickLanguage: () => Promise.resolve(undefined),
         generate: (_prompt, _sampler, _plan, signal) => {
             asked += 1
             if (signal?.aborted === true) return Promise.reject(new Error('cancelled'))
@@ -424,6 +427,7 @@ test('Cancel stops a batch that is already running, and keeps what landed', asyn
     const held: Llama = {
         probe: () => Promise.resolve('qwen'),
         pick: () => Promise.resolve(['dog']),
+        pickLanguage: () => Promise.resolve(undefined),
         generate: (_prompt, _sampler, _plan, signal) => {
             asked += 1
             if (signal?.aborted === true) return Promise.reject(new Error('cancelled'))

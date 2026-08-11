@@ -196,6 +196,7 @@ test('cancelling keeps what landed and never asks CLIP about a batch that was wa
     const held: Llama = {
         probe: () => Promise.resolve('qwen'),
         pick: () => Promise.resolve(['dog']),
+        pickLanguage: () => Promise.resolve(undefined),
         generate: (_prompt, _sampler, _examples, signal) => {
             asked += 1
             if (signal?.aborted === true) return Promise.reject(new Error('cancelled'))

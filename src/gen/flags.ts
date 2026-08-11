@@ -27,6 +27,20 @@ import type {Store} from '../doc/store'
  */
 export interface Flags {
     /**
+     * Let the model choose which language the subject wants — see `gen/auto.ts`.
+     *
+     * One cheap call per batch, and it **overrides the four language switches below**: whichever it
+     * names is turned on and the other three off. The four policy switches — repair, gates, retry,
+     * one example — are untouched, because they are about broken output rather than about the
+     * subject and the model has nothing to say about them.
+     *
+     * It picks one language or none, never a set. The picking call is measured to pad when it is
+     * unsure (`GEN_RESEARCH.md`, 2026-08-09) and here padding is not a wash but a contradiction:
+     * `relational` replaces the example set, so two languages on at once is a prompt describing one
+     * and examples teaching another.
+     */
+    readonly auto: boolean
+    /**
      * §1 — repair the volume in code before anything ranks it. `gen/repair.ts`.
      *
      * Deterministic, no model call: drop debris, close a one-voxel gap, put the feet on the floor.
@@ -98,6 +112,7 @@ export interface Flags {
 }
 
 export const DEFAULT_FLAGS: Flags = {
+    auto: false,
     repair: false,
     gates: false,
     silhouette: false,
@@ -127,6 +142,12 @@ export interface FlagNote {
 }
 
 export const FLAG_NOTES: readonly FlagNote[] = [
+    {
+        key: 'auto',
+        title: 'Pick the language automatically',
+        note: 'One call per batch chooses one of the four languages below, or none, from the prompt.',
+        where: 'gen/auto.ts'
+    },
     {
         key: 'repair',
         title: 'Repair the volume',

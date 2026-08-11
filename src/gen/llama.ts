@@ -2,6 +2,7 @@ import {MAX_SIZE, rasterise, type VoxSpec} from './ops'
 import {snapTo, type Swatches} from './palette'
 import {picksFor, pickPrompt, readPicks, type Manifest, type WorkedExample} from './bank'
 import {DEFAULT_FLAGS, type Flags} from './flags'
+import {asking, autoPrompt, readLanguage, resolveFlags, type Language} from './auto'
 import {SILHOUETTE_EXAMPLES} from './shape'
 import {GROW_EXAMPLES} from './grow'
 import {FACE_EXAMPLES} from './face'
@@ -170,6 +171,16 @@ export interface GenerationRecord {
      * document this file has replaced — recording a bare `true` would name an effect with no cause.
      */
     readonly canvas?: number
+    /**
+     * The language `auto` chose for this batch — see `gen/auto.ts`. Absent means none was chosen,
+     * which covers both "auto was off" and "auto said none".
+     *
+     * It is here for the same reason `examples` is: the choice is its own model call, so the prompt
+     * and the seed alone no longer reproduce a candidate. Which experiments were *switched on* is
+     * still not recorded, because a flag is a code path about to be deleted — but the language a
+     * batch was actually written in is a property of the reply, and outlives the switch.
+     */
+    readonly language?: string
 }
 
 /**
@@ -237,6 +248,15 @@ export interface Llama {
         picks: number,
         signal?: AbortSignal
     ) => Promise<readonly string[]>
+    /**
+     * Which language this subject wants, or `undefined` for none — see `gen/auto.ts`.
+     *
+     * Its own call rather than a second question on `pick`, and that is the measurement talking: one
+     * short unconstrained question with a one-word answer is the shape that works, and the same call
+     * asked two things is the shape that pads. It costs about a second, once per batch, and only
+     * when `auto` is on.
+     */
+    readonly pickLanguage: (prompt: string, signal?: AbortSignal) => Promise<Language | undefined>
     readonly generate: (
         prompt: string,
         sampler: Sampler,
@@ -303,6 +323,30 @@ export const browserLlama = (manifest: Manifest, endpoint: string = DEFAULT_ENDP
             return [manifest.fallback]
         }
     },
+    pickLanguage: async (prompt, signal) => {
+        try {
+            const response = await fetch(`${endpoint}/v1/chat/completions`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                ...(signal ? {signal} : {}),
+                body: JSON.stringify({
+                    messages: [
+                        {role: 'system', content: autoPrompt()},
+                        {role: 'user', content: prompt}
+                    ],
+                    max_tokens: 8,
+                    temperature: 0
+                })
+            })
+            if (!response.ok) return undefined
+            const body = (await response.json()) as ChatReply
+            return readLanguage(body.choices?.[0]?.message?.content ?? '')
+        } catch {
+            // A failed choice is "no language", which is the generator every finding was measured
+            // on. It must not sink the batch.
+            return undefined
+        }
+    },
     generate: async (prompt, sampler, brief, signal) => {
         const response = await fetch(`${endpoint}/v1/chat/completions`, {
             method: 'POST',
@@ -361,7 +405,8 @@ export interface SeenCall {
 export const memoryLlama = (
     replies: readonly (VoxSpec | Error)[],
     model = 'memory',
-    picks: readonly string[] = ['dog']
+    picks: readonly string[] = ['dog'],
+    language?: Language
 ): Llama & {readonly seen: SeenCall[]; readonly asked: number[]} => {
     const seen: SeenCall[] = []
     /** The cap each picking call was made with, so a test can see the `onePick` flag reach the wire. */
@@ -371,6 +416,7 @@ export const memoryLlama = (
         seen,
         asked,
         probe: () => Promise.resolve(model),
+        pickLanguage: () => Promise.resolve(language),
         pick: (_prompt, cap) => {
             asked.push(cap)
             return Promise.resolve(picks.slice(0, Math.max(1, cap)))
@@ -396,6 +442,13 @@ export interface GenerateOptions {
     readonly onAttempt?: (attempt: Attempt, done: number, total: number) => void
     /** Called once, with the ids of the examples the whole batch will be shown. */
     readonly onPick?: (ids: readonly string[]) => void
+    /**
+     * Called once with the language `auto` chose, or `undefined` for none — see `gen/auto.ts`.
+     *
+     * Called whether or not `auto` is on, because "nothing was chosen" and "nothing was asked" are
+     * the same thing to a status line and different things to the record.
+     */
+    readonly onLanguage?: (chosen: Language | undefined) => void
     /**
      * Called after each candidate the gate looked at — see `gen/gate.ts`, and only when `gates` is
      * on. It carries the running tally rather than one verdict, because the line the dialog draws
@@ -501,6 +554,7 @@ export const generateMany = async (
         signal,
         onAttempt,
         onPick,
+        onLanguage,
         onGate,
         teach = () => [],
         canvas,
@@ -509,8 +563,17 @@ export const generateMany = async (
         now = () => new Date()
     } = options
     const attempts: Attempt[] = []
+    /*
+     * Which language, before anything else, because everything after this reads the resolved flags —
+     * the system prompt, the reply's scope and which worked examples are sent. Once per batch, and
+     * only when `auto` is on: with it off `asking` is false, no call is made, and `resolveFlags` is
+     * the identity, so a batch runs on exactly the switches the artist set.
+     */
+    const chosen = asking(flags) ? await llama.pickLanguage(prompt, signal) : undefined
+    const running = resolveFlags(flags, chosen)
+    onLanguage?.(chosen)
     // Once, before the loop: which example fits belongs to the subject, not to the seed.
-    const picked = await llama.pick(prompt, picksFor(flags.onePick), signal)
+    const picked = await llama.pick(prompt, picksFor(running.onePick), signal)
     onPick?.(picked)
     /*
      * The worked examples, with the experiments' own in front of the bank's when one is on.
@@ -523,10 +586,10 @@ export const generateMany = async (
     const brief: Brief = {
         canvas,
         examples:
-            flags.relational ?
-                experimentExamples(flags, picked)
-            :   [...experimentExamples(flags, picked), ...teach(picked)],
-        flags
+            running.relational ?
+                experimentExamples(running, picked)
+            :   [...experimentExamples(running, picked), ...teach(picked)],
+        flags: running
     }
     /*
      * Two counters, not one, and only the `gates` experiment can part them: `spent` is how many
@@ -549,7 +612,7 @@ export const generateMany = async (
              * before it crashed, so this fires only for a reply that painted *nothing*: ten seconds
              * spent and a blank slot. One, not a loop: the measured win is the first retry.
              */
-            if (flags.retryEmpty && countPainting(answer.spec) === 0) {
+            if (running.retryEmpty && countPainting(answer.spec) === 0) {
                 asked = {...brief, retry: 'That reply produced no voxels'}
                 answer = await llama.generate(prompt, sampler, asked, signal)
             }
@@ -560,7 +623,7 @@ export const generateMany = async (
              * `gen/repair.ts`, §1. Off, `repair` is not called at all rather than called and
              * ignored: the identity of the volume is what the caller compares.
              */
-            const volume = flags.repair ? repair(painted).volume : painted
+            const volume = running.repair ? repair(painted).volume : painted
             /*
              * Shaded here, not stored: the spec stays flat-coloured, and rasterise-then-finish
              * reproduces the asset from the record exactly.
@@ -588,6 +651,7 @@ export const generateMany = async (
                                 model,
                                 examples: picked,
                                 ...(canvas === undefined ? {} : {canvas}),
+                                ...(chosen === undefined ? {} : {language: chosen}),
                                 at: now().toISOString()
                             }
                         }
@@ -603,7 +667,7 @@ export const generateMany = async (
          * gone `admit` keeps the failures, because an empty grid after a spent minute is worse than
          * a wrong sprite the artist can look at.
          */
-        if (flags.gates && attempt.ok) {
+        if (running.gates && attempt.ok) {
             /*
              * The spec's own declaration decides which rules apply — see `gen/face.ts`. A reply that
              * called `face` said its content is on its surface, so the brick rule stands down and the
