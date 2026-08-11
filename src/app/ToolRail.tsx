@@ -23,7 +23,7 @@ import type {AppAction, AppState, Tool} from './state'
  * The rail is a radio group, because exactly one tool is armed at a time and a screen reader should
  * hear that rather than nine unrelated buttons. Which tool is armed decides what the left button
  * does in the viewport: the first four write voxels, the next four work on a selection, and Measure
- * leaves the drag to the camera.
+ * reads one without changing it.
  *
  * Under a divider it also carries the four view switches, which used to be a box in the bottom-left
  * corner with symmetry, the drawing plane, the reference rows and the voxel size crammed in beside
@@ -64,17 +64,17 @@ const HINTS: Record<Tool, string> = {
     rotate: 'Grab a face and drag sideways to turn the selection 90°',
     scale: 'Pull a face of the selection to extrude it',
     clone: 'Drag a selection to leave a copy behind',
-    measure: 'Not built yet — the left button still turns the view'
+    measure: 'Drag from one voxel to another to read the span between them. Click air to clear it'
 }
 
 /**
- * Measure is in the rail because `docs/editor.png` draws nine tools, and it does nothing: arming it
- * leaves the left button to the camera. So it is greyed, and its tooltip says which. It stays
- * visible rather than being cut because the rail's nine-slot shape is the mockup's, and an artist who
- * has read the feature set should be able to see that this one is coming.
+ * There was a `DEAD` set here holding Measure, which greyed the button and swallowed its click.
+ *
+ * Measure is built — `doc/measure.ts` and `SpanTape` — so nothing in this rail is disabled any more,
+ * and the rule the set stood for is worth keeping without it: a control that names a feature nobody
+ * is building teaches the artist that the window lies about itself. The `[data-dead]` styling went
+ * with it.
  */
-const DEAD: ReadonlySet<Tool> = new Set<Tool>(['measure'])
-
 const ToolButton = ({
     tool,
     isArmed,
@@ -88,13 +88,11 @@ const ToolButton = ({
         type='button'
         role='radio'
         aria-checked={isArmed}
-        aria-disabled={DEAD.has(tool) || undefined}
         title={HINTS[tool]}
         className='tool'
         data-armed={isArmed || undefined}
-        data-dead={DEAD.has(tool) || undefined}
         onClick={() => {
-            if (!DEAD.has(tool)) onArm(tool)
+            onArm(tool)
         }}
     >
         <span className='tool-icon'>{TOOL_ICONS[tool]}</span>
@@ -118,8 +116,9 @@ type Switchable = 'grid' | 'edges' | 'snap' | 'invert'
  * which is the one place in this rail that is affordable — there are four of them, they are read at
  * a glance while drawing, and none of them is destructive.
  *
- * Off is the same grey as an unarmed tool rather than the dimming `[data-dead]` uses, because in
- * this column faded already means "not built yet" and Measure is sitting four rows up saying so.
+ * Off is the same grey as an unarmed tool rather than a dimming, because dimming reads as "not
+ * available" and every one of these four is available at all times — it is the ground grid that is
+ * off, not the switch.
  *
  * They are `role='switch'` in a group of their own, so nothing hears them as a tenth tool, and the
  * `aria-label` is what carries the name now that nothing is drawn under the icon.

@@ -534,3 +534,54 @@ test('a file that is not a model says so, and does not become the reference', as
 
     await close(root, host)
 })
+
+/*
+ * The other end of the drop. Clear is the only way back to the bank once a model has been taught
+ * from, and it has to reach `localStorage` and not just the dialog's own state — a reference that
+ * came back on the next reload would be a teacher the artist thought they had dismissed.
+ */
+test('clearing the dropped reference forgets it, on screen and on disk', async () => {
+    const llama = memoryLlama([carved('tower', '#808080')])
+    const store = memoryStore()
+    const mounted = await open(llama, memoryScorer([], false), memoryVeto(['']), store)
+    const {root, host} = mounted
+
+    await dropFile(referenceZone(), new File([carBytes], 'car.vox'))
+    expect(said('generate-reference')).toContain('Teaching from')
+    expect(store.get('gofer-pixel/gen-reference') ?? '').toContain('box(')
+
+    await act(async () => {
+        control('Clear').click()
+    })
+
+    expect(said('generate-reference')).toContain('Drop a .vox or .gpix here')
+    expect(store.get('gofer-pixel/gen-reference') ?? '').toBe('')
+    // And Clear is gone with it: there is nothing left to clear.
+    expect(
+        [...dialog().querySelectorAll('button')].some(node => node.textContent.trim() === 'Clear')
+    ).toBe(false)
+
+    await generate(mounted)
+    expect(llama.seen[0]?.examples ?? []).toHaveLength(1)
+
+    await close(root, host)
+})
+
+/*
+ * The other way out of the dialog, beside the close button above. Astryx listens for Escape on the
+ * `<dialog>` element itself, and this dialog is `purpose='form'`, so Escape closes it and a click on
+ * the backdrop does not — a batch is a minute of the artist's time to lose to a stray click.
+ */
+test('Escape closes the dialog, the same as the close button', async () => {
+    const {root, host, closed} = await open(memoryLlama([carved('tower', '#808080')]))
+
+    const shell = dialog().closest('dialog')
+    if (!shell) throw new Error('the dialog is not in a <dialog>')
+    await act(async () => {
+        shell.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}))
+    })
+
+    expect(closed).toHaveLength(1)
+
+    await close(root, host)
+})

@@ -298,18 +298,9 @@ body,
 }
 
 /*
- * A tool that is not built yet. It keeps its slot and its `aria-disabled`, so a keyboard can still
- * reach it and hear why — which is the whole reason it is not simply `disabled`.
+ * There was a `[data-dead]` pair here, dimming the one tool that was not built. Measure is built,
+ * so every slot in this rail is live and there is nothing left to dim.
  */
-.tool[data-dead] {
-    opacity: 0.4;
-    cursor: not-allowed;
-}
-
-.tool[data-dead]:hover {
-    background: none;
-    color: var(--color-icon-secondary);
-}
 
 /* ---- symmetry / plane / references / voxel size ---- */
 
@@ -1259,6 +1250,24 @@ body,
 }
 
 /*
+ * Gauge. Measure, which changes nothing and takes nothing out of the model either — so nothing is
+ * filled, for the reason Sample is not: a block of paint promises a write that is not coming, and
+ * this is the one tool that will never make one.
+ *
+ * It is `sample`'s rule and not a share of it, because the two differ where it matters: Pick sets
+ * `hover.paint` and draws itself in the colour it is about to take, and a measurement has no colour
+ * to propose. Without this rule the default applied — a translucent wash in the *loaded* colour,
+ * which is Draw's promise worn by the one tool that cannot keep it.
+ */
+.brush-ghost[data-kind='gauge'] .brush-ghost-fill {
+    fill: none;
+}
+
+.brush-ghost[data-kind='gauge'] .brush-ghost-outline {
+    stroke-width: 2.5;
+}
+
+/*
  * Grab. Nothing changes yet; these are the voxels the gesture is about to take hold of. Accent at a
  * fifth strength rather than the loaded paint, because it is the same statement `.selection-box`
  * makes a moment later and the two should be recognisably the same colour of idea.
@@ -1284,6 +1293,33 @@ body,
  */
 .brush-ghost[data-blocked='locked'] .brush-ghost-outline {
     stroke: var(--color-warning);
+}
+
+/*
+ * Measure's tape — the box the two ends span, dashed, and the diagonal between their centres, solid.
+ *
+ * Neither is the selection's own solid accent box, deliberately. A tape is a reading rather than a
+ * thing the artist is holding, and the two are on screen together often enough that a second solid
+ * accent box would be read as a second selection. The dashes are what say "this is a measurement",
+ * the same sentence `.brush-ghost-drop` makes about the shadow under the ghost.
+ *
+ * The diagonal is heavier than the box because it is the line the artist actually dragged; the box
+ * is the consequence of it.
+ */
+.span-tape {
+    color: var(--color-accent);
+}
+
+.span-tape-box {
+    stroke: currentColor;
+    stroke-width: 1;
+    stroke-dasharray: 3 3;
+    opacity: 0.7;
+}
+
+.span-tape-line {
+    stroke: currentColor;
+    stroke-width: 1.5;
 }
 
 .rubber-band {
@@ -1424,6 +1460,20 @@ body,
 
 .hint-cell[data-blocked] {
     opacity: 0.5;
+}
+/*
+ * What the tape says. Tabular and fixed-width for the reason the two readings either side of it are:
+ * the numbers change while the hand drags and a proportional `3 × 4 × 12` walks the bar sideways as
+ * the digits turn over.
+ *
+ * It is on the bar only while Measure is armed and a tape exists, which is what makes it affordable
+ * at all — this bar is `nowrap` and does not shrink, and every hint that is always there is a hint
+ * the stage has to be wide enough for.
+ */
+.hint-span {
+    min-width: 128px;
+    justify-content: center;
+    font-variant-numeric: tabular-nums;
 }
 /*
  * What a pixel means, at the far end of the bar. Tabular, because it is read while the wheel turns

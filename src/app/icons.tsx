@@ -238,12 +238,6 @@ export const EllipseIcon = () => (
 
 /* ---- header and panel actions ---- */
 
-export const SlidersIcon = () => (
-    <Svg>
-        <path d='M2.5 4.5h11M2.5 11.5h11M6 2.8v3.4M10.5 9.8v3.4' />
-    </Svg>
-)
-
 export const UndoIcon = () => (
     <Svg>
         <path d='M3 7h7a3.5 3.5 0 0 1 0 7H6' />
@@ -283,12 +277,6 @@ export const SunIcon = () => (
     </Svg>
 )
 
-export const MenuIcon = () => (
-    <Svg>
-        <path d='M2.5 4h11M2.5 8h11M2.5 12h11' />
-    </Svg>
-)
-
 export const GearIcon = () => (
     <Svg>
         <circle
@@ -297,12 +285,6 @@ export const GearIcon = () => (
             r='2.2'
         />
         <path d='M8 1.6l.9 1.6 1.8-.4.5 1.8 1.8.4-.5 1.8L14 8l-1.5 1.2.5 1.8-1.8.4-.5 1.8-1.8-.4L8 14.4l-.9-1.6-1.8.4-.5-1.8-1.8-.4.5-1.8L2 8l1.5-1.2-.5-1.8 1.8-.4.5-1.8 1.8.4z' />
-    </Svg>
-)
-
-export const DotsIcon = () => (
-    <Svg>
-        <path d='M4 8h.01M8 8h.01M12 8h.01' />
     </Svg>
 )
 

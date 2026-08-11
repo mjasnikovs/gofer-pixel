@@ -33,6 +33,28 @@ thisFunctionDoesNotExist()`,
     ).toBe(27)
 })
 
+/*
+ * The other two verbs. `box` is in every test above because it is what the examples teach with;
+ * these two are what a model reaches for on a head or a hollow, and until now nothing said they
+ * arrive as the ops `ops.ts` knows how to rasterise.
+ */
+test('ball and erase reach the spec as their own ops, and paint a rounded solid', () => {
+    const spec = specFromCode(
+        `ball(3,3,3, 3,3,3, '#ff8800')
+erase(3,3,0, 3,3,6)`,
+        'a head'
+    )
+    expect(spec?.ops.map(op => op.op)).toEqual(['ball', 'erase'])
+    expect(spec?.ops[0]).toEqual({op: 'ball', at: [3, 3, 3], r: [3, 3, 3], color: '#ff8800'})
+
+    // Rounded, so it is short of the 7³ box it is inscribed in — and hollowed by the erase.
+    const filled = countFilled(
+        rasterise(spec ?? {name: '', size: [1, 1, 1], mirror_x: false, ops: []})
+    )
+    expect(filled).toBeGreaterThan(0)
+    expect(filled).toBeLessThan(7 * 7 * 7)
+})
+
 test('prose, a syntax error, or code that paints nothing is undefined, not an empty model', () => {
     expect(specFromCode('the reply was an apology, not a program', 'x')).toBeUndefined()
     expect(specFromCode('const x =', 'x')).toBeUndefined()

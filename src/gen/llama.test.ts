@@ -273,3 +273,83 @@ test('an attempt is one shape, so a caller cannot read a candidate off a failure
         attempts.map(attempt => (attempt.ok ? attempt.candidate.spec.name : attempt.error))
     ).toEqual(['busy'])
 })
+
+/*
+ * The picking call, over the same fake `fetch` the other browser-port tests use. It is one cheap
+ * unconstrained call per batch, and the rule that matters is at the bottom: it must not be able to
+ * sink a batch. `bank.ts` owns what a reply *means* — `readPicks` and `pickPrompt` are tested
+ * there; this is the wire between them and the server.
+ */
+test('the picking call sends the manifest as its prompt and reads ids back', async () => {
+    const original = globalThis.fetch
+    let sent: {url: string; body: Record<string, unknown>} | undefined
+    globalThis.fetch = ((url: string, init: {body: string}) => {
+        sent = {url, body: JSON.parse(init.body) as Record<string, unknown>}
+        return Promise.resolve(
+            new Response(JSON.stringify({choices: [{message: {content: 'farmer, dog'}}]}))
+        )
+    }) as unknown as typeof fetch
+    try {
+        const picks = await browserLlama(manifest, 'http://x:8080').pick('a knight')
+        expect(picks).toEqual(['farmer', 'dog'])
+    } finally {
+        globalThis.fetch = original
+    }
+
+    expect(sent?.url).toBe('http://x:8080/v1/chat/completions')
+    const messages = sent?.body['messages'] as {role: string; content: string}[]
+    expect(messages[0]?.role).toBe('system')
+    // The prompt *is* the manifest, so every id the artist could be sent to is in the sentence.
+    for (const entry of manifest.entries) expect(messages[0]?.content).toContain(entry.id)
+    expect(messages[1]).toEqual({role: 'user', content: 'a knight'})
+    // Deterministic and short: this call picks from a list, it does not draw.
+    expect(sent?.body['temperature']).toBe(0)
+    expect(sent?.body['max_tokens']).toBe(32)
+})
+
+test('a pick that fails falls back rather than sinking the batch', async () => {
+    const original = globalThis.fetch
+    const fallback = [manifest.fallback]
+    try {
+        // The server is down.
+        globalThis.fetch = (() =>
+            Promise.reject(new Error('ECONNREFUSED'))) as unknown as typeof fetch
+        expect(await browserLlama(manifest).pick('a knight')).toEqual(fallback)
+
+        // The server is there and unhappy.
+        globalThis.fetch = (() =>
+            Promise.resolve(new Response('busy', {status: 503}))) as unknown as typeof fetch
+        expect(await browserLlama(manifest).pick('a knight')).toEqual(fallback)
+
+        // The server answered with nothing an id could be read out of.
+        globalThis.fetch = (() =>
+            Promise.resolve(
+                new Response(JSON.stringify({choices: [{message: {content: 'no idea'}}]}))
+            )) as unknown as typeof fetch
+        expect(await browserLlama(manifest).pick('a knight')).toEqual(fallback)
+
+        // And a reply with no choices at all, which is a proxy answering rather than the server.
+        globalThis.fetch = (() => Promise.resolve(new Response('{}'))) as unknown as typeof fetch
+        expect(await browserLlama(manifest).pick('a knight')).toEqual(fallback)
+    } finally {
+        globalThis.fetch = original
+    }
+})
+
+test('a cancelled pick carries the signal to the server', async () => {
+    const original = globalThis.fetch
+    const control = new AbortController()
+    let seen: AbortSignal | undefined
+    globalThis.fetch = ((_url: string, init: {signal?: AbortSignal}) => {
+        seen = init.signal
+        return Promise.resolve(
+            new Response(JSON.stringify({choices: [{message: {content: 'dog'}}]}))
+        )
+    }) as unknown as typeof fetch
+    try {
+        expect(await browserLlama(manifest).pick('a dog', control.signal)).toEqual(['dog'])
+    } finally {
+        globalThis.fetch = original
+    }
+    expect(seen).toBe(control.signal)
+})

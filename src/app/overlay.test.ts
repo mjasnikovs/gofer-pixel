@@ -2,7 +2,16 @@ import {expect, test} from 'bun:test'
 import {ISOMETRIC_PITCH} from '../doc/cameras'
 import {createCamera, type Camera} from '../render/camera'
 import {createVolume, setVoxel, type Volume} from '../render/volume'
-import {boxCorners, floorOf, ghostMesh, hull, projector, unitCubeCorners} from './overlay'
+import {
+    boxCorners,
+    floorOf,
+    ghostMesh,
+    hull,
+    projector,
+    spanMesh,
+    unitCubeCorners,
+    type Point
+} from './overlay'
 
 /**
  * The overlay geometry, asked directly.
@@ -204,4 +213,43 @@ test('an interior face is never drawn, so the block takes one uniform alpha', ()
         }
     }
     expect(ghostMesh(cells, camera, volume).skin).toHaveLength(12)
+})
+
+/*
+ * Measure's tape. The one thing worth checking here is the line, because it is the only overlay in
+ * the file that is not a function of the box it is drawn inside.
+ */
+
+test('the tape runs between the ends the artist dragged, not along the box diagonal', () => {
+    const volume = grid()
+    const camera = iso(volume)
+    const project = projector(camera, volume)
+
+    // A drag towards the origin: `from` is the high corner and `to` is the low one, so the two ends
+    // are on the *other* diagonal of the same box. Drawing `min` to `max` would show a line nobody
+    // made — and it would have looked right for every drag in the opposite direction.
+    const ends = {from: [8, 3, 4] as const, to: [3, 8, 4] as const}
+    const box = {min: [3, 3, 4] as const, max: [8, 8, 4] as const}
+    const {line, edges} = spanMesh(ends, box, camera, volume)
+
+    const middle = (cell: readonly [number, number, number]): Point =>
+        project([cell[0] + 0.5, cell[1] + 0.5, cell[2] + 0.5])
+    expect(line.a).toEqual(middle(ends.from))
+    expect(line.b).toEqual(middle(ends.to))
+    expect(line.a).not.toEqual(middle(box.min))
+
+    // And the box is the twelve edges every other box overlay draws, flat or not.
+    expect(edges).toHaveLength(12)
+})
+
+test('a tape of one voxel is a cube and a line of no length', () => {
+    const volume = grid()
+    const camera = iso(volume)
+    const at = [5, 5, 5] as const
+    const {line, edges} = spanMesh({from: at, to: at}, {min: at, max: at}, camera, volume)
+
+    expect(edges).toHaveLength(12)
+    // Zero length on screen, which is the honest picture of a measurement between a voxel and
+    // itself. Nothing downstream invents an arrowhead for it.
+    expect(line.a).toEqual(line.b)
 })

@@ -153,3 +153,67 @@ test('the emitted code declares each colour once and names it', () => {
     ).toBe(0)
     expect(lines).toBe(code.split('\n').length)
 })
+
+/*
+ * The one sweep is the whole algorithm — see the note where the second one used to be. `isCorner`
+ * only reads cells earlier in scan order, so nothing can be stranded; these are the shapes that
+ * would strand something if that stopped being true. Adversarial on purpose: interlocking L
+ * fragments, a checkerboard where no cell has a same-coloured neighbour at all, a hollow shell, and
+ * a stack of alternating single-cell layers.
+ */
+test('one sweep claims every cell, on the shapes that would strand one', () => {
+    const lossless = (build: (volume: Volume) => void, size = 6): void => {
+        const volume = createVolume(size, size, size, new Uint8Array(256 * 4))
+        for (let index = 1; index < 16; index += 1) {
+            volume.palette.set([index * 16, 255 - index * 8, index * 5, 255], index * 4)
+        }
+        build(volume)
+        const rebuilt = rasterise(decompose(volume, 'x'))
+        const original = trimmed(volume)
+        expect(countFilled(rebuilt)).toBe(countFilled(original))
+        expect(colours(rebuilt)).toEqual(colours(original))
+    }
+
+    // A checkerboard: every filled cell is isolated, so every cell is its own box.
+    lossless(volume => {
+        for (let z = 0; z < volume.sz; z += 1)
+            for (let y = 0; y < volume.sy; y += 1)
+                for (let x = 0; x < volume.sx; x += 1)
+                    if ((x + y + z) % 2 === 0) setVoxel(volume, x, y, z, 1)
+    })
+
+    // Interlocking Ls of one colour, which is what makes a greedy box leave an awkward remainder.
+    lossless(volume => {
+        for (let z = 0; z < volume.sz; z += 1) {
+            for (let n = 0; n < volume.sx; n += 1) {
+                setVoxel(volume, n, 0, z, 1)
+                setVoxel(volume, 0, n, z, 1)
+                setVoxel(volume, n, volume.sy - 1, z, 1)
+                setVoxel(volume, volume.sx - 1, n, z, 1)
+            }
+        }
+    })
+
+    // A hollow shell: every claimed box runs into the hole.
+    lossless(volume => {
+        for (let z = 0; z < volume.sz; z += 1)
+            for (let y = 0; y < volume.sy; y += 1)
+                for (let x = 0; x < volume.sx; x += 1) {
+                    const edge =
+                        x === 0
+                        || y === 0
+                        || z === 0
+                        || x === volume.sx - 1
+                        || y === volume.sy - 1
+                        || z === volume.sz - 1
+                    if (edge) setVoxel(volume, x, y, z, 2)
+                }
+    })
+
+    // Alternating layers, so no box may ever grow in z.
+    lossless(volume => {
+        for (let z = 0; z < volume.sz; z += 1)
+            for (let y = 0; y < volume.sy; y += 1)
+                for (let x = 0; x < volume.sx; x += 1) setVoxel(volume, x, y, z, (z % 3) + 1)
+    })
+})

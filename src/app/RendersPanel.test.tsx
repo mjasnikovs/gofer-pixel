@@ -112,6 +112,38 @@ test('with every camera deleted the render panel says so instead of showing a bl
     await panel.unmount()
 })
 
+/*
+ * Capture is the strip's one button that adds rather than rearranges, and it is on the strip twice
+ * — the header when there are cameras, the empty state when there are none. Both are the same call,
+ * which is what stops the empty strip becoming a dead end.
+ */
+test('capture adds the live view, from the header and from the empty strip alike', async () => {
+    const panel = await open()
+    expect(panel.state().cameras).toHaveLength(8)
+
+    await panel.click('Capture view as a camera')
+    const grown = panel.state().cameras
+    expect(grown).toHaveLength(9)
+    // The new one is the chosen one: the artist captured it to work on it.
+    expect(panel.state().selected).toBe(grown[grown.length - 1]?.id)
+
+    // Empty the strip, and the button that is left is the same one.
+    for (let step = 0; step < 9; step += 1) {
+        const next = panel.state().cameras[0]
+        if (!next) break
+        await panel.act(() => {
+            within(panel, '.views-strip', next.name).click()
+        })
+        await panel.click('Delete camera')
+    }
+    expect(panel.state().cameras).toEqual([])
+
+    await panel.click('Capture view')
+    expect(panel.state().cameras).toHaveLength(1)
+
+    await panel.unmount()
+})
+
 test('the views strip rebuilds, aligns, duplicates, deletes and reorders the camera list', async () => {
     const panel = await open()
     const names = (): string[] => panel.state().cameras.map(entry => entry.name)

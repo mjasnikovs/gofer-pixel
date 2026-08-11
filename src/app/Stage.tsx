@@ -11,7 +11,15 @@ import {TOOL_CURSORS} from './cursors'
 import {markDrawn, publish} from './handle'
 import {ReferenceLayer} from './ReferenceLayer'
 import {SelectionBar} from './SelectionBar'
-import {AxisGizmo, BrushGhost, GroundGrid, HintBar, SelectionBox, ViewCube} from './ViewportOverlay'
+import {
+    AxisGizmo,
+    BrushGhost,
+    GroundGrid,
+    HintBar,
+    SelectionBox,
+    SpanTape,
+    ViewCube
+} from './ViewportOverlay'
 import {previewVolume, type AppAction, type AppState} from './state'
 
 /**
@@ -77,6 +85,17 @@ export const Stage = ({
         state.hover?.blocked?.reason === 'locked' ? state.hover.blocked.object : undefined
     const blocking =
         blockingId === undefined ? undefined : objectAt(state.objects, blockingId)?.name
+
+    /*
+     * Measure's tape, shown only while Measure is armed.
+     *
+     * It stays on the state across a tool change — an artist who measured a leg and armed Draw has
+     * not thrown the measurement away, and coming back to Measure finds it where it was. What it
+     * must not do is sit over the model through every stroke of the session: a reading is something
+     * to look at, and there is nothing to look at while the hand is drawing. This is the whole of
+     * that rule, and it is here rather than in `SpanTape` because the hint bar needs the same answer.
+     */
+    const tape = state.tool === 'measure' ? state.span : undefined
 
     /*
      * What a pixel means at this zoom — the hint bar's last hint, and the one derivation on this
@@ -175,6 +194,11 @@ export const Stage = ({
                 band={state.band}
                 losing={state.losing}
             />
+            <SpanTape
+                volume={shown}
+                camera={orbit.camera}
+                span={tape}
+            />
             <AxisGizmo
                 volume={shown}
                 camera={orbit.camera}
@@ -198,6 +222,7 @@ export const Stage = ({
                 blocking={blocking}
                 height={volume.sz}
                 losing={state.losing}
+                span={tape}
                 voxel={voxel}
                 onCapture={capture}
             />

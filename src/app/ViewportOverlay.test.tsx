@@ -11,7 +11,7 @@ import {
     ViewCube,
     type GhostHover
 } from './ViewportOverlay'
-import type {Blocked} from './state'
+import type {Blocked, Span} from './state'
 
 const volume = createVolume(8, 8, 8, new Uint8Array(256 * 4))
 setVoxel(volume, 3, 3, 3, 1)
@@ -84,6 +84,7 @@ const hintText = async (
                 blocking={blocking}
                 height={8}
                 losing={0}
+                span={undefined}
                 voxel={{pixels: 2, even: true, cell: 64}}
                 onCapture={() => undefined}
             />
@@ -142,6 +143,7 @@ const voxelHint = async (voxel: {
                 blocking={undefined}
                 height={8}
                 losing={0}
+                span={undefined}
                 voxel={voxel}
                 onCapture={() => undefined}
             />
@@ -441,6 +443,7 @@ test('the hint bar counts the voxels a drag would destroy, and says voxel once',
                     blocking={undefined}
                     height={8}
                     losing={losing}
+                    span={undefined}
                     voxel={{pixels: 2, even: true, cell: 64}}
                     onCapture={() => undefined}
                 />
@@ -452,6 +455,50 @@ test('the hint bar counts the voxels a drag would destroy, and says voxel once',
     expect(await show(0)).toBe('')
     expect(await show(1)).toContain('1 voxel will be destroyed')
     expect(await show(12)).toContain('12 voxels will be destroyed')
+
+    await act(async () => {
+        root.unmount()
+    })
+    host.remove()
+})
+
+/**
+ * What the tape says, and where it says it.
+ *
+ * The size is on the face of the bar and the diagonal is in the tooltip — the same trade
+ * `.hint-voxel` made two hints along, because this bar is `nowrap` inside an `overflow: hidden`
+ * stage and a second number costs about 90 px of a budget that is already tight at 1400.
+ */
+test('the tape reads its size in the bar and its diagonal in the tooltip', async () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const root = createRoot(host)
+    const show = async (span: Span | undefined): Promise<Element | null> => {
+        await act(async () => {
+            root.render(
+                <HintBar
+                    tool='Measure'
+                    hover={undefined}
+                    blocking={undefined}
+                    height={8}
+                    losing={0}
+                    span={span}
+                    voxel={{pixels: 2, even: true, cell: 64}}
+                    onCapture={() => undefined}
+                />
+            )
+        })
+        return host.querySelector('.hint-span')
+    }
+
+    expect(await show(undefined)).toBeNull()
+
+    // A 3-4-5 triangle across x and y. The size counts both ends and reads 4 × 5 × 1; the diagonal
+    // does not and reads 5. They are counted differently on purpose — see `doc/measure.ts`.
+    const hint = await show({from: [0, 0, 0], to: [3, 4, 0], live: false})
+    expect(hint?.textContent).toContain('4 × 5 × 1')
+    expect(hint?.textContent).not.toContain('5.00')
+    expect(hint?.getAttribute('title')).toContain('5.00 voxels')
 
     await act(async () => {
         root.unmount()

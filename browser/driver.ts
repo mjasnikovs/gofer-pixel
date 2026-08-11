@@ -28,6 +28,7 @@ export interface Handle {
         slice: number | undefined
         clipboard: unknown
         losing: number
+        span: {from: [number, number, number]; to: [number, number, number]} | undefined
     }
     dispatch: (action: unknown) => void
     firstFrame: Promise<void>
@@ -101,6 +102,8 @@ export interface Reading {
     slice: number | undefined
     clipboard: boolean
     losing: number
+    /** Measure's tape, as the voxels it spans on each axis. `undefined` when there is none. */
+    span: [number, number, number] | undefined
 }
 
 export const read = (page: Page): Promise<Reading> =>
@@ -129,6 +132,22 @@ export const read = (page: Page): Promise<Reading> =>
             cameras: state.cameras.length,
             slice: state.slice,
             clipboard: state.clipboard !== undefined,
-            losing: state.losing
+            losing: state.losing,
+            /*
+             * The reading, worked out here from the two ends rather than taken off the app.
+             *
+             * That is the same choice `filled` and `hash` above make, and for the same reason: this
+             * file states what the app is supposed to have computed, independently, so a wrong
+             * `measured` cannot agree with itself. What it restates is `doc/measure.ts`'s one rule —
+             * the size counts both ends, so one voxel is one voxel across.
+             */
+            span:
+                state.span === undefined ?
+                    undefined
+                :   ([
+                        Math.abs(state.span.to[0] - state.span.from[0]) + 1,
+                        Math.abs(state.span.to[1] - state.span.from[1]) + 1,
+                        Math.abs(state.span.to[2] - state.span.from[2]) + 1
+                    ] as [number, number, number])
         }
     })

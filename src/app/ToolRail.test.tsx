@@ -162,3 +162,25 @@ test('a second picture on the same plane replaces the first rather than stacking
 
     await panel.unmount()
 })
+
+/**
+ * There is no dead tool in the rail any more.
+ *
+ * Measure was greyed and `aria-disabled` for as long as it was not built, and the button swallowed
+ * its own click. It is built — `doc/measure.ts` — and the thing worth holding is the rule that
+ * outlasted it: every button in this column arms the tool it names, or it should not be drawn.
+ */
+test('every tool in the rail arms, and none of them is disabled', async () => {
+    const panel = await open()
+
+    for (const tool of TOOLS) {
+        const label = `${(tool[0] ?? '').toUpperCase()}${tool.slice(1)}`
+        const button = panel.control(label)
+        expect(button.getAttribute('aria-disabled'), `${tool} must not be disabled`).toBeNull()
+        await panel.click(label)
+        expect(panel.state().tool, `${tool} must arm`).toBe(tool)
+        expect(panel.control(label).getAttribute('aria-checked')).toBe('true')
+    }
+
+    await panel.unmount()
+})

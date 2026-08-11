@@ -12,13 +12,14 @@ import {
     floorOf,
     ghostMesh,
     projector,
+    spanMesh,
     unitCubeCorners,
     type Point,
     type Quad,
     type Segment
 } from './overlay'
 import {CameraIcon, MagnetIcon, MouseIcon} from './icons'
-import type {Blocked} from './state'
+import {measured, type Blocked, type Span} from './state'
 
 /**
  * The three things that float over the render in `docs/editor.png`: which way the axes point, a
@@ -361,6 +362,60 @@ export const SelectionBox = ({
     )
 }
 
+/**
+ * Measure's tape: the box the two ends span, and the line between their centres.
+ *
+ * It draws the same two things the hint bar reads out, from the same `measured` call, which is the
+ * rule `doc/measure.ts` exists to keep — a box three voxels wide over a bar that says four would be
+ * the ruler equivalent of an outline that disagrees with the edit.
+ *
+ * The box is dashed and the diagonal is solid. Neither is the selection's own solid box on purpose:
+ * a tape is a reading rather than a thing the artist is holding, and the two are on screen at once
+ * often enough that they must not be confused.
+ *
+ * `Stage.tsx` passes `undefined` for every tool but Measure, so a settled tape does not sit over the
+ * model while the artist draws. It is still on the state, and re-arming Measure brings it back.
+ */
+export const SpanTape = ({
+    volume,
+    camera,
+    span
+}: {
+    volume: Volume
+    camera: Camera
+    span: Span | undefined
+}) => {
+    if (!span) return undefined
+    const {box} = measured(span)
+    const {edges, line} = spanMesh(span, box, camera, volume)
+    const at = ({x, y}: Point): string => `${String(x)} ${String(y)}`
+    const path = ({a, b}: Segment): string => `M${at(a)}L${at(b)}`
+
+    const half = camera.zoom / 2
+    return (
+        <svg
+            className='span-tape overlay-plane'
+            data-live={span.live || undefined}
+            viewBox={`${String(-half)} ${String(-half)} ${String(camera.zoom)} ${String(camera.zoom)}`}
+            preserveAspectRatio='xMidYMid slice'
+            aria-hidden='true'
+        >
+            <path
+                className='span-tape-box'
+                d={edges.map(path).join('')}
+                fill='none'
+                vectorEffect='non-scaling-stroke'
+            />
+            <path
+                className='span-tape-line'
+                d={path(line)}
+                fill='none'
+                vectorEffect='non-scaling-stroke'
+            />
+        </svg>
+    )
+}
+
 export const AxisGizmo = ({volume, camera}: {volume: Volume; camera: Camera}) => {
     const {right, up, forward} = basisFor(camera, volume, 1)
     // Painter's order: an axis pointing away from the viewer is drawn first, so the near one wins
@@ -489,12 +544,51 @@ export interface VoxelSize {
     readonly cell: number
 }
 
+/**
+ * What the tape says, in the bar where every other live reading already is.
+ *
+ * The size is on the face of it and the diagonal is in the tooltip, which is the same trade
+ * `.hint-voxel` made two hints along and for the same measured reason: this bar is `nowrap` inside
+ * an `overflow: hidden` stage, and a second number costs about 90 px of a budget that is already
+ * tight at a 1400 px window. The size is the number an artist came here for — how many voxels tall,
+ * how many across — and the diagonal is the one they look up once.
+ *
+ * The tooltip is also where the two numbers are reconciled, because they are counted differently on
+ * purpose: the size includes both ends and the diagonal does not. See `doc/measure.ts`.
+ */
+const SpanHint = ({span}: {span: Span}) => {
+    const {size, diagonal} = measured(span)
+    return (
+        <span
+            className='hint hint-span'
+            title={
+                `Voxels across the box between the two ends, counting both of them.`
+                + ` The straight line between their centres is ${diagonal.toFixed(2)} voxels.`
+            }
+        >
+            <Text
+                type='supporting'
+                color='disabled'
+            >
+                Span
+            </Text>
+            <Text
+                type='supporting'
+                hasTabularNumbers
+            >
+                {size[0]} × {size[1]} × {size[2]}
+            </Text>
+        </span>
+    )
+}
+
 export const HintBar = ({
     tool,
     hover,
     blocking,
     height,
     losing,
+    span,
     voxel,
     onCapture
 }: {
@@ -507,6 +601,8 @@ export const HintBar = ({
     height: number
     /** How many voxels the drag in progress would destroy by landing. Zero when there is no drag. */
     losing: number
+    /** Measure's tape, or `undefined` when there is none to read — see `SpanTape`. */
+    span: Span | undefined
     /** What a pixel means at this zoom, at the size the export is set to. */
     voxel: VoxelSize
     onCapture: () => void
@@ -554,6 +650,9 @@ export const HintBar = ({
                 icon={hover.blocked.reason === 'locked' ? <MagnetIcon /> : undefined}
                 label={blockedSaid(hover.blocked, blocking)}
             />
+        :   undefined}
+        {span ?
+            <SpanHint span={span} />
         :   undefined}
         {/*
          * The cell under the cursor, and how high it is.

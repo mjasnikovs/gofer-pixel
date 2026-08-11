@@ -166,6 +166,40 @@ test('there is one cell per camera, at the sprite’s own size', async () => {
     await panel.unmount()
 })
 
+/*
+ * The two controls on a map row do different things, and the row is the only place that is said.
+ * The name previews; the tick writes. Looking at the AO map must not start writing it, and unticking
+ * the colour map must not blank the preview — they were one control for a while and that was wrong
+ * in both directions.
+ */
+test('picking a map previews it, and previewing is not the same as writing it', async () => {
+    const panel = await open()
+    const on = (): string | null => inside('.export-map[data-on]').getAttribute('data-map')
+    const caption = (): string => inside('.export-preview').textContent
+
+    expect(on()).toBe('color')
+    expect(caption()).toContain('colour ·')
+
+    const ticked = tick('ao').checked
+    await panel.act(() => {
+        press('Preview the occlusion map').click()
+    })
+    expect(on()).toBe('ao')
+    expect(caption()).toContain('occlusion ·')
+    // The tick did not move, and neither did the document.
+    expect(tick('ao').checked).toBe(ticked)
+    expect(panel.state().output.preset).toBe('Sprite Sheet (Auto)')
+
+    // A blank map is still previewable: seeing that it is black is how the artist learns why.
+    await panel.act(() => {
+        press('Preview the emission map').click()
+    })
+    expect(on()).toBe('emission')
+    expect(caption()).toContain('emission ·')
+
+    await panel.unmount()
+})
+
 test('the ticks follow the preset, and a map the preset does not name is unticked', async () => {
     const panel = await open()
     expect(tick('normal').checked).toBe(true)

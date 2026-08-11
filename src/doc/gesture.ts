@@ -11,6 +11,7 @@ import {
 } from './edits'
 import {figureCells} from './figures'
 import {commit, type History} from './history'
+import {beganSpan, type Span} from './measure'
 import {lockedIds, objectCells, ownerAt, shownVolume, type Objects} from './objects'
 import {remember} from './palette'
 import {
@@ -93,6 +94,15 @@ export interface Gesture {
     /** Non-`undefined` while a rubber band is being dragged over the picture. */
     readonly band: Band | undefined
     /**
+     * The tape between two voxels — Measure, and `doc/measure.ts` for what its numbers mean.
+     *
+     * Unlike the three above it outlives the button: `live` is what says the pointer is still down,
+     * and a settled tape stays until the next press or until a press lands on air. It is not chrome
+     * and not document — it is a gesture's own result, which is exactly the category `stroke`,
+     * `drag` and `band` are in, so it lives beside them rather than in `Chrome`.
+     */
+    readonly span: Span | undefined
+    /**
      * How many voxels the drag, as it stands right now, would destroy if it were dropped.
      *
      * Zero when nothing is being dragged. Move and clone overwrite, which is right — refusing would
@@ -135,10 +145,7 @@ export const TOOLS = [
 ] as const
 export type Tool = (typeof TOOLS)[number]
 
-/**
- * The tools that take the left button in the viewport. The rest still orbit with it, because a tool
- * that has not been built yet must not silently swallow the gesture that moves the camera.
- */
+/** The tools that take the left button in the viewport and change voxels with it. */
 export const WRITES: ReadonlySet<Tool> = new Set<Tool>(['draw', 'erase', 'fill', 'pick'])
 
 /**
@@ -158,14 +165,15 @@ export const SELECTS: ReadonlySet<Tool> = new Set<Tool>(['move', 'rotate', 'scal
  */
 export const USES_BRUSH: ReadonlySet<Tool> = new Set<Tool>(['draw', 'erase'])
 
-/**
- * Every tool that does something with the left button, and therefore every tool that owes the artist
- * a picture of what that something is before they commit to it.
+/*
+ * There is no `AIMS` set any more, and its going is the record of Measure being built.
  *
- * Measure is the only one missing, because it is not built: arming it leaves the button to the
- * camera, and previewing a gesture that does not exist would be the worst lie of the lot.
+ * It listed `WRITES` and `SELECTS`, and its comment said Measure was the one tool missing because
+ * previewing a gesture that does not exist would be the worst lie of the lot. Every tool does
+ * something with the left button now, so every tool owes the artist a picture of what that something
+ * is — and the guard that used to say so is the compiler's instead: `Tool` is a closed union and
+ * every member of it has a branch in `hoverAt` below.
  */
-const AIMS: ReadonlySet<Tool> = new Set<Tool>([...WRITES, ...SELECTS])
 
 /**
  * How many cells the overlay will draw one cube each for, before it gives up and draws the box.
@@ -260,7 +268,7 @@ export interface Stroke {
 /**
  * What kind of change the press would be, which is what the overlay draws it as.
  *
- * The kind rather than the tool, because eight tools make five kinds of promise and the overlay
+ * The kind rather than the tool, because nine tools make six kinds of promise and the overlay
  * should be answering "what is about to happen here" rather than "which button is lit". Two tools
  * that do the same thing to the voxels — Move and Rotate both pick a selection up — have no
  * business looking different before the press.
@@ -276,6 +284,15 @@ export type HoverKind =
     | 'sample'
     /** Nothing changes yet; these are the voxels the gesture takes hold of. Move, Rotate, Scale, Clone. */
     | 'grab'
+    /**
+     * Nothing changes and nothing comes out of the grid either; this voxel is one end of a tape.
+     * Measure.
+     *
+     * Its own kind rather than `sample`'s, though both only read: Pick proposes a colour and draws
+     * itself in it, and a measurement has no colour to propose. Sharing the kind would have given
+     * the tape a paint swatch it never uses.
+     */
+    | 'gauge'
 
 /**
  * Where the next click would land, computed on every pointer move that is not already a gesture.
@@ -643,9 +660,10 @@ export const hoverAt = <S extends Gesture>(state: S): S => {
     if (!event) return withHover(state, undefined)
     // A gesture owns the pointer: a stroke is already showing its own voxels, and an outline that
     // chased an orbit would be aiming at a picture that is still moving.
-    if (state.stroke || state.drag || state.band) return withHover(state, undefined)
+    if (state.stroke || state.drag || state.band || state.span?.live) {
+        return withHover(state, undefined)
+    }
     if (state.orbit.gesture !== undefined) return withHover(state, undefined)
-    if (!AIMS.has(state.tool)) return withHover(state, undefined)
     if (event.height <= 0 || event.width <= 0) return withHover(state, undefined)
     const volume = visible(state)
     const basis = basisFor(state.orbit.camera, volume, event.height)
@@ -681,6 +699,24 @@ export const hoverAt = <S extends Gesture>(state: S): S => {
             bounds: {min: cell, max: cell},
             paint: hit.value,
             blocked: hit.value === state.color ? NOTHING : undefined
+        })
+    }
+
+    /*
+     * Measure grabs the voxel the ray struck, and one of them — the brush is not consulted, because
+     * a tape has two ends and neither of them is a footprint. It can never be blocked: a lock is
+     * about what may be written and this writes nothing, and a press that lands nowhere has already
+     * returned above.
+     */
+    if (state.tool === 'measure') {
+        return withHover(state, {
+            ...at,
+            kind: 'gauge',
+            cells: [cell],
+            region: undefined,
+            bounds: {min: cell, max: cell},
+            paint: undefined,
+            blocked: undefined
         })
     }
 
@@ -1047,6 +1083,56 @@ const beginSelect = <S extends Gesture>(state: S, event: ViewportPointer): S => 
     })
 }
 
+/**
+ * One end of a tape, put down — `doc/measure.ts` for what the tape then says.
+ *
+ * The only gesture in this file with no draft behind it, because Measure is the only tool that
+ * changes nothing. It picks the voxel the ray struck rather than the empty cell in front of it: the
+ * artist is measuring the model, and the gap in front of a face is not part of it.
+ *
+ * **A press that lands on air or on the floor puts the tape away.** That is the one way to be rid of
+ * one, and it is the reading `endBand` already gives a click on nothing — a press over the model is
+ * a new measurement, so without this a tape could be replaced but never cleared.
+ */
+const beginSpan = <S extends Gesture>(state: S, event: ViewportPointer): S => {
+    if (event.height <= 0 || event.width <= 0) return state
+    const volume = visible(state)
+    const basis = basisFor(state.orbit.camera, volume, event.height)
+    const hit = pick(volume, basis, event.x, event.y, event.width, event.height)
+    if (!hit || hit.value === 0) {
+        return state.span === undefined ? state : changed(state, {span: undefined})
+    }
+    return changed(state, {span: beganSpan([hit.x, hit.y, hit.z])})
+}
+
+/**
+ * The far end of the tape, following the cursor.
+ *
+ * A move whose ray misses the model leaves it where it was, rather than snapping to nothing. The
+ * silhouette of a voxel model is full of gaps — between legs, through a window — and a reading that
+ * collapsed to `1 × 1 × 1` every time the cursor crossed one would flicker through the whole drag.
+ * The same rule `continueStroke` applies when its ray misses its own plane.
+ */
+const continueSpan = <S extends Gesture>(state: S, event: ViewportPointer): S => {
+    const {span} = state
+    if (!span) return state
+    if (event.height <= 0 || event.width <= 0) return state
+    const volume = visible(state)
+    const basis = basisFor(state.orbit.camera, volume, event.height)
+    const hit = pick(volume, basis, event.x, event.y, event.width, event.height)
+    if (!hit || hit.value === 0) return state
+    const {to} = span
+    if (hit.x === to[0] && hit.y === to[1] && hit.z === to[2]) return state
+    return changed(state, {span: {...span, to: [hit.x, hit.y, hit.z]}})
+}
+
+/** The button up. The tape stays — see `Span.live`, which is the whole of what changes here. */
+const endSpan = <S extends Gesture>(state: S): S => {
+    const {span} = state
+    if (!span) return state
+    return changed(state, {span: {...span, live: false}})
+}
+
 const AXIS_KEYS = ['x', 'y', 'z'] as const
 
 /**
@@ -1258,6 +1344,9 @@ export const pointerAt = <S extends Gesture>(state: S, event: ViewportPointer): 
         if (event.button !== 0 || event.shift) return camera
         if (WRITES.has(seen.tool)) return {state: beginStroke(seen, event), took: true}
         if (SELECTS.has(seen.tool)) return {state: beginSelect(seen, event), took: true}
+        // One tool, so a set of one would say less than the name does. Measure is not in `WRITES`
+        // or `SELECTS` because it neither writes voxels nor chooses any.
+        if (seen.tool === 'measure') return {state: beginSpan(seen, event), took: true}
         return camera
     }
 
@@ -1270,6 +1359,11 @@ export const pointerAt = <S extends Gesture>(state: S, event: ViewportPointer): 
     }
     if (seen.drag) {
         return {state: moving ? continueDrag(seen, event) : endDrag(seen), took: true}
+    }
+    // `live`, not merely present: the tape outlives its own gesture, and a settled one must not go
+    // on eating every pointer move that crosses the model.
+    if (seen.span?.live) {
+        return {state: moving ? continueSpan(seen, event) : endSpan(seen), took: true}
     }
     return camera
 }
@@ -1300,6 +1394,9 @@ export const changedAim = (before: Gesture, after: Gesture): boolean =>
     || before.stroke !== after.stroke
     || before.drag !== after.drag
     || before.band !== after.band
+    // For its `live` flag, which gates the outline the same way the three above do — and for the
+    // press that clears a tape, which has to give the voxel under the cursor its outline back.
+    || before.span !== after.span
     // The grab tools read it: a press on a voxel that is already selected keeps the whole selection
     // rather than collapsing to that one cell, so what is outlined changes when the selection does.
     || before.selection !== after.selection

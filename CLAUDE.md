@@ -37,28 +37,28 @@ is new.
 
 What is there now, and roughly in dependency order:
 
-| Path                | Holds                                                                            |
-| ------------------- | -------------------------------------------------------------------------------- |
-| `src/render/`       | the CPU raycaster, the shader it is mirrored by, the camera, the WebGL2 renderer |
-| `src/render/light`  | the sun and the ambient floor, as the six-face table both backends multiply by   |
-| `src/vox/`          | `.vox` → `Volume`                                                                |
-| `src/doc/`          | cameras, the brush, edits, undo, selection, transforms, symmetry, figures        |
-| `src/doc/gesture`   | what the pointer does to voxels: aiming, strokes, drags, and the outline         |
-| `src/doc/files`     | the `.gpix` save format, the disk behind a port, and the new-project templates   |
-| `src/sheet/`        | packing cameras into the eight output sheets, and which of them would be blank   |
-| `src/image/`        | PNG encoding                                                                     |
-| `src/viewport/`     | orbit/pan/zoom as a pure function, and the React canvas                          |
-| `src/app/`          | the whole app as one value and one `reduce`, plus the panels that show it        |
-| `src/app/session`   | New, Open, Save, the palette, the picture drop — every path to the artist's disk |
-| `src/app/keys`      | every keyboard shortcut, as one table                                            |
-| `src/app/overlay`   | projection, the ground lattice and the ghost's meshes — no SVG in it             |
-| `src/gen/`          | the local-AI pipeline: prompt → primitives → voxels, and the two scorers         |
-| `src/gen/batch`     | one batch end to end: generate, score, name, rank — the dialog just draws it     |
-| `src/gen/reference` | the artist's own model as the example the next batch is taught from              |
-| `src/gen/teaching`  | which examples teach a batch, in what order, within what line budget             |
-| `src/theme/`        | `theme.ts` and the CSS it generates; never edit the CSS                          |
-| `py/`               | `clipserve.py`, the CLIP scoring service. Optional, started by hand              |
-| `browser/`          | the Playwright suite and the page it drives                                      |
+| Path                | Holds                                                                               |
+| ------------------- | ----------------------------------------------------------------------------------- |
+| `src/render/`       | the CPU raycaster, the shader it is mirrored by, the camera, the WebGL2 renderer    |
+| `src/render/light`  | the sun and the ambient floor, as the six-face table both backends multiply by      |
+| `src/vox/`          | `.vox` → `Volume`                                                                   |
+| `src/doc/`          | cameras, the brush, edits, undo, selection, transforms, symmetry, figures, the tape |
+| `src/doc/gesture`   | what the pointer does to voxels: aiming, strokes, drags, and the outline            |
+| `src/doc/files`     | the `.gpix` save format, the disk behind a port, and the new-project templates      |
+| `src/sheet/`        | packing cameras into the eight output sheets, and which of them would be blank      |
+| `src/image/`        | PNG encoding                                                                        |
+| `src/viewport/`     | orbit/pan/zoom as a pure function, and the React canvas                             |
+| `src/app/`          | the whole app as one value and one `reduce`, plus the panels that show it           |
+| `src/app/session`   | New, Open, Save, the palette, the picture drop — every path to the artist's disk    |
+| `src/app/keys`      | every keyboard shortcut, as one table                                               |
+| `src/app/overlay`   | projection, the ground lattice and the ghost's meshes — no SVG in it                |
+| `src/gen/`          | the local-AI pipeline: prompt → primitives → voxels, and the two scorers            |
+| `src/gen/batch`     | one batch end to end: generate, score, name, rank — the dialog just draws it        |
+| `src/gen/reference` | the artist's own model as the example the next batch is taught from                 |
+| `src/gen/teaching`  | which examples teach a batch, in what order, within what line budget                |
+| `src/theme/`        | `theme.ts` and the CSS it generates; never edit the CSS                             |
+| `py/`               | `clipserve.py`, the CLIP scoring service. Optional, started by hand                 |
+| `browser/`          | the Playwright suite and the page it drives                                         |
 
 ## The renderer
 
@@ -174,11 +174,12 @@ Neither service is required to open the app. With llama-server down the menu ite
 that says so and disables its one button; with `clipserve.py` down the batch ranks on the built-in
 scores.
 
-## Twenty seams worth knowing about
+## Twenty-one seams worth knowing about
 
-The app layer is deliberately thin, and twenty modules under it hold what would otherwise be spread
-through React callbacks and reducer cases. Each one was pulled out because its rules could only be
-tested by mounting something, or by building a whole `AppState` to ask a question about four fields.
+The app layer is deliberately thin, and twenty-one modules under it hold what would otherwise be
+spread through React callbacks and reducer cases. Each one was pulled out because its rules could
+only be tested by mounting something, or by building a whole `AppState` to ask a question about four
+fields.
 
 - **`src/doc/gesture.ts`** — every pointer gesture, over a `Gesture` interface that `AppState`
   extends. Eighteen fields, not fifty. It replaces two hand-written lists of the same field names
@@ -246,6 +247,31 @@ tested by mounting something, or by building a whole `AppState` to ask a questio
     the running app, the button computed `rgb(197, 189, 243)` while `--color-text-accent` in that
     same header read `#a08cf6`. The button keeps its ghost face rather than taking
     `variant='primary'`, because Export is the one filled button in the window.
+
+- **`src/doc/measure.ts`** — the tape between two voxels, and the only decision Measure has in it.
+  The tool was a greyed button in the rail for as long as it was not built, with a tooltip saying
+  the left button still turned the view; it is `beginSpan`/`continueSpan`/`endSpan` in `gesture.ts`,
+  a `gauge` hover kind, `spanMesh` in `overlay.ts` and a `Span` hint in the bar. **It is the one
+  tool on the rail with no draft behind it**, so nothing downstream holds it honest — no
+  `writeBlock`, no history, no golden hash — which is why the arithmetic is a module with its own
+  tests instead of two lines in a component.
+
+    Three things are deliberate. **The size counts both ends and the diagonal does not**: grabbing
+    the bottom voxel of a four-tall leg and dragging to the top one reads 4, because 4 is what an
+    artist counts, while the centre-to-centre distance is a length and a `+ 1` on it would be
+    arithmetic about nothing. The two are counted differently on purpose and the hint bar's tooltip
+    is where that is said out loud. **The tape outlives the button**, because reading it is the
+    whole gesture — a settled one is `live: false`, which is also what stops it eating every pointer
+    move that crosses the model afterwards. And **only Measure draws it**: it stays on the state
+    across a tool change, so coming back finds the measurement where it was, but a ruler lying over
+    the model through every stroke of a session is clutter. That last rule is a `const` in
+    `Stage.tsx`, because the overlay and the bar both need the same answer.
+
+    A press on air puts the tape away, which is the same reading `endBand` gives a click on nothing
+    and the only way to be rid of one — a press over the model is always a new measurement, never a
+    clearing. There is no Escape binding: `keyAction` takes one boolean of document state on
+    purpose, and Escape already means "drop the selection", which is a different thing to be
+    holding.
 
 - **`src/render/perfect.ts`** — whether a voxel lands on whole pixels, and at which zooms it would.
   `FEATURESET.md` §14 words the rule as "integer zoom" and **that is the wrong invariant**: zoom is
@@ -494,10 +520,10 @@ file dialogs, the guard in front of them, and the one live viewport.
 Before reaching for a mount, check whether the thing under test has a seam already: `state.ts`,
 `gesture.ts`, `session.ts`, `keys.ts`, `batch.ts`, `connect.ts`, `doc/reference.ts`,
 `gen/reference.ts`, `teaching.ts`, `overlay.ts`, `views.ts`, `presets.ts`, `store.ts`, `export.ts`,
-`history.ts`, `ask.ts`, `choice.ts`, `empty.ts` and `render/light.ts` all answer their own questions
-in single-digit milliseconds, and they exist because the answers used to cost a window. If it is one
-panel and a real reducer, that is `test/panel.tsx` — and the stage is a panel by that definition, so
-`Stage.test.tsx` mounts it there rather than mounting a window.
+`history.ts`, `ask.ts`, `choice.ts`, `empty.ts`, `doc/measure.ts` and `render/light.ts` all answer
+their own questions in single-digit milliseconds, and they exist because the answers used to cost a
+window. If it is one panel and a real reducer, that is `test/panel.tsx` — and the stage is a panel
+by that definition, so `Stage.test.tsx` mounts it there rather than mounting a window.
 
 ## Conventions
 

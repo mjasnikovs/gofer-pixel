@@ -9,6 +9,7 @@ import {initialObjects, shownVolume} from './objects'
 import type {Volume} from '../render/volume'
 import {EMPTY_SELECTION} from './selection'
 import {NO_SYMMETRY} from './symmetry'
+import {beganSpan, measured} from './measure'
 import {
     changedAim,
     forgetAim,
@@ -55,18 +56,26 @@ const fresh = (): Gesture => ({
     stroke: undefined,
     drag: undefined,
     band: undefined,
+    span: undefined,
     losing: 0,
     aim: undefined,
     hover: undefined
 })
 
-/** A pixel the model actually covers, so a ray from it hits something. */
-const onModel = (state: Gesture): {x: number; y: number} => {
+/**
+ * A pixel the model actually covers, so a ray from it hits something.
+ *
+ * `through` is how far down the list of covered pixels to take, so a test that needs two of them
+ * can ask for two far apart. It is not a screen direction: the list is row-major, and the middle of
+ * it landed 13 px from the right edge of a 64 px frame — a drag rightwards from there left the model
+ * on its first step and the reading held still, correctly, for the whole test.
+ */
+const onModel = (state: Gesture, through = 0.5): {x: number; y: number} => {
     const basis = basisFor(state.orbit.camera, state.volume, SIZE)
     const {id} = render(state.volume, basis, SIZE, SIZE)
     const hits: number[] = []
     for (let i = 0; i < id.length; i += 1) if ((id[i] ?? 0) !== 0) hits.push(i)
-    const index = hits[Math.floor(hits.length / 2)] ?? 0
+    const index = hits[Math.floor(hits.length * through)] ?? 0
     return {x: index % SIZE, y: Math.floor(index / SIZE)}
 }
 
@@ -138,12 +147,107 @@ test('the camera keeps every press a tool did not want', () => {
     expect(pointerAt(state, pointer('down', x, y, {button: 1})).took).toBe(false)
     expect(pointerAt(state, pointer('down', x, y, {button: 2})).took).toBe(false)
 
-    // And a tool that is not built takes nothing, rather than silently swallowing the gesture.
+    // Measure too, which is the tool with the least to lose from swallowing a drag and still may
+    // not: its own gesture is the left button, so the camera has to keep the other three.
     const measuring: Gesture = {...state, tool: 'measure'}
-    expect(pointerAt(measuring, pointer('down', x, y)).took).toBe(false)
+    expect(pointerAt(measuring, pointer('down', x, y, {shift: true})).took).toBe(false)
+    expect(pointerAt(measuring, pointer('down', x, y, {button: 2})).took).toBe(false)
 
     // Every one of them still re-aims: an event the camera took is still a sighting of the pointer.
-    expect(pointerAt(measuring, pointer('down', x, y)).state.aim).toBeDefined()
+    expect(pointerAt(measuring, pointer('down', x, y, {button: 2})).state.aim).toBeDefined()
+})
+
+/*
+ * Measure — the one tool with no draft behind it, so nothing but these tests holds it to what it
+ * claims. See `doc/measure.ts` for why the size counts both ends and the diagonal does not.
+ */
+
+test('a tape spans two voxels, stays up after the button, and reads both ends inclusive', () => {
+    const state: Gesture = {...fresh(), tool: 'measure'}
+    const {x, y} = onModel(state)
+
+    const down = pointerAt(state, pointer('down', x, y))
+    expect(down.took).toBe(true)
+    const from = down.state.span?.from
+    expect(from).toBeDefined()
+    // A press that has not moved is a tape of one voxel, which is one voxel across on every axis.
+    expect(down.state.span?.to).toEqual(from ?? [-1, -1, -1])
+    expect(measured(down.state.span ?? beganSpan([0, 0, 0])).size).toEqual([1, 1, 1])
+    expect(down.state.span?.live).toBe(true)
+
+    // Nothing it does touches the grid or the history — it is the only tool on the rail that reads.
+    const up = pointerAt(down.state, pointer('up', x, y)).state
+    expect(up.volume).toBe(state.volume)
+    expect(up.history.past).toHaveLength(0)
+    // And the tape stays: reading it is the gesture, and one that vanished on release would have to
+    // be held in the head.
+    expect(up.span?.live).toBe(false)
+    expect(up.span?.from).toEqual(from ?? [-1, -1, -1])
+})
+
+test('a settled tape stops eating the pointer, and a press on air puts it away', () => {
+    const state: Gesture = {...fresh(), tool: 'measure'}
+    const {x, y} = onModel(state)
+    const settled = pointerAt(
+        pointerAt(state, pointer('down', x, y)).state,
+        pointer('up', x, y)
+    ).state
+    expect(settled.span).toBeDefined()
+
+    // The move after the release belongs to nobody, so the camera gets it. A tape that went on
+    // taking moves would have made the model unturnable for the rest of the session.
+    const wandered = pointerAt(settled, pointer('move', x + 4, y + 4))
+    expect(wandered.took).toBe(false)
+    expect(wandered.state.span).toBe(settled.span)
+
+    // A corner of the frame is air. The same reading `endBand` gives a click on nothing, and the
+    // only way to be rid of a tape — a press over the model is a new one, never a clearing.
+    const cleared = pointerAt(settled, pointer('down', 0, 0))
+    expect(cleared.took).toBe(true)
+    expect(cleared.state.span).toBeUndefined()
+})
+
+test('the far end follows the cursor and holds still when the ray leaves the model', () => {
+    const state: Gesture = {...fresh(), tool: 'measure'}
+    const near = onModel(state, 0.1)
+    const far = onModel(state, 0.9)
+    const down = pointerAt(state, pointer('down', near.x, near.y)).state
+
+    // Somewhere else on the model: both ends are real voxels, so the tape has grown on some axis.
+    const dragged = pointerAt(down, pointer('move', far.x, far.y))
+    expect(dragged.took).toBe(true)
+    const reached = dragged.state.span
+    expect(reached?.from).toEqual(down.span?.from ?? [-1, -1, -1])
+    expect(measured(reached ?? beganSpan([0, 0, 0])).size).not.toEqual([1, 1, 1])
+
+    // Off the model entirely. It holds where it was rather than collapsing: the silhouette of a
+    // voxel model is full of gaps — between legs, through a window — and a reading that snapped
+    // through 1 × 1 × 1 at every one of them would flicker for the whole drag.
+    const missed = pointerAt(dragged.state, pointer('move', 0, 0))
+    expect(missed.took).toBe(true)
+    expect(missed.state.span).toBe(reached)
+})
+
+test('the tape outlines the voxel a press would grab, and never blocks', () => {
+    const state: Gesture = {...fresh(), tool: 'measure'}
+    const {x, y} = onModel(state)
+    const aimed = hoverAt({...state, aim: pointer('move', x, y)})
+
+    // Its own kind, because a measurement proposes no paint — see `HoverKind`.
+    expect(aimed.hover?.kind).toBe('gauge')
+    expect(aimed.hover?.paint).toBeUndefined()
+    // A lock is about what may be written and this writes nothing, so there is no silent press.
+    expect(aimed.hover?.blocked).toBeUndefined()
+
+    // The voxel the ray struck, and the press takes that same one. Measure is like Erase in this:
+    // the empty cell in front of a face is not part of the model and not worth measuring.
+    const cell = aimed.hover?.cells[0]
+    expect(aimed.hover?.cells).toHaveLength(1)
+    expect(pointerAt(aimed, pointer('down', x, y)).state.span?.from).toEqual(cell ?? [-1, -1, -1])
+
+    // And a gesture in progress owns the pointer, so the outline gets out of the way while it runs.
+    const live = pointerAt(aimed, pointer('down', x, y)).state
+    expect(hoverAt(live).hover).toBeUndefined()
 })
 
 test('a stroke in progress owns the pointer, and cannot be re-armed halfway through', () => {

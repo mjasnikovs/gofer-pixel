@@ -5,7 +5,7 @@ import type {Dispatch} from 'react'
 import {canRedo, canUndo} from '../doc/history'
 import {countVoxels} from '../vox/vox-file'
 import {MoreMenu} from '@astryxdesign/core/MoreMenu'
-import {RedoIcon, SlidersIcon, SunIcon, UndoIcon} from './icons'
+import {RedoIcon, SunIcon, UndoIcon} from './icons'
 import type {AppAction, AppState} from './state'
 
 /**
@@ -33,6 +33,14 @@ import type {AppAction, AppState} from './state'
  * dialog already previews all eight, so the only thing it would have added is orbiting while you
  * look at one. That is not worth a control in the title bar, and a promise nobody is keeping reads
  * as a missing feature rather than a postponed one.
+ *
+ * A Viewport settings gear was the last of those, and it went for a different reason: not that it
+ * promised too much, but that it had nothing left to hold. Grid, edges, snap and invert are switches
+ * in the tool rail; the sun is the button beside it; the ring pitch is a badge on the views strip;
+ * the map and the preview size are the renders panel, and the viewport follows the first of them;
+ * the frame rate is in the timeline. Every one of them already sits next to the thing it changes,
+ * which is where a viewport setting belongs. Reopening it here would be a second place to change
+ * each, and two controls over one field disagree the first time one of them is missed.
  */
 /**
  * Restore-point labels, guaranteed distinct.
@@ -117,14 +125,6 @@ export const Header = ({
         </div>
 
         <div className='header-group header-end'>
-            <IconButton
-                label='Viewport settings'
-                tooltip='Viewport settings'
-                icon={<SlidersIcon />}
-                size='sm'
-                variant='ghost'
-                isDisabled
-            />
             <IconButton
                 label='Undo'
                 tooltip={

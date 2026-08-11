@@ -218,6 +218,47 @@ export const floorOf = (volume: Volume, camera: Camera): Floor => {
     return {fine, ground, middle, inner, outer, silhouette, step, coarse}
 }
 
+/** The tape between two voxels, projected — see `doc/measure.ts`. */
+export interface SpanMesh {
+    /** The twelve edges of the box the two ends span. */
+    readonly edges: readonly Segment[]
+    /** Centre to centre, which is the diagonal the reading names. */
+    readonly line: Segment
+}
+
+/**
+ * Measure's tape, as geometry.
+ *
+ * Two drawings rather than one, because the reading is two numbers. The box is the size — three
+ * whole-voxel spans an artist can count along — and the line is the diagonal, which is a length and
+ * lies inside that box rather than along any edge of it.
+ *
+ * The line runs `from` to `to` and not `min` to `max`, and the difference is real: a drag towards
+ * the origin puts the two ends on the *other* diagonal of the same box. Drawing the box's own
+ * would show the artist a line they did not make.
+ *
+ * The box arrives already worked out rather than being derived here, so this file keeps its rule —
+ * nothing in the overlays owns arithmetic about the document, and what a span measures is
+ * `measured`'s answer once.
+ */
+export const spanMesh = (
+    ends: {readonly from: Cell; readonly to: Cell},
+    box: {readonly min: Cell; readonly max: Cell},
+    camera: Camera,
+    volume: Volume
+): SpanMesh => {
+    const project = projector(camera, volume)
+    const flat = boxCorners(box.min, box.max).map(project)
+    const edges: Segment[] = []
+    for (const [from, to] of BOX_EDGES) {
+        const a = flat[from]
+        const b = flat[to]
+        if (a && b) edges.push({a, b})
+    }
+    const middle = (cell: Cell): Vec3 => [cell[0] + 0.5, cell[1] + 0.5, cell[2] + 0.5]
+    return {edges, line: {a: project(middle(ends.from)), b: project(middle(ends.to))}}
+}
+
 /** The three axes, and for each the two it spreads over. Typed so indexing a cell stays a number. */
 type Axis3 = 0 | 1 | 2
 const AXES3: readonly Axis3[] = [0, 1, 2]

@@ -98,6 +98,7 @@ import {
     type Stroke,
     type Tool
 } from '../doc/gesture'
+import {measured, type Measured, type Span} from '../doc/measure'
 import {apply as applyOrbit, type OrbitEvent, type ViewportPointer} from '../viewport/orbit'
 
 /**
@@ -124,8 +125,8 @@ import {apply as applyOrbit, type OrbitEvent, type ViewportPointer} from '../vie
  */
 export {MAX_BRUSH, SHAPES}
 export type {Brush, Shape}
-export {GHOST_CELLS, previewVolume, slicedFor, TOOLS, USES_BRUSH}
-export type {Band, Blocked, Drag, Hover, HoverKind, Stroke, Tool}
+export {GHOST_CELLS, measured, previewVolume, slicedFor, TOOLS, USES_BRUSH}
+export type {Band, Blocked, Drag, Hover, HoverKind, Measured, Span, Stroke, Tool}
 
 /**
  * What the floating bar over a selection can do — `FEATURESET.md` §9, plus delete and recolour.
@@ -441,6 +442,7 @@ export const initialState = (source: Volume, name: string, opened?: OpenedDocume
         selection: EMPTY_SELECTION,
         band: undefined,
         drag: undefined,
+        span: undefined,
         losing: 0,
         aim: undefined,
         hover: undefined,

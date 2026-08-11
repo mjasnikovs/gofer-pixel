@@ -350,8 +350,9 @@ test('the brush reaches Draw and Erase and no other tool', () => {
         }
     }
 
-    // Measure is the one tool with no outline at all, because it is not built.
-    expect(footprint('measure', 1)).toBeUndefined()
+    // Measure is one voxel whatever the brush says, which the loop above already covers — it is
+    // spelled out because it is the one tool whose footprint is not a footprint but an end of a tape.
+    expect(footprint('measure', 5)).toBe(1)
     // And the shape reaches the same two: a round size-5 brush is fewer cells than a square one.
     const round = {
         ...armed('draw'),
@@ -562,9 +563,11 @@ test('the camera is still reachable with a writing tool armed', () => {
     const panned = reduce(state, at('down', column, row, {shift: true}))
     expect(panned.orbit.gesture?.mode).toBe('pan')
 
-    // A tool with no pointer behaviour yet leaves the left button to the camera.
-    const measuring = reduce(armed('measure'), at('down', column, row))
+    // Measure takes the left button now, so the camera reaches it the way it reaches every other
+    // armed tool: the right button, and Shift.
+    const measuring = reduce(armed('measure'), at('down', column, row, {button: 2}))
     expect(measuring.orbit.gesture?.mode).toBe('orbit')
+    expect(measuring.span).toBeUndefined()
 })
 
 test('drawing on empty space lands on the floor of the grid, not nowhere', () => {
@@ -703,6 +706,37 @@ test('the rotate tool turns what it grabbed, a quarter for every drag of the han
     const done = reduce(turned, at('up', column + 48, row))
     expect(done.drag).toBeUndefined()
     expect(done.history.past).toHaveLength(1)
+})
+
+/*
+ * The other half of "a turn is a bijection". A model that cannot fit its own turn has to come back
+ * exactly where it was, rather than come back a slice thinner — the same refusal the keyboard
+ * transform makes, and the reason the drag works on a throwaway draft.
+ */
+test('a turn that would fall off the grid is refused whole, not clipped', () => {
+    // 16 × 8 × 4 filled solid: every one of the three axes swaps a long extent into a short one, so
+    // it is unturnable whichever face the press happens to grab.
+    const slab = createVolume(16, 8, 4, volume.palette)
+    slab.data.fill(1)
+    const state = reduce(initialState(slab, 'slab.gpix'), {type: 'tool', tool: 'rotate'})
+    const {column, row} = onModel(state)
+
+    const down = reduce(state, at('down', column, row, {clicks: 2}))
+    expect(down.drag?.kind).toBe('turn')
+    expect(down.selection.size).toBe(16 * 8 * 4)
+
+    // Past the threshold, both ways, and near and far. Nothing moves and nothing is lost.
+    for (const dx of [48, 96, -48, -320]) {
+        const turned = reduce(down, at('move', column + dx, row))
+        expect(turned.volume).toBe(state.volume)
+        expect(turned.selection).toBe(down.selection)
+        expect(occupied(turned.volume)).toBe(16 * 8 * 4)
+    }
+
+    // And letting go of a refused turn is not an edit: there is nothing to undo.
+    const done = reduce(reduce(down, at('move', column + 96, row)), at('up', column + 96, row))
+    expect(done.drag).toBeUndefined()
+    expect(done.history.past).toHaveLength(0)
 })
 
 test('Control adds to the selection instead of replacing it', () => {
@@ -1024,6 +1058,27 @@ test('a stroke joins the active object, and a new object is where the next one g
     expect(objectCells(drawn.volume, 2).size).toBe(4)
     // Undo takes the ownership back with the voxels.
     expect(objectCells(reduce(drawn, {type: 'undo'}).volume, 2).size).toBe(0)
+})
+
+/*
+ * The one object op with no `doc/objects.ts` call behind it — `active` is a field assignment in the
+ * reducer, so this is where it is stated. Choosing a row is not an edit: it changes where the next
+ * stroke lands and nothing that is already on the grid.
+ */
+test('choosing an object is where the next stroke goes, and is not an edit', () => {
+    const state = reduce(armed('draw'), {type: 'object', op: {kind: 'add'}})
+    expect(state.objects.active).toBe(2)
+
+    const back = reduce(state, {type: 'object', op: {kind: 'active', id: 1}})
+    expect(back.objects.active).toBe(1)
+    expect(back.history.past).toEqual(state.history.past)
+    expect(back.doc.dirty).toBe(state.doc.dirty)
+    expect(back.volume).toBe(state.volume)
+
+    const {column, row} = onModel(back)
+    const drawn = reduce(reduce(back, at('down', column, row)), at('up', column, row))
+    expect(objectCells(drawn.volume, 1).size).toBe(objectCells(back.volume, 1).size + 4)
+    expect(objectCells(drawn.volume, 2).size).toBe(0)
 })
 
 test('hiding an object takes it out of what is drawn, picked and exported', () => {
@@ -1547,19 +1602,11 @@ test('with erase armed the viewport is handed the hole, and every other tool the
 })
 
 test('every tool that does something says what, before the press', () => {
-    const live: readonly Tool[] = [
-        'draw',
-        'erase',
-        'fill',
-        'pick',
-        'move',
-        'rotate',
-        'scale',
-        'clone'
-    ]
+    // Every tool, which is the point: the set that used to be here left Measure out because it was
+    // not built, and a tool that does something with the left button owes the artist a picture of it.
     const {column, row} = onModel(fresh())
 
-    for (const tool of live) {
+    for (const tool of TOOLS) {
         const aimed = reduce(armed(tool), at('move', column, row))
         const hover = aimed.hover
         if (!hover) throw new Error(`${tool} has an answer with the pointer on the model`)
@@ -1567,12 +1614,9 @@ test('every tool that does something says what, before the press', () => {
         expect(hover.cells.length > 0 || hover.bounds !== undefined).toBe(true)
         expect(hover.blocked).toBeUndefined()
     }
-
-    // Measure is not built, and a preview of a gesture that does not exist is the worst lie of all.
-    expect(reduce(armed('measure'), at('move', column, row)).hover).toBeUndefined()
 })
 
-test('the five kinds say what happens to the voxels, not which button is lit', () => {
+test('the six kinds say what happens to the voxels, not which button is lit', () => {
     const {column, row} = onModel(fresh())
     const kindOf = (tool: Tool): string | undefined =>
         reduce(armed(tool), at('move', column, row)).hover?.kind
@@ -1581,6 +1625,14 @@ test('the five kinds say what happens to the voxels, not which button is lit', (
     expect(kindOf('erase')).toBe('clear')
     expect(kindOf('fill')).toBe('recolour')
     expect(kindOf('pick')).toBe('sample')
+    /*
+     * Measure's own kind, not Pick's, even though both only read. Pick sets `hover.paint` and the
+     * ghost draws itself in the colour it is about to take; a measurement has no colour to propose,
+     * and while it shared the default it wore Draw's translucent wash in the *loaded* paint — a
+     * write promised by the one tool that cannot make one.
+     */
+    expect(kindOf('measure')).toBe('gauge')
+    expect(reduce(armed('measure'), at('move', column, row)).hover?.paint).toBeUndefined()
     // Four tools, one promise: these voxels are about to be taken hold of.
     for (const tool of ['move', 'rotate', 'scale', 'clone'] as const)
         expect(kindOf(tool)).toBe('grab')

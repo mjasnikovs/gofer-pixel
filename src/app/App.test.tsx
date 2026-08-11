@@ -515,6 +515,109 @@ test('Save first, then backing out of the picker, is not a silent Discard', asyn
     await unmount(mounted)
 })
 
+/**
+ * Escape, where astryx listens for it: on the `<dialog>` element itself, not on the window.
+ *
+ * It bubbles, so the app's own keyboard table sees it too — which is the point. Escape already
+ * means "drop the selection", and a dialog on screen has to win.
+ */
+const escape = async (): Promise<void> => {
+    const open = [...global.document.querySelectorAll<HTMLElement>('dialog[open]')].at(-1)
+    if (!open) throw new Error('no dialog is open')
+    await act(async () => {
+        open.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}))
+    })
+}
+
+/** The × in the corner of whichever dialog is open. */
+const closeCorner = (): HTMLElement => {
+    const open = [...global.document.querySelectorAll<HTMLElement>('dialog[open]')].at(-1)
+    const found = [...(open?.querySelectorAll<HTMLElement>('button') ?? [])].find(node =>
+        (node.getAttribute('aria-label') ?? '').toLowerCase().includes('close')
+    )
+    if (!found) throw new Error('the open dialog has no close button')
+    return found
+}
+
+/*
+ * The fourth answer to the guard, and the one nothing was asserting: leaving without answering. It
+ * is Cancel's answer, and it has to stay Cancel's answer through both of the routes a dialog can be
+ * dismissed by — otherwise Escape over the guard is a silent Discard, which is the one outcome the
+ * guard exists to prevent.
+ */
+test('Escape and the × back out of the guard without answering it', async () => {
+    const disk = new Map<string, string>()
+    const mounted = await mount(memoryStore(), memoryFiles(disk))
+
+    await guard(mounted.host)
+    await escape()
+    expect(openDialogTitle()).toBe('')
+    expect(disk.size).toBe(0)
+    expect(handle.state?.doc.dirty).toBe(true)
+
+    await guard(mounted.host)
+    await act(async () => {
+        closeCorner().click()
+    })
+    expect(openDialogTitle()).toBe('')
+    expect(disk.size).toBe(0)
+    expect(handle.state?.doc.dirty).toBe(true)
+
+    await unmount(mounted)
+})
+
+test('Escape and the × back out of New project without building one', async () => {
+    const mounted = await mount(memoryStore(), memoryFiles())
+    const before = handle.state?.volume
+
+    const openNew = async (): Promise<void> => {
+        await act(async () => {
+            control(mounted.host, 'Main menu').click()
+        })
+        await act(async () => {
+            menuItem('New project…').click()
+        })
+        expect(openDialogTitle()).toBe('New project')
+    }
+
+    await openNew()
+    await escape()
+    expect(openDialogTitle()).toBe('')
+    expect(handle.state?.volume).toBe(before)
+
+    await openNew()
+    await act(async () => {
+        closeCorner().click()
+    })
+    expect(openDialogTitle()).toBe('')
+    expect(handle.state?.volume).toBe(before)
+
+    await unmount(mounted)
+})
+
+test('Escape and the × close the export dialog, which writes nothing on the way out', async () => {
+    const disk = new Map<string, string | Uint8Array>()
+    const mounted = await mount(memoryStore(), memoryFiles(disk))
+
+    await act(async () => {
+        control(mounted.host, 'Export').click()
+    })
+    expect(openDialogTitle()).toBe('Export')
+    await escape()
+    expect(openDialogTitle()).toBe('')
+
+    await act(async () => {
+        control(mounted.host, 'Export').click()
+    })
+    await act(async () => {
+        closeCorner().click()
+    })
+    expect(openDialogTitle()).toBe('')
+    expect(disk.size).toBe(0)
+
+    await unmount(mounted)
+})
+
 test('a typed custom size is the box that gets built', async () => {
     const mounted = await mount(memoryStore(), memoryFiles())
     await act(async () => {

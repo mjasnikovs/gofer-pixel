@@ -168,3 +168,50 @@ test('the voxel size is the orbit camera against the export size, and both halve
 
     await panel.unmount()
 })
+
+/**
+ * Measure end to end over the real reducer: the drag, the tape drawn over the model, and the
+ * reading in the bar.
+ *
+ * The claim that needs a mount rather than `gesture.test.ts` is the last one in it — a settled tape
+ * is on the state whatever tool is armed, and only Measure draws it. That rule is a `const` in
+ * `Stage.tsx` and nothing below the seam knows about it.
+ */
+test('a measure drag puts a tape over the model, and only Measure shows it', async () => {
+    const panel = await open()
+    const tape = (): Element | null => panel.host.querySelector('.span-tape')
+    const at = onModel(panel)
+
+    await panel.dispatch({type: 'tool', tool: 'measure'})
+    expect(tape()).toBeNull()
+    expect(hint(panel)).not.toContain('Span')
+
+    await panel.dispatch({type: 'pointer', event: {...at, type: 'down'}})
+    await panel.dispatch({type: 'pointer', event: {...at, type: 'up'}})
+
+    // Nothing was written — it is the one tool on the rail that reads the model rather than editing.
+    expect(panel.state().history.past).toHaveLength(0)
+    expect(tape()).not.toBeNull()
+    // A press that has not been dragged is one voxel, and one voxel is one voxel across.
+    expect(hint(panel)).toContain('1 × 1 × 1')
+
+    /*
+     * Armed away, the tape is still on the state and no longer on screen. It is a reading, and
+     * there is nothing to read while the hand is drawing — but an artist who measured a leg and
+     * armed Draw has not thrown the measurement away, so coming back finds it where it was.
+     */
+    await panel.dispatch({type: 'tool', tool: 'draw'})
+    expect(panel.state().span).toBeDefined()
+    expect(tape()).toBeNull()
+    expect(hint(panel)).not.toContain('Span')
+
+    await panel.dispatch({type: 'tool', tool: 'measure'})
+    expect(tape()).not.toBeNull()
+
+    // A press on air is the way to be rid of one — a press over the model is a new measurement.
+    await panel.dispatch({type: 'pointer', event: {...at, type: 'down', x: 0, y: 0}})
+    expect(panel.state().span).toBeUndefined()
+    expect(tape()).toBeNull()
+
+    await panel.unmount()
+})

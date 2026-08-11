@@ -26,7 +26,7 @@ import {arm, read, ready, viewport, type Reading} from './driver'
  * | Rotate  | the same select                                     | turns it 90°, once per drag    |
  * | Scale   | grabs the face patch under the cursor               | extrudes along the normal      |
  * | Clone   | the same select                                     | leaves a copy behind           |
- * | Measure | nothing — it is not built, so the camera keeps it   | orbits                         |
+ * | Measure | anchors a tape on that voxel, writes nothing         | the far end follows the cursor |
  *
  * Nothing here waits for a duration. Playwright's mouse calls resolve when the event has been
  * dispatched, and the app is synchronous from there.
@@ -431,19 +431,37 @@ test('turning four times keeps every selected voxel, and unwinds exactly', async
     expect(back.filled).toBe(held.filled)
 })
 
-test('measure is not built, so the left button still belongs to the camera', async ({page}) => {
-    const {on, was} = await start(page, 'measure')
-    await press(page, on, shifted(on, 120, 40))
+test('measure reads the model without touching it, and the tape stays up', async ({page}) => {
+    const {on, air, was} = await start(page, 'measure')
 
-    const now = await read(page)
-    // Nothing was written, and the view moved — which is the promise a dead tool has to keep.
-    expect(now.hash).toBe(was.hash)
-    expect(now.undo).toBe(0)
-    expect(now.yaw).not.toBe(was.yaw)
+    // A press with no drag: one voxel, which is one voxel across on every axis.
+    await press(page, on)
+    const tapped = await read(page)
+    expect(tapped.span).toEqual([1, 1, 1])
+    // Nothing written and nothing to undo — the one tool on the rail that only reads.
+    expect(tapped.hash).toBe(was.hash)
+    expect(tapped.undo).toBe(0)
+    // And the view did not move, which is what says the left button is Measure's now.
+    expect(tapped.yaw).toBe(was.yaw)
+
+    // A drag across the model grows it on at least one axis, and the tape survives the release.
+    await press(page, on, shifted(on, -60, -20))
+    const dragged = await read(page)
+    expect(dragged.span).toBeDefined()
+    expect(dragged.span).not.toEqual([1, 1, 1])
+    expect(dragged.hash).toBe(was.hash)
+
+    // The move after the release belongs to nobody, so a settled tape does not eat the pointer.
+    await page.mouse.move(on.x + 4, on.y + 4)
+    expect((await read(page)).span).toEqual(dragged.span)
+
+    // A press on air is the way to be rid of one. A press over the model is a new measurement.
+    await press(page, air)
+    expect((await read(page)).span).toBeUndefined()
 })
 
 test('the camera keeps the right button and Shift whatever tool is armed', async ({page}) => {
-    for (const tool of ['draw', 'erase', 'fill', 'move', 'scale', 'clone']) {
+    for (const tool of ['draw', 'erase', 'fill', 'move', 'scale', 'clone', 'measure']) {
         const {on, was} = await start(page, tool)
 
         await page.mouse.move(on.x, on.y)
