@@ -55,9 +55,9 @@ export interface VoxSpec {
  */
 export const MAX_SIZE = 32
 
-const clampAxis = (value: unknown): number => {
+const clampAxis = (value: unknown, cap: number): number => {
     if (typeof value !== 'number' || !Number.isFinite(value)) return 1
-    return Math.min(MAX_SIZE, Math.max(1, Math.floor(value)))
+    return Math.min(cap, Math.max(1, Math.floor(value)))
 }
 
 const isTriple = (value: unknown): value is Vec3 =>
@@ -84,7 +84,7 @@ const readOp = (value: unknown): VoxOp | undefined => {
  * rather than fatal — 39 good primitives and one typo is a model, and refusing it would throw away
  * eight seconds of generation over a coordinate.
  */
-export const readSpec = (value: unknown): VoxSpec | undefined => {
+export const readSpec = (value: unknown, cap: number = MAX_SIZE): VoxSpec | undefined => {
     if (typeof value !== 'object' || value === null) return undefined
     const {name, size, mirror_x: mirror, ops} = value as Record<string, unknown>
     if (!Array.isArray(size) || size.length !== 3 || !Array.isArray(ops)) return undefined
@@ -92,7 +92,7 @@ export const readSpec = (value: unknown): VoxSpec | undefined => {
     if (read.length === 0) return undefined
     return {
         name: typeof name === 'string' && name !== '' ? name : 'Generated',
-        size: [clampAxis(size[0]), clampAxis(size[1]), clampAxis(size[2])],
+        size: [clampAxis(size[0], cap), clampAxis(size[1], cap), clampAxis(size[2], cap)],
         mirror_x: mirror === true,
         ops: read
     }
@@ -133,11 +133,19 @@ const paintedBounds = (ops: readonly VoxOp[]): {lo: Vec3; hi: Vec3} | undefined 
     return any ? {lo, hi} : undefined
 }
 
-const extent = (low: number, high: number): number =>
-    Math.max(1, Math.min(MAX_SIZE, Math.floor(high) - Math.ceil(low) + 1))
+const extent = (low: number, high: number, cap: number): number =>
+    Math.max(1, Math.min(cap, Math.floor(high) - Math.ceil(low) + 1))
 
 /**
  * The grid a spec gets, which is the box its ops paint rather than the `size` it declared.
+ *
+ * **Unless a canvas is named, in which case the grid is that cube and the content is placed in it.**
+ * That is the "Enforce canvas size" switch, and the two halves of it are separate: the model is
+ * *asked* for a cube of that size by `systemFor`, and the document it becomes *is* that cube whether
+ * or not the model obliged. Fitting the grid to the ops is still what decides where the content
+ * lands — finding 6 stands, a reply still paints outside whatever it declared — so the content is
+ * measured exactly as before and then centred in x and y with its feet on the floor. Air above a
+ * short model is the point: the canvas is the room left to draw in.
  *
  * Measured against the live Qwen3.6-27B on 2026-08-08 over six "a cat" replies: **every one wrote
  * outside the size it had just declared** — `[20,16,14]` with ops reaching `y = 18`, `[16,20,16]`
@@ -152,19 +160,49 @@ const extent = (low: number, high: number): number =>
  * declared centre, because a half whose declared plane was wrong is a half joined to itself in the
  * wrong place: a seam, or a body with a hollow down the middle.
  */
-export const gridFor = (spec: VoxSpec): {readonly size: Vec3; readonly origin: Vec3} => {
+export const gridFor = (
+    spec: VoxSpec,
+    canvas?: number
+): {readonly size: Vec3; readonly origin: Vec3} => {
     // Both are in *op* space, so `size` reads [width, height, depth]. `rasterise` swaps.
+    const cap = canvas ?? MAX_SIZE
     const bounds = paintedBounds(spec.ops)
-    if (!bounds) return {size: [1, 1, 1], origin: [0, 0, 0]}
+    if (!bounds) {
+        return canvas === undefined ?
+                {size: [1, 1, 1], origin: [0, 0, 0]}
+            :   {size: [canvas, canvas, canvas], origin: [0, 0, 0]}
+    }
     const {lo, hi} = bounds
-    const half = extent(lo[0], hi[0])
+    const half = extent(lo[0], hi[0], cap)
+    const width = spec.mirror_x ? Math.min(cap, half * 2) : half
+    const height = extent(lo[1], hi[1], cap)
+    const depth = extent(lo[2], hi[2], cap)
+    if (canvas === undefined) {
+        return {
+            size: [width, height, depth],
+            origin: [Math.ceil(lo[0]), Math.ceil(lo[1]), Math.ceil(lo[2])]
+        }
+    }
+    /*
+     * Centred across, and against the floor up. `y` is up in op space and the system prompt has
+     * always said "feet at y=0", so lifting the content off the floor to centre it would put every
+     * model in the air over a ground lattice drawn at z = 0.
+     *
+     * With `mirror_x` the drawn half is laid against the middle rather than centred, because the
+     * mirror reflects about the grid's own centre: centring the half would fold it back over itself.
+     * A half wider than the canvas allows keeps its inner edge and loses its outer one.
+     */
+    const across =
+        spec.mirror_x ?
+            Math.max(0, Math.floor(canvas / 2) - half)
+        :   Math.max(0, Math.floor((canvas - width) / 2))
     return {
-        size: [
-            spec.mirror_x ? Math.min(MAX_SIZE, half * 2) : half,
-            extent(lo[1], hi[1]),
-            extent(lo[2], hi[2])
-        ],
-        origin: [Math.ceil(lo[0]), Math.ceil(lo[1]), Math.ceil(lo[2])]
+        size: [canvas, canvas, canvas],
+        origin: [
+            Math.ceil(lo[0]) - across,
+            Math.ceil(lo[1]),
+            Math.ceil(lo[2]) - Math.max(0, Math.floor((canvas - depth) / 2))
+        ]
     }
 }
 
@@ -182,8 +220,8 @@ export const gridFor = (spec: VoxSpec): {readonly size: Vec3; readonly origin: V
  * rest of this app. Writes outside the fitted grid are dropped rather than clamped — clamping would
  * smear a mistyped coordinate along a wall, which looks like geometry instead of like an error.
  */
-export const rasterise = (spec: VoxSpec): Volume => {
-    const {size, origin} = gridFor(spec)
+export const rasterise = (spec: VoxSpec, canvas?: number): Volume => {
+    const {size, origin} = gridFor(spec, canvas)
     const [width, height, depth] = size
     const [ox, oy, oz] = origin
     const palette = new Uint8Array(256 * 4)

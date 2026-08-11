@@ -1537,6 +1537,25 @@ body,
 }
 
 /*
+ * ---- a dialog scrolls; the boxes inside it do not ----
+ *
+ * Astryx's wrapper under the `<dialog>` is `overflow: hidden` under a 75vh cap, so a dialog taller
+ * than the window *clips* rather than scrolls. Each dialog then reached for the same workaround —
+ * a scrollbar around one box inside itself — and that is the wrong place for it: the generate
+ * dialog capped its candidate grid at 52vh, so the pictures moved under a prompt, three switches
+ * and a footnote that stayed put, and the artist got two scroll regions in one window with the
+ * inner one owning the only thing they were looking at. New project has no inner scroll at all, so
+ * on a short window its buttons were simply unreachable.
+ *
+ * One rule, on the wrapper, so the dialog is the thing that scrolls. Export is excluded and keeps
+ * its own: it is two panes that each fill the dialog's height, and scrolling the settings column
+ * would take the preview off with it — the preview is the whole claim of that dialog.
+ */
+.astryx-dialog:not(:has(.export-dialog)) > div {
+    overflow-y: auto;
+}
+
+/*
  * The two file dialogs — New project and the unsaved-changes guard.
  *
  * Layout only. Every colour, border and control inside them is astryx's, because a dialog is the
@@ -1585,6 +1604,17 @@ body,
 }
 
 /*
+ * The rules a batch runs under, in one row. It wraps rather than scrolls: three controls at 780 px
+ * fit, and a fourth should push down instead of hiding.
+ */
+.generate-limits {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: start;
+    gap: 16px 24px;
+}
+
+/*
  * The drop target for a model to teach from.
  *
  * Dashed rather than solid, and inside the flow rather than an overlay: it is a place to put
@@ -1616,21 +1646,15 @@ body,
 }
 
 /*
- * Scrolls, because the batch is up to 12 and 12 is three rows of cards taller than any window this
- * dialog fits in. Without this the grid grew past the bottom of the screen and the last two rows
- * were unreachable — the artist got to choose between the four candidates that happened to fit.
+ * No height cap and no scrollbar of its own. The dialog scrolls — see the wrapper rule above.
  *
- * The cap is `vh` rather than a flex `min-height: 0`, because the dialog does not bound its own
- * height and a flex item with nothing above it to shrink against never overflows. `52vh` is two
- * rows of cards on a 900 px window, which leaves the prompt row, the status line and the footnote
- * their space.
+ * This box used to be `max-height: 52vh; overflow-y: auto`, which reached the last of twelve
+ * candidates but did it by scrolling the pictures inside a dialog that itself sat still.
  */
 .generate-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
     gap: 12px;
-    max-height: 52vh;
-    overflow-y: auto;
 }
 
 .generate-card {

@@ -342,6 +342,20 @@ test('a generated candidate becomes the open document, provenance and all', asyn
     })
     expect(openDialogTitle()).toBe('Generate a model')
 
+    /*
+     * The canvas off, so the candidate is the 6 × 6 × 12 tower rather than the default 64³.
+     *
+     * Not a detail of what is under test — this is about the menu reaching the pipeline and the
+     * document coming out the other side — and it is worth 19 seconds. React's development build
+     * writes every changed prop into its Performance track and walks a `Uint8Array` one index at a
+     * time; the panel seam hands `volume` down as a prop, so replacing the document with a 64³ one
+     * walks half a million indices per panel. `PixelCanvas` has the same note about pixel buffers.
+     * The built bundle does none of it. Everything about the canvas itself is in
+     * `GenerateDialog.test.tsx`, where the tree is one dialog rather than a window.
+     */
+    await act(async () => {
+        control(global.document.body, 'Off').click()
+    })
     await act(async () => {
         control(global.document.body, 'Generate').click()
     })

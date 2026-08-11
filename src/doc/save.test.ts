@@ -243,3 +243,19 @@ test('a store that refuses to write loses the new snapshot and keeps the old one
     expect(snapshots(store)).toHaveLength(1)
     expect(snapshots(store)[0]?.name).toBe('kept')
 })
+
+test('the canvas a model was asked for survives the file, and its absence survives too', () => {
+    const doc = document()
+    const origin = doc.origin
+    if (!origin) throw new Error('the fixture has no generation record')
+    const back = loadDocument(
+        JSON.stringify(saveDocument({...doc, origin: {...origin, canvas: 64}}, 'tower.gpix'))
+    )
+
+    expect(back?.origin?.canvas).toBe(64)
+    // Off is absent, not zero: every file written before the switch existed was generated fitted,
+    // and a `0` would read as a canvas of no size.
+    const fitted = loadDocument(JSON.stringify(saveDocument(doc, 'tower.gpix')))
+    expect(fitted?.origin?.canvas).toBeUndefined()
+    expect(fitted?.origin?.prompt).toBe('a stone tower')
+})

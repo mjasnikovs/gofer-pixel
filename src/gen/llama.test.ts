@@ -1,10 +1,13 @@
 import {expect, test} from 'bun:test'
+import {createVolume, setVoxel} from '../render/volume'
 import {countFilled, type VoxSpec} from './ops'
+import {swatchesOf} from './palette'
 import {
     browserLlama,
     generateMany,
     memoryLlama,
     SYSTEM,
+    systemFor,
     type Attempt,
     type Candidate
 } from './llama'
@@ -143,7 +146,7 @@ test('the browser port sends the sampler, the system prompt and the worked examp
         const {spec, model} = await browserLlama(manifest, 'http://x:8080').generate(
             'a tower',
             {temperature: 0.8, seed: 12},
-            [dog, tall]
+            {canvas: undefined, examples: [dog, tall]}
         )
         // The code format carries no name of its own, so the prompt is the name.
         expect(spec.name).toBe('a tower')
@@ -186,7 +189,11 @@ test('no examples still generates, rather than refusing to ask', async () => {
         )
     }) as unknown as typeof fetch
     try {
-        await browserLlama(manifest).generate('a tower', {temperature: 0.8, seed: 1}, [])
+        await browserLlama(manifest).generate(
+            'a tower',
+            {temperature: 0.8, seed: 1},
+            {canvas: undefined, examples: []}
+        )
     } finally {
         globalThis.fetch = original
     }
@@ -209,7 +216,11 @@ test('a reply that is not runnable code is an error, not a half-built model', as
         const port = browserLlama(manifest)
         for (const _ of bodies) {
             await port
-                .generate('a tower', {temperature: 0.8, seed: 1}, [dog])
+                .generate(
+                    'a tower',
+                    {temperature: 0.8, seed: 1},
+                    {canvas: undefined, examples: [dog]}
+                )
                 .catch((error: unknown) => errors.push(String(error)))
         }
     } finally {
@@ -352,4 +363,64 @@ test('a cancelled pick carries the signal to the server', async () => {
         globalThis.fetch = original
     }
     expect(seen).toBe(control.signal)
+})
+
+/*
+ * The canvas reaches the model, which is the half of "Enforce canvas size" that `gen/ops.ts` cannot
+ * do. Placing the content in a 64³ grid is placement; asking for a model that fills it is a prompt,
+ * and both have to happen or the switch buys air.
+ */
+
+test('the canvas is in the system prompt, in the bound and in the scale', () => {
+    const asked = systemFor(64)
+
+    expect(asked).toContain('64x64x64')
+    expect(asked).toContain('close to 64 tall')
+    expect(asked).not.toContain('32x32x32')
+    // Off is the measured prompt, unchanged.
+    expect(SYSTEM).toContain('32x32x32')
+})
+
+test('a candidate records the canvas it was asked for, and nothing when there was none', async () => {
+    const spec: VoxSpec = {
+        name: 'tower',
+        size: [4, 4, 4],
+        mirror_x: false,
+        ops: [{op: 'box', from: [0, 0, 0], to: [3, 3, 3], color: '#ff0000'}]
+    }
+    const llama = memoryLlama([spec, spec])
+
+    const [big] = await generateMany(llama, 'a tower', 1, {canvas: 64, seed: 1})
+    const [fitted] = await generateMany(llama, 'a tower', 1, {seed: 1})
+
+    expect(big?.ok === true && big.candidate.record.canvas).toBe(64)
+    expect(big?.ok === true && big.candidate.volume.sz).toBe(64)
+    expect(llama.seen[0]?.brief.canvas).toBe(64)
+    // Off leaves no trace: the record would otherwise claim a bound nobody set.
+    expect(fitted?.ok === true && fitted.candidate.record.canvas).toBeUndefined()
+    expect(fitted?.ok === true && fitted.candidate.volume.sz).toBe(4)
+    expect(llama.seen[1]?.brief.canvas).toBeUndefined()
+})
+
+test('the swatches hold a candidate to the palette, after the shading and not before', async () => {
+    const spec: VoxSpec = {
+        name: 'tower',
+        size: [4, 4, 4],
+        // A colour on no palette, so every voxel of it has to move.
+        ops: [{op: 'box', from: [0, 0, 0], to: [3, 3, 3], color: '#123456'}],
+        mirror_x: false
+    }
+    const one = createVolume(2, 2, 2)
+    one.palette.set([255, 0, 0, 255], 4)
+    setVoxel(one, 0, 0, 0, 1)
+
+    const [held] = await generateMany(memoryLlama([spec]), 'a tower', 1, {
+        swatches: swatchesOf(one),
+        seed: 1
+    })
+    const volume = held?.ok === true ? held.candidate.volume : undefined
+
+    // One colour on the palette means one colour in the model — `finish`'s three tones included.
+    expect(new Set(volume?.data ?? [])).toEqual(new Set([1]))
+    expect([...(volume?.palette.subarray(4, 8) ?? [])]).toEqual([255, 0, 0, 255])
 })

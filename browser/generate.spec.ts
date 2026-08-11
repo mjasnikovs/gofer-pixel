@@ -160,9 +160,9 @@ test('a batch draws real pixels on every card, and picking one replaces the docu
         }
     })
 
-    // The grid is fitted to the ops, never to a declared size — `src/gen/ops.ts`. The tower's ops
-    // span x 1-10 and y 0-19, so it is 10 wide and 20 tall.
-    expect(after.size).toEqual([10, 20])
+    // The default canvas is 32³ and the document *is* the canvas — `src/gen/ask.ts`. The tower's
+    // ops span x 1-10 and y 0-19, so it is 10 wide and 20 tall inside a box with room around it.
+    expect(after.size).toEqual([32, 32])
     expect(after.filled).toBeGreaterThan(0)
     expect(after.doc).toMatchObject({name: 'a stone tower', dirty: true})
     expect(after.origin?.model).toBe('stub-27b')
@@ -322,4 +322,117 @@ test('the shipped bank loads in the browser, and every entry teaches something',
         expect(entry.lines).toBeGreaterThan(1)
         expect(entry.lines).toBeLessThanOrEqual(80)
     }
+})
+
+/*
+ * The canvas and the palette, in the running app — `gen/ask.ts`.
+ *
+ * `bun test` proves the placement and the snap against canned ports, which is where those belong.
+ * What only a browser can answer is whether the two controls the artist actually presses reach
+ * them: a segmented control and a switch inside a `<dialog>` portal, over the real reducer.
+ */
+test('the canvas control decides the document, and Off gives the fitted model back', async ({
+    page
+}) => {
+    await ready(page)
+    await stub(page, {clip: false})
+    await openDialog(page)
+
+    const dialog = dialogOf(page)
+    await dialog.getByLabel('Candidates').fill('1')
+    await dialog.getByRole('radio', {name: 'Off'}).click()
+    await dialog.getByRole('button', {name: 'Generate', exact: true}).click()
+    await expect(dialog.locator('[data-testid="generate-status"]')).toContainText('1 candidates')
+    await dialog.locator('.generate-card').first().getByRole('button').click()
+
+    const fitted = await page.evaluate(() => {
+        const {state} = window.goferPixel as unknown as {
+            state: {volume: {sx: number; sz: number}; origin: {canvas?: number} | undefined}
+        }
+        return {size: [state.volume.sx, state.volume.sz], canvas: state.origin?.canvas}
+    })
+
+    // The tower's ops span x 1-10 and y 0-19, so with the canvas off the grid is fitted to them.
+    expect(fitted.size).toEqual([10, 20])
+    expect(fitted.canvas).toBeUndefined()
+})
+
+test('the palette switch decides whether a candidate may invent colours', async ({page}) => {
+    await ready(page)
+    await stub(page, {clip: false})
+    await openDialog(page)
+
+    const dialog = dialogOf(page)
+    await dialog.getByLabel('Candidates').fill('1')
+    await dialog.getByRole('button', {name: 'Generate', exact: true}).click()
+    await expect(dialog.locator('[data-testid="generate-status"]')).toContainText('1 candidates')
+    await dialog.locator('.generate-card').first().getByRole('button').click()
+
+    /*
+     * The stub tower paints `#8a8f98` and `#4a4f57`, neither of which is in DB32. On, every voxel
+     * carries a palette entry the document opened with — the whole palette is adopted, so the
+     * comparison is against the document that was open before the pick.
+     */
+    const held = await page.evaluate(() => {
+        const {state} = window.goferPixel as unknown as {
+            state: {volume: {data: Uint8Array; palette: Uint8Array}}
+        }
+        const hex = (index: number): string =>
+            [0, 1, 2]
+                .map(at =>
+                    (state.volume.palette[index * 4 + at] ?? 0).toString(16).padStart(2, '0')
+                )
+                .join('')
+        return [...new Set(state.volume.data)].filter(value => value !== 0).map(hex)
+    })
+
+    expect(held.length).toBeGreaterThan(0)
+    expect(held).not.toContain('8a8f98')
+    expect(held).not.toContain('4a4f57')
+})
+
+/*
+ * The dialog scrolls; the grid inside it does not.
+ *
+ * The candidate grid used to be `max-height: 52vh; overflow-y: auto`, so on any window the pictures
+ * moved inside a dialog that stayed still — a scrollbar around the one thing the artist is looking
+ * at, with the prompt and the switches pinned around it. Astryx's wrapper is `overflow: hidden`
+ * under a 75vh cap, which is why the workaround was there at all; the scroll belongs on the wrapper.
+ *
+ * A short window and twelve candidates, because a tall screen fits the lot and hides both defects.
+ */
+test('a twelve-candidate batch scrolls the dialog, not the grid', async ({page}) => {
+    await page.setViewportSize({width: 1280, height: 720})
+    await ready(page)
+    await stub(page, {clip: false})
+    await openDialog(page)
+
+    const dialog = dialogOf(page)
+    await dialog.getByLabel('Candidates').fill('12')
+    await dialog.getByRole('button', {name: 'Generate', exact: true}).click()
+    await expect(dialog.locator('[data-testid="generate-status"]')).toContainText('12 candidates')
+
+    const boxes = await page.evaluate(() => {
+        const grid = document.querySelector('.generate-grid')
+        // Reached from the grid, not by selector: astryx leaves collapsed `.astryx-dialog` nodes on
+        // the page, and a query would measure one of those instead of the box on screen.
+        const wrapper = grid?.closest('.astryx-dialog')?.firstElementChild
+        if (!grid || !wrapper) return undefined
+        return {
+            gridOverflows: grid.scrollHeight > grid.clientHeight,
+            wrapperScrolls: wrapper.scrollHeight > wrapper.clientHeight,
+            wrapperOverflow: getComputedStyle(wrapper).overflowY
+        }
+    })
+    expect(boxes).toEqual({
+        gridOverflows: false,
+        wrapperScrolls: true,
+        wrapperOverflow: 'auto'
+    })
+
+    // And the twelfth card is reachable, which is the whole reason the old cap existed.
+    const cards = dialog.locator('.generate-card')
+    await expect(cards).toHaveCount(12)
+    await cards.nth(11).scrollIntoViewIfNeeded()
+    await expect(cards.nth(11)).toBeInViewport()
 })

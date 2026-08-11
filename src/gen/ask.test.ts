@@ -1,6 +1,15 @@
 import {expect, test} from 'bun:test'
 import MANIFEST from '../assets/examples/examples.json'
-import {asking, FIRST_ASK, MAX_CANDIDATES, showing, startable, starting} from './ask'
+import {
+    asking,
+    CANVAS_SIZES,
+    DEFAULT_CANVAS,
+    FIRST_ASK,
+    MAX_CANDIDATES,
+    showing,
+    startable,
+    starting
+} from './ask'
 import {readManifest} from './bank'
 import {idleBatch, type BatchState} from './batch'
 import {connect, CONNECTING, type Connection} from './connect'
@@ -78,4 +87,36 @@ test('a new batch drops the order the last one was being read in', () => {
     expect(next.rankBy).toBeUndefined()
     expect(next.prompt).toBe('a fish')
     expect(showing(next, {...idleBatch(4), rankBy: 'built-in'})).toBe('built-in')
+})
+
+/*
+ * The canvas and the palette switch. Both are bounds on what a batch may produce rather than
+ * descriptions of it, and the canvas one reaches the grid allocator — so the narrowing is here,
+ * beside the count's, and not on the control.
+ */
+
+test('the dialog opens on a canvas and on the project palette', () => {
+    expect(FIRST_ASK.canvas).toBe(DEFAULT_CANVAS)
+    expect(CANVAS_SIZES).toContain(DEFAULT_CANVAS)
+    // On by default, unlike naming: a model that invents colours costs the artist their palette.
+    expect(FIRST_ASK.enforcePalette).toBe(true)
+    expect(FIRST_ASK.naming).toBe(false)
+})
+
+test('a canvas that is not one of the three is off, not a grid of that size', () => {
+    for (const size of CANVAS_SIZES) expect(asking(FIRST_ASK, {canvas: size}).canvas).toBe(size)
+    expect(asking(FIRST_ASK, {canvas: undefined}).canvas).toBeUndefined()
+    // 1000³ is a billion cells. The control cannot ask for it; nothing else may either.
+    expect(asking(FIRST_ASK, {canvas: 1000}).canvas).toBeUndefined()
+    expect(asking(FIRST_ASK, {canvas: 48}).canvas).toBeUndefined()
+})
+
+test('changing one part of the ask leaves the rest of it standing', () => {
+    const asked = asking(asking(FIRST_ASK, {canvas: 32}), {enforcePalette: false})
+
+    expect(asked.canvas).toBe(32)
+    expect(asked.enforcePalette).toBe(false)
+    expect(asked.prompt).toBe(FIRST_ASK.prompt)
+    // And a new batch keeps both: they are the ask, not the order the last grid came back in.
+    expect(starting(asked)).toMatchObject({canvas: 32, enforcePalette: false, rankBy: undefined})
 })

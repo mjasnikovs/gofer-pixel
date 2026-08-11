@@ -56,6 +56,7 @@ What is there now, and roughly in dependency order:
 | `src/gen/batch`     | one batch end to end: generate, score, name, rank — the dialog just draws it        |
 | `src/gen/reference` | the artist's own model as the example the next batch is taught from                 |
 | `src/gen/teaching`  | which examples teach a batch, in what order, within what line budget                |
+| `src/gen/palette`   | holding a candidate to the project's colours, in Oklab                              |
 | `src/theme/`        | `theme.ts` and the CSS it generates; never edit the CSS                             |
 | `py/`               | `clipserve.py`, the CLIP scoring service. Optional, started by hand                 |
 | `browser/`          | the Playwright suite and the page it drives                                         |
@@ -160,6 +161,36 @@ picking call pads when unsure, so a knight gets `farmer, chicken, dog` and grows
 on its helmet. See `docs/GEN_RESEARCH.md`, 2026-08-09. It stays in `bank.ts` rather than moving to
 `teaching.ts` with the other three rules, because `pickPrompt` writes the cap into the sentence it
 sends the model: the number and the prompt that states it have to move together.
+
+Two switches in the dialog bound what a batch may produce rather than describe it, and both are in
+`gen/ask.ts`:
+
+**Keep to the project palette, on by default.** A candidate is snapped to the open document's own
+colours, and it adopts that palette whole — indices and all — rather than a compacted copy of the
+entries it happened to land on. It is a snap in code and not a rule in the prompt, because the
+worked examples are programs full of literal hex and an example beats a rule (finding 7). It runs
+**after `finish`**, so the two shade tones per colour are held to the palette along with the colour
+they came from. The distance is Oklab: `finish` darkens by 0.72, and in plain RGB the nearest DB32
+entry to a darkened pink is a _grey_, because RGB puts every dark colour in one corner of its cube.
+Where a palette has no ramp under a colour the three tones collapse into one and the model comes out
+flat there, which is the honest outcome rather than a fourth colour the palette does not have.
+
+**Enforce canvas size — off, 32³, 64³ or 128³, default 32³.** Two halves that have to move together:
+`systemFor` asks the model for that cube _and_ tells it to fill it, and `gridFor` makes the document
+that cube whether or not it obliged — centred across, feet on the floor, because the prompt has
+always said feet at y = 0. Off is the old behaviour: 32 asked for, and a grid fitted to the ops with
+no room around the model.
+
+The instruction to fill the box does work — measured 2026-08-11 against the live server on "a stone
+tower", one candidate each: fitted it drew 13 wide × 25 tall, at 64 it drew 30 × 55, at 128 it drew
+61 × 128. **Filling a big box with _shape_ is a different thing and is not measured**: the 128 run
+came back at 88 % of its own bounding box, which is the solid brick `score.ts` exists to sink, and
+every worked example in the bank is built at 32. So 32 is the default because it is the ground the
+findings were walked on, and the bigger two are there to be tried.
+
+The canvas travels in the `.gpix` record because it is in the system prompt; whether the palette was
+enforced does not, because that happens after generation and the palette it snapped to belonged to a
+document the file has replaced.
 
 **`veto.ts` costs a second 27B call per candidate whose word did not match** — `couldDescribe` — and
 the only thing that call moves is the `matched` count in a status line. That is a product decision
@@ -517,13 +548,22 @@ the real one, so the assertion is the same assertion the window made, minus the 
 were not under test. **`App.test.tsx` is for composition** — effects, the keyboard listener, the
 file dialogs, the guard in front of them, and the one live viewport.
 
+**Never put a big `Volume` through a window test.** Measured 2026-08-11: replacing the document with
+a 16³ grid costs 0.25 s, a 32³ one 1.6 s and a 64³ one 17 s, one render each — because React's
+development build writes every changed prop into its Performance track and walks a `Uint8Array` one
+index at a time, and the panel seam hands `volume` down as a prop. `PixelCanvas` has the same note
+about pixel buffers, and is the reason a sprite crosses that boundary as a closure. The built bundle
+does none of it and neither does the real app: the same 64³ generate-and-pick is 2 s in Chromium
+under `vite dev`, which is why the browser suite is where the big-canvas paths are proved.
+
 Before reaching for a mount, check whether the thing under test has a seam already: `state.ts`,
 `gesture.ts`, `session.ts`, `keys.ts`, `batch.ts`, `connect.ts`, `doc/reference.ts`,
 `gen/reference.ts`, `teaching.ts`, `overlay.ts`, `views.ts`, `presets.ts`, `store.ts`, `export.ts`,
-`history.ts`, `ask.ts`, `choice.ts`, `empty.ts`, `doc/measure.ts` and `render/light.ts` all answer
-their own questions in single-digit milliseconds, and they exist because the answers used to cost a
-window. If it is one panel and a real reducer, that is `test/panel.tsx` — and the stage is a panel
-by that definition, so `Stage.test.tsx` mounts it there rather than mounting a window.
+`history.ts`, `ask.ts`, `choice.ts`, `empty.ts`, `doc/measure.ts`, `gen/palette.ts` and
+`render/light.ts` all answer their own questions in single-digit milliseconds, and they exist
+because the answers used to cost a window. If it is one panel and a real reducer, that is
+`test/panel.tsx` — and the stage is a panel by that definition, so `Stage.test.tsx` mounts it there
+rather than mounting a window.
 
 ## Conventions
 

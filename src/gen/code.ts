@@ -26,7 +26,11 @@ const OP_BUDGET = 4096
  * voxels first, and throwing those away refuses a model over a typo. `readSpec` still validates
  * every op afterwards, so a box called with a string coordinate is dropped, not smeared.
  */
-export const specFromCode = (source: string, name: string): VoxSpec | undefined => {
+export const specFromCode = (
+    source: string,
+    name: string,
+    canvas: number = MAX_SIZE
+): VoxSpec | undefined => {
     const body = source.replace(/^\s*```\w*\s*\n/, '').replace(/\n?```\s*$/, '')
     const ops: unknown[] = []
     let mirror = false
@@ -60,10 +64,14 @@ export const specFromCode = (source: string, name: string): VoxSpec | undefined 
     } catch {
         // A syntax error before the first op leaves `ops` empty, and empty reads as undefined.
     }
-    return readSpec({
-        name,
-        size: [MAX_SIZE, MAX_SIZE, MAX_SIZE],
-        mirror_x: mirror,
-        ops
-    })
+    return readSpec(
+        {
+            name,
+            // The code names no size, so the spec records the box it was asked to draw inside.
+            size: [canvas, canvas, canvas],
+            mirror_x: mirror,
+            ops
+        },
+        canvas
+    )
 }

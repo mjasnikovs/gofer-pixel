@@ -74,7 +74,7 @@ test('a batch scores what lands and names the examples that taught it', async ()
 })
 
 test('a candidate that failed is counted and named, not silently dropped', async () => {
-    const {final} = await run(
+    const {final, seen} = await run(
         ports(memoryLlama([carved('tower', '#808080'), new Error('llama-server 503: busy')]))
     )
 
@@ -84,6 +84,23 @@ test('a candidate that failed is counted and named, not silently dropped', async
     expect(generateNote(final)).toBe(
         '2 candidates, 2 failed · taught by dog — llama-server 503: busy'
     )
+    /*
+     * And counted *while it is happening*, which is the half that was missing. A failed attempt
+     * closes its own placeholder, so the grid loses a box the moment it fails — seen from the
+     * outside that is "I asked for four and there are three", under a line that said 1/4 and
+     * nothing anywhere that said why. The reason still waits for the end; the count does not.
+     */
+    const midway = seen.filter(state => state.stage === 'generating')
+    expect(midway.map(generateNote)).toEqual([
+        // Two before the first attempt lands: the opening snapshot and the one naming the examples.
+        'Generating 0/4…',
+        'Generating 0/4…',
+        // Nothing has failed yet, so there is nothing to say and the line stays the plain count.
+        'Generating 1/4…',
+        'Generating 2/4… · 1 failed',
+        'Generating 3/4… · 1 failed',
+        'Generating 4/4… · 2 failed'
+    ])
 })
 
 test('the grid keeps its shape while the model is still answering', async () => {
@@ -195,7 +212,7 @@ test('a dropped model is taught last, nearest the prompt, and is named as the ar
     const own: WorkedExample = {prompt: 'a stone tower', reply: 'box(0,0,0, 2,2,2, "#888")'}
     const {final} = await run(ports(llama), {teach: () => [bank], reference: own})
 
-    const sent = llama.seen[0]?.examples ?? []
+    const sent = llama.seen[0]?.brief.examples ?? []
     expect(sent).toHaveLength(2)
     // An explicit drop outranks the picking call's guess, so it goes closest to the prompt.
     expect(sent[1]).toBe(own)

@@ -169,3 +169,73 @@ test('an unnamed model still has a name', () => {
 
     expect(read?.name).toBe('Generated')
 })
+
+/*
+ * The canvas — `gen/ask.ts`'s "Enforce canvas size". Off, the grid is fitted to the ops and every
+ * test above holds. On, the grid is the cube and the ops are placed in it, and the placement is the
+ * whole feature: an artist asked for room to keep drawing, not for a model floating in the middle
+ * of a box.
+ */
+
+test('a canvas is the grid, whatever the ops painted', () => {
+    const ops: VoxSpec['ops'] = [{op: 'box', from: [1, 0, 1], to: [6, 11, 6], color: '#ff0000'}]
+
+    const canvas = rasterise(spec(ops), 32)
+    expect([canvas.sx, canvas.sy, canvas.sz]).toEqual([32, 32, 32])
+    // The same ops with the switch off are the 6 x 6 x 12 the model painted.
+    const fitted = rasterise(spec(ops))
+    expect([fitted.sx, fitted.sy, fitted.sz]).toEqual([6, 6, 12])
+    expect(countFilled(canvas)).toBe(countFilled(fitted))
+})
+
+test('the content is centred across the canvas and stands on its floor', () => {
+    // 6 wide, 12 tall, 6 deep, painted away from the origin so a placement that ignored the ops'
+    // own low corner would land somewhere else.
+    const canvas = rasterise(
+        spec([{op: 'box', from: [1, 0, 1], to: [6, 11, 6], color: '#ff0000'}]),
+        32
+    )
+
+    // (32 - 6) / 2 = 13, on both horizontal axes.
+    expect(voxelAt(canvas, 13, 13, 0)).toBe(1)
+    expect(voxelAt(canvas, 18, 18, 11)).toBe(1)
+    expect(voxelAt(canvas, 12, 13, 0)).toBe(0)
+    expect(voxelAt(canvas, 19, 18, 11)).toBe(0)
+    // Feet on the floor rather than centred in z: the prompt has always said feet at y = 0, and a
+    // model lifted into the middle of the box would hover over the ground lattice.
+    expect(voxelAt(canvas, 13, 13, 12)).toBe(0)
+})
+
+test('a mirrored half is laid against the middle of the canvas, not centred on it', () => {
+    // Centring the drawn half would put its reflection back on top of it.
+    const canvas = rasterise(
+        spec([{op: 'box', from: [0, 0, 0], to: [5, 3, 3], color: '#ff0000'}], {mirror_x: true}),
+        32
+    )
+
+    // Twelve wide, hard against the middle from both sides: 10…15 drawn, 16…21 reflected.
+    expect(voxelAt(canvas, 9, 14, 0)).toBe(0)
+    expect(voxelAt(canvas, 10, 14, 0)).toBe(1)
+    expect(voxelAt(canvas, 15, 14, 0)).toBe(1)
+    expect(voxelAt(canvas, 16, 14, 0)).toBe(1)
+    expect(voxelAt(canvas, 21, 14, 0)).toBe(1)
+    expect(voxelAt(canvas, 22, 14, 0)).toBe(0)
+    expect(countFilled(canvas)).toBe(6 * 2 * 4 * 4)
+})
+
+test('a model bigger than its canvas is clipped, and the canvas is still the canvas', () => {
+    const canvas = rasterise(
+        spec([{op: 'box', from: [0, 0, 0], to: [63, 63, 63], color: '#ff0000'}]),
+        32
+    )
+
+    expect([canvas.sx, canvas.sy, canvas.sz]).toEqual([32, 32, 32])
+    expect(countFilled(canvas)).toBe(32 * 32 * 32)
+})
+
+test('a canvas that nothing painted is still that canvas', () => {
+    const empty = rasterise(spec([{op: 'erase', from: [0, 0, 0], to: [4, 4, 4]}]), 64)
+
+    expect([empty.sx, empty.sy, empty.sz]).toEqual([64, 64, 64])
+    expect(countFilled(empty)).toBe(0)
+})

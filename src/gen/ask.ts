@@ -29,6 +29,24 @@ export interface Ask {
      */
     readonly naming: boolean
     /**
+     * Whether a candidate may only paint in the open document's colours — see `gen/palette.ts`.
+     *
+     * **On by default**, which is the opposite of every other switch in this dialog, and it is the
+     * default because the alternative is not neutral: the model invents hex, `finish` invents two
+     * more tones per colour, and a project that generates three models has three near-identical
+     * browns in a palette nobody chose. Off is the escape hatch for looking at what the model
+     * actually picked.
+     */
+    readonly enforcePalette: boolean
+    /**
+     * The cube the model is asked for and the document comes out as, or `undefined` for off.
+     *
+     * Off is the measured behaviour: 32 in the system prompt, and a grid fitted to whatever was
+     * painted, which is a document the size of the model with no room around it. A canvas asks for
+     * the bigger box *and* gives the document that box, so there is somewhere to keep drawing.
+     */
+    readonly canvas: number | undefined
+    /**
      * The order the artist clicked, or `undefined` to follow the batch.
      *
      * The batch decides the *default* — it flips to CLIP once CLIP has actually ranked — and this
@@ -50,12 +68,35 @@ export const DEFAULT_PROMPT = 'a stone tower'
  */
 export const DEFAULT_COUNT = 4
 
+/**
+ * The canvases on offer, and the one a new dialog opens on.
+ *
+ * Cubes, because the generator has no notion of a tall subject and a flat one — it is handed a box
+ * and told to fill it.
+ *
+ * **32 is the default, because 32 is the size every finding on the record was measured at.** The
+ * bigger two are not a claim that the model draws well at them. Measured 2026-08-11 against the live
+ * server on "a stone tower", one candidate each: fitted it drew 13 wide × 25 tall, at 64 it drew
+ * 30 × 55, and at 128 it drew 61 × 128 at 88 % of its own bounding box — which is the solid brick
+ * `score.ts` exists to sink. The instruction to fill the box works; filling a big box with *shape*
+ * is a different thing and is not measured. So the default is the ground that has been walked, and
+ * 64 and 128 are there to be tried.
+ */
+export const CANVAS_SIZES = [32, 64, 128] as const
+
+export const DEFAULT_CANVAS = 32
+
 export const FIRST_ASK: Ask = {
     prompt: DEFAULT_PROMPT,
     count: DEFAULT_COUNT,
     naming: false,
+    enforcePalette: true,
+    canvas: DEFAULT_CANVAS,
     rankBy: undefined
 }
+
+const isCanvas = (value: number | undefined): value is number =>
+    CANVAS_SIZES.some(size => size === value)
 
 /**
  * Change part of the ask, with the count held inside its bounds.
@@ -63,10 +104,17 @@ export const FIRST_ASK: Ask = {
  * Clamped here rather than on the field, for the reason the reducer clamps the brush size and the
  * export padding: the bound is a property of the thing being asked for, and it has to hold however
  * the value was set. The field's own `min`/`max` are what a mouse obeys; a typed `40` is not.
+ *
+ * The canvas is narrowed the same way and for a stronger reason: it reaches the grid allocator, so
+ * anything but one of the three offered sizes is off. A stray `1000` would be 1000³ cells.
  */
 export const asking = (ask: Ask, change: Partial<Ask>): Ask => {
     const next = {...ask, ...change}
-    return {...next, count: Math.min(MAX_CANDIDATES, Math.max(1, Math.round(next.count)))}
+    return {
+        ...next,
+        count: Math.min(MAX_CANDIDATES, Math.max(1, Math.round(next.count))),
+        canvas: isCanvas(next.canvas) ? next.canvas : undefined
+    }
 }
 
 /**

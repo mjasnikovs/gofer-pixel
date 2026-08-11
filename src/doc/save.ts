@@ -217,7 +217,7 @@ const readOutput = (value: unknown): SavedOutput | undefined => {
  */
 const readOrigin = (value: unknown): GenerationRecord | undefined => {
     if (typeof value !== 'object' || value === null) return undefined
-    const {prompt, sampler, model, at, plan, examples} = value as Record<string, unknown>
+    const {prompt, sampler, model, at, plan, examples, canvas} = value as Record<string, unknown>
     if (typeof prompt !== 'string' || typeof model !== 'string' || typeof at !== 'string') {
         return undefined
     }
@@ -241,7 +241,10 @@ const readOrigin = (value: unknown): GenerationRecord | undefined => {
         sampler: {temperature, seed},
         model,
         at,
-        ...(shown.length === 0 ? {} : {examples: shown})
+        ...(shown.length === 0 ? {} : {examples: shown}),
+        // Absent means the canvas switch was off, which is a real answer rather than a gap — every
+        // file written before the switch existed was generated at the fitted 32.
+        ...(typeof canvas === 'number' ? {canvas} : {})
     }
 }
 

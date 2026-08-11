@@ -1,4 +1,5 @@
-import {rasterise, type VoxSpec} from './ops'
+import {MAX_SIZE, rasterise, type VoxSpec} from './ops'
+import {snapTo, type Swatches} from './palette'
 import {pickPrompt, readPicks, type Manifest, type WorkedExample} from './bank'
 import {specFromCode} from './code'
 import {finish} from './finish'
@@ -23,19 +24,37 @@ import type {Volume} from '../render/volume'
  */
 export const DEFAULT_ENDPOINT = 'http://localhost:8080'
 
-export const SYSTEM = `You write JavaScript that builds a voxel model. These functions exist already:
+/**
+ * The system prompt, with the cube it asks for.
+ *
+ * The size is a parameter because the canvas is a switch — see `gen/ask.ts`. Two lines carry it: the
+ * bound, and an explicit instruction to *use* the box. The second exists because every worked
+ * example in the bank is a model built at 32, and an example is worth more than a rule (finding 7),
+ * so at 64 or 128 the model will happily draw a 30-tall figure in the corner of the grid unless it
+ * is told the scale in the same breath as the bound. Whether that instruction survives the examples
+ * is exactly what the switch is for finding out.
+ */
+export const systemFor = (canvas: number): string => {
+    const box = `${String(canvas)}x${String(canvas)}x${String(canvas)}`
+    return `You write JavaScript that builds a voxel model. These functions exist already:
   box(x0,y0,z0, x1,y1,z1, "#rrggbb")   solid box, inclusive integer bounds
   ball(x,y,z, rx,ry,rz, "#rrggbb")     axis-aligned ellipsoid
   erase(x0,y0,z0, x1,y1,z1)            carve empty space
   mirrorX()                            call last to mirror the model across its centre in x
 
 Axes: x = left/right, y = up/down (bigger y is higher), z = front/back. Feet at y=0.
-Keep everything inside 32x32x32. Use variables and loops where they help symmetry and repetition.
+Keep everything inside ${box}. The finished model should be close to ${String(canvas)} tall and fill
+most of that box — scale the proportions up to it rather than drawing a small model in a corner.
+Use variables and loops where they help symmetry and repetition.
 Ops apply in order; later calls paint over earlier ones.
 Block out the big masses first, then carve with erase, then add small details.
 Use 4-8 distinct colors with real value contrast, not near-identical shades.
 Plan the proportions in a short comment first, then the code.
 Answer with only JavaScript, no markdown fence.`
+}
+
+/** What the model is asked for when nothing has enforced a canvas: the size everything was measured at. */
+export const SYSTEM = systemFor(MAX_SIZE)
 
 /**
  * Exactly what produced a candidate, stored with the asset it becomes.
@@ -65,6 +84,30 @@ export interface GenerationRecord {
      * was shown, so an old record reads as a one-element list rather than as a gap.
      */
     readonly examples?: readonly string[]
+    /**
+     * The cube the model was asked to draw inside, when a canvas was enforced.
+     *
+     * It is in the record because it is in the *system prompt*: the same prompt and the same seed at
+     * 64 and at 128 are two different questions and two different answers. Absent means the canvas
+     * switch was off, and the model was asked for 32 and got a grid fitted to what it painted.
+     *
+     * Whether the palette was enforced is deliberately not here. That happens after generation and
+     * changes nothing about what the model produced, and the palette it snapped to belonged to a
+     * document this file has replaced — recording a bare `true` would name an effect with no cause.
+     */
+    readonly canvas?: number
+}
+
+/**
+ * What one call is asked for beyond its prompt and its sampler: the examples, and the box.
+ *
+ * One value rather than two parameters because both are properties of the batch rather than of the
+ * candidate — they are computed once, before the loop, and every candidate is handed the same brief.
+ */
+export interface Brief {
+    /** The cube the system prompt asks for, or `undefined` to ask for the measured 32. */
+    readonly canvas: number | undefined
+    readonly examples: readonly WorkedExample[]
 }
 
 export interface Candidate {
@@ -89,7 +132,7 @@ export interface Llama {
     readonly generate: (
         prompt: string,
         sampler: Sampler,
-        examples: readonly WorkedExample[],
+        brief: Brief,
         signal?: AbortSignal
     ) => Promise<{spec: VoxSpec; model: string}>
 }
@@ -152,17 +195,17 @@ export const browserLlama = (manifest: Manifest, endpoint: string = DEFAULT_ENDP
             return [manifest.fallback]
         }
     },
-    generate: async (prompt, sampler, examples, signal) => {
+    generate: async (prompt, sampler, brief, signal) => {
         const response = await fetch(`${endpoint}/v1/chat/completions`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             ...(signal ? {signal} : {}),
             body: JSON.stringify({
                 messages: [
-                    {role: 'system', content: SYSTEM},
+                    {role: 'system', content: systemFor(brief.canvas ?? MAX_SIZE)},
                     // Each example is a completed exchange. The last one sits against the prompt,
                     // which is the position the model imitates hardest — see `Library.teach`.
-                    ...examples.flatMap(example => [
+                    ...brief.examples.flatMap(example => [
                         {role: 'user', content: example.prompt},
                         {role: 'assistant', content: example.reply}
                     ]),
@@ -179,7 +222,7 @@ export const browserLlama = (manifest: Manifest, endpoint: string = DEFAULT_ENDP
         const body = (await response.json()) as ChatReply
         const content = body.choices?.[0]?.message?.content
         if (content === undefined || content === '') throw new Error('the server returned nothing')
-        const spec = specFromCode(content, prompt)
+        const spec = specFromCode(content, prompt, brief.canvas ?? MAX_SIZE)
         if (!spec) throw new Error('the reply held no usable ops')
         return {spec, model: body.model ?? 'unknown'}
     }
@@ -189,7 +232,7 @@ export const browserLlama = (manifest: Manifest, endpoint: string = DEFAULT_ENDP
 export interface SeenCall {
     readonly prompt: string
     readonly sampler: Sampler
-    readonly examples: readonly WorkedExample[]
+    readonly brief: Brief
 }
 
 /** A canned server, for tests and for nothing else. Replies are handed back in order. */
@@ -204,8 +247,8 @@ export const memoryLlama = (
         seen,
         probe: () => Promise.resolve(model),
         pick: () => Promise.resolve(picks),
-        generate: (prompt, sampler, examples, signal) => {
-            seen.push({prompt, sampler, examples})
+        generate: (prompt, sampler, brief, signal) => {
+            seen.push({prompt, sampler, brief})
             if (signal?.aborted === true) return Promise.reject(new Error('cancelled'))
             const reply = replies[next % Math.max(1, replies.length)]
             next += 1
@@ -233,6 +276,20 @@ export interface GenerateOptions {
      * is a worse model and never a broken one.
      */
     readonly teach?: (ids: readonly string[]) => readonly WorkedExample[]
+    /**
+     * The cube every candidate is asked for and gets — see `gen/ops.ts`'s `gridFor`.
+     *
+     * `undefined` is the switch turned off: the model is asked for 32, which is what every finding
+     * on the record was measured at, and the grid is fitted to what it painted.
+     */
+    readonly canvas?: number | undefined
+    /**
+     * The project's colours, when the palette is being enforced — see `gen/palette.ts`.
+     *
+     * Applied after `finish`, so the shading is snapped along with the base colours and a candidate
+     * carries no colour the artist has not already got.
+     */
+    readonly swatches?: Swatches | undefined
     readonly now?: () => Date
 }
 
@@ -262,34 +319,44 @@ export const generateMany = async (
         onAttempt,
         onPick,
         teach = () => [],
+        canvas,
+        swatches,
         now = () => new Date()
     } = options
     const attempts: Attempt[] = []
     // Once, before the loop: which example fits belongs to the subject, not to the seed.
     const picked = await llama.pick(prompt, signal)
     onPick?.(picked)
-    const examples = teach(picked)
+    const brief: Brief = {canvas, examples: teach(picked)}
     for (let i = 0; i < count; i += 1) {
         if (signal?.aborted === true) break
         const sampler: Sampler = {temperature, seed: seed + i}
         let attempt: Attempt
         try {
-            const {spec, model} = await llama.generate(prompt, sampler, examples, signal)
-            const volume = rasterise(spec)
+            const {spec, model} = await llama.generate(prompt, sampler, brief, signal)
+            const volume = rasterise(spec, canvas)
             attempt =
                 volume.data.some(value => value !== 0) ?
                     {
                         ok: true,
                         candidate: {
                             spec,
-                            // Shaded here, not stored: the spec stays flat-coloured, and
-                            // rasterise-then-finish reproduces the asset from the record exactly.
-                            volume: finish(volume),
+                            /*
+                             * Shaded here, not stored: the spec stays flat-coloured, and
+                             * rasterise-then-finish reproduces the asset from the record exactly.
+                             *
+                             * The palette snap comes *after* the shading, so the two invented tones
+                             * per colour are held to the project's palette along with the colour
+                             * they came from. Snapping first would enforce the palette on the one
+                             * third of the colours that never reaches a voxel on its own.
+                             */
+                            volume: swatches ? snapTo(finish(volume), swatches) : finish(volume),
                             record: {
                                 prompt,
                                 sampler,
                                 model,
                                 examples: picked,
+                                ...(canvas === undefined ? {} : {canvas}),
                                 at: now().toISOString()
                             }
                         }

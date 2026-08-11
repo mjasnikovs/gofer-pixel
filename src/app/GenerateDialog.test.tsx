@@ -2,7 +2,11 @@ import {expect, test} from 'bun:test'
 import {act} from 'react'
 import {createRoot, type Root} from 'react-dom/client'
 import {memoryFiles, type Files} from '../doc/files'
+import {freshenPalette} from '../doc/palette'
 import {memoryStore, type Store} from '../doc/store'
+import {newDocument} from '../doc/templates'
+import {DEFAULT_CANVAS} from '../gen/ask'
+import {swatchesOf} from '../gen/palette'
 import type {BankEntry} from '../gen/bank'
 import {memoryScorer, type Scorer} from '../gen/clip'
 import {buildLibrary, type Library} from '../gen/library'
@@ -63,13 +67,25 @@ interface Mounted {
 const testLibrary = (): Promise<Library> =>
     buildLibrary({fallback: 'tower', entries: BANK_ENTRIES}, () => Promise.resolve(undefined))
 
+/**
+ * The document the dialog is opened over, for its palette — see `gen/palette.ts`.
+ *
+ * Freshened, exactly as `initialState` freshens every document the app opens, so the palette the
+ * candidates are snapped to is DB32 and not the empty grid `newDocument` hands back.
+ */
+const project = (): Volume => {
+    const {volume} = newDocument([16, 16, 16])
+    return {...volume, palette: freshenPalette(volume)}
+}
+
 const open = async (
     llama: Llama,
     scorer: Scorer = memoryScorer([], false),
     // Canned silence: the judge answers nothing, which passes every candidate — see `gen/veto.ts`.
     veto: Veto = memoryVeto(['']),
     store: Store = memoryStore(),
-    files: Files = memoryFiles()
+    files: Files = memoryFiles(),
+    volume: Volume = project()
 ): Promise<Mounted> => {
     const host = document.createElement('div')
     document.body.appendChild(host)
@@ -84,10 +100,11 @@ const open = async (
                 llama={llama}
                 store={store}
                 files={files}
+                volume={volume}
                 scorer={scorer}
                 veto={veto}
                 onClose={() => closed.push(1)}
-                onPick={(volume, name, record) => picked.push({volume, name, record})}
+                onPick={(made, name, record) => picked.push({volume: made, name, record})}
                 onRunning={batch => {
                     running = batch
                 }}
@@ -158,16 +175,25 @@ const pending = (): HTMLElement[] => [
 /**
  * Switch the naming pass on.
  *
- * Astryx's Switch is a real checkbox with a `<label for>` beside it, so it is reached as an input
- * rather than by the text next to it — and it is the only checkbox in this dialog.
+ * Astryx's Switch is a real checkbox with a `<label for>` beside it, so it is reached through the
+ * label rather than by the text next to it. By name rather than by position: there are three
+ * switches in this dialog now and "the only checkbox" stopped being true the day a second landed.
  */
-const toggleNaming = async (): Promise<void> => {
-    const box = dialog().querySelector<HTMLInputElement>('input[type="checkbox"]')
-    if (!box) throw new Error('the dialog has no naming switch')
+const toggleSwitch = async (label: string): Promise<void> => {
+    const found = [...dialog().querySelectorAll<HTMLLabelElement>('label')].find(node =>
+        node.textContent.includes(label)
+    )
+    const box =
+        found?.htmlFor === '' ?
+            found.querySelector<HTMLInputElement>('input[type="checkbox"]')
+        :   dialog().querySelector<HTMLInputElement>(`#${found?.htmlFor ?? ''}`)
+    if (!box) throw new Error(`the dialog has no switch called ${label}`)
     await act(async () => {
         box.click()
     })
 }
+
+const toggleNaming = (): Promise<void> => toggleSwitch('Ask what each result looks like')
 
 test('with no server there is nothing to press, and the dialog says why', async () => {
     const down: Llama = {
@@ -210,7 +236,9 @@ test('a batch fills the grid, and every candidate carries what made it', async (
     expect(picked[0]?.name).not.toBe('brick')
     expect(picked[0]?.record.prompt).toBe('a stone tower')
     expect(picked[0]?.record.model).toBe('qwen')
-    expect(picked[0]?.volume.sz).toBe(12)
+    // The default canvas is 64, so the document is the canvas rather than the fitted 12-tall tower.
+    expect(picked[0]?.volume.sz).toBe(DEFAULT_CANVAS)
+    expect(picked[0]?.record.canvas).toBe(DEFAULT_CANVAS)
 
     await close(root, host)
 })
@@ -481,7 +509,7 @@ test('a dropped model becomes the example the next batch is taught from', async 
      * Last, against the prompt. The bank's pick is a guess and a dropped model is not — an artist
      * who went and found a file has said which teacher they want more clearly than any call can.
      */
-    const sent = llama.seen[0]?.examples ?? []
+    const sent = llama.seen[0]?.brief.examples ?? []
     expect(sent).toHaveLength(2)
     expect(sent[1]?.reply).toContain('box(')
     // It survives a reload, because it cost the artist a file picker to set.
@@ -530,7 +558,7 @@ test('a file that is not a model says so, and does not become the reference', as
     expect(said('generate-reference')).toContain('not a .vox or .gpix')
     await generate(mounted)
     // The batch still runs, taught by the bank alone.
-    expect(llama.seen[0]?.examples ?? []).toHaveLength(1)
+    expect(llama.seen[0]?.brief.examples ?? []).toHaveLength(1)
 
     await close(root, host)
 })
@@ -562,7 +590,7 @@ test('clearing the dropped reference forgets it, on screen and on disk', async (
     ).toBe(false)
 
     await generate(mounted)
-    expect(llama.seen[0]?.examples ?? []).toHaveLength(1)
+    expect(llama.seen[0]?.brief.examples ?? []).toHaveLength(1)
 
     await close(root, host)
 })
@@ -582,6 +610,82 @@ test('Escape closes the dialog, the same as the close button', async () => {
     })
 
     expect(closed).toHaveLength(1)
+
+    await close(root, host)
+})
+
+/*
+ * The two rules a batch runs under — `gen/ask.ts`. Both are default-on in a way the rest of this
+ * dialog is not, so both are asserted from the dialog rather than only from the modules under it:
+ * the switch, the control and the candidate that comes out have to agree.
+ */
+
+test('the canvas is the document, and turning it off gives the fitted model back', async () => {
+    const mounted = await open(memoryLlama([carved('tower', '#808080')]))
+    const {root, host, picked} = mounted
+
+    await act(async () => {
+        control('32³').click()
+    })
+    await generate(mounted)
+    await act(async () => {
+        control('Use this one').click()
+    })
+    expect([picked[0]?.volume.sx, picked[0]?.volume.sz]).toEqual([32, 32])
+
+    await act(async () => {
+        control('Off').click()
+    })
+    await generate(mounted)
+    await act(async () => {
+        control('Use this one').click()
+    })
+    // The tower is 6 wide and 12 tall, which is what the ops painted — see `gen/ops.ts`.
+    expect([picked[1]?.volume.sx, picked[1]?.volume.sz]).toEqual([6, 12])
+    expect(picked[1]?.record.canvas).toBeUndefined()
+
+    await close(root, host)
+})
+
+test('a candidate paints in the project palette until the switch says it need not', async () => {
+    const doc = project()
+    // On no palette, and nowhere near DB32's greys: every voxel of it has to move.
+    const mounted = await open(
+        memoryLlama([carved('tower', '#013b02')]),
+        memoryScorer([], false),
+        memoryVeto(['']),
+        memoryStore(),
+        memoryFiles(),
+        doc
+    )
+    const {root, host, picked} = mounted
+
+    await generate(mounted)
+    await act(async () => {
+        control('Use this one').click()
+    })
+    const allowed = new Set(swatchesOf(doc).slots)
+    const held = picked[0]?.volume
+    expect(held?.palette).toEqual(doc.palette)
+    expect(
+        [...new Set(held?.data ?? [])].filter(value => value !== 0).every(v => allowed.has(v))
+    ).toBe(true)
+
+    await toggleSwitch('Keep to the project palette')
+    await generate(mounted)
+    await act(async () => {
+        control('Use this one').click()
+    })
+    // Off, the model keeps what it painted: the green it asked for, plus the two tones `finish`
+    // shades it into. The project's palette is not adopted and none of the three is in it.
+    const free = picked[1]?.volume
+    const greens = [...new Set(free?.data ?? [])].filter(value => value !== 0)
+    expect(greens.length).toBeGreaterThan(1)
+    for (const value of greens) {
+        const [r, g, b] = free?.palette.subarray(value * 4, value * 4 + 3) ?? []
+        expect(g ?? 0).toBeGreaterThan(Math.max(r ?? 0, b ?? 0))
+    }
+    expect(free?.palette).not.toEqual(doc.palette)
 
     await close(root, host)
 })

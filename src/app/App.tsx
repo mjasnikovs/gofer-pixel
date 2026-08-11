@@ -454,6 +454,7 @@ export const App = ({
                     {...(llama ? {llama} : {})}
                     store={store}
                     files={files}
+                    volume={shown}
                     scorer={scorer}
                     veto={veto}
                     onClose={() => {

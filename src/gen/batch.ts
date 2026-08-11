@@ -4,6 +4,7 @@ import {overallScore, scoreModel, type ModelScores} from './score'
 import {judge, type Veto, type Verdict} from './veto'
 import {rankingViews} from './views'
 import type {WorkedExample} from './bank'
+import type {Swatches} from './palette'
 import {teachingSet} from './teaching'
 
 /**
@@ -120,6 +121,10 @@ export interface BatchRequest {
     readonly teach?: (ids: readonly string[]) => readonly WorkedExample[]
     /** A model the artist dropped on the dialog. Appended last; see the note on this module. */
     readonly reference?: WorkedExample | undefined
+    /** The cube every candidate is asked for and gets. `undefined` is the switch off — 32, fitted. */
+    readonly canvas?: number | undefined
+    /** The project's colours, when the palette is enforced — see `gen/palette.ts`. */
+    readonly swatches?: Swatches | undefined
     readonly seed?: number
     readonly now?: () => Date
 }
@@ -140,7 +145,17 @@ export const runBatch = async (
     onProgress?: (state: BatchState) => void,
     signal?: AbortSignal
 ): Promise<BatchState> => {
-    const {prompt, count, naming, teach, reference, seed = randomSeed(), now} = request
+    const {
+        prompt,
+        count,
+        naming,
+        teach,
+        reference,
+        canvas,
+        swatches,
+        seed = randomSeed(),
+        now
+    } = request
     // Read through a call, never as a field: it flips during an `await`, and a plain read narrows
     // for the rest of the function under the type-aware lint rules.
     const stopped = (): boolean => signal?.aborted === true
@@ -157,6 +172,8 @@ export const runBatch = async (
     const attempts = await generateMany(ports.llama, prompt, count, {
         temperature: 0.9,
         seed,
+        canvas,
+        swatches,
         ...(signal ? {signal} : {}),
         ...(now ? {now} : {}),
         /*
@@ -286,7 +303,18 @@ export const pendingSlots = (state: BatchState): number =>
 export const generateNote = (state: BatchState): string => {
     if (state.stage === 'idle') return ''
     if (state.stage === 'generating') {
-        return `Generating ${String(state.done)}/${String(state.count)}…`
+        /*
+         * The failures are counted here as well as at the end, because `done` counts *attempts* and
+         * `pendingSlots` is `count - done`: a failed attempt closes its own placeholder, so the grid
+         * silently loses a box. Seen from the outside that is "I asked for four and there are
+         * three", with a line above it saying 1/4 and nothing anywhere saying why. The reason still
+         * waits for the end — it is one long line and it would make this one jump on every attempt.
+         */
+        const lost = state.failures.length
+        return (
+            `Generating ${String(state.done)}/${String(state.count)}…`
+            + (lost === 0 ? '' : ` · ${String(lost)} failed`)
+        )
     }
     const taught = state.taughtBy.length === 0 ? '' : ` · taught by ${state.taughtBy.join(', ')}`
     const first = state.failures[0]

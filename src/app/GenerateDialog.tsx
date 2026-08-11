@@ -26,7 +26,17 @@ import {
 } from '../gen/batch'
 import type {Scorer} from '../gen/clip'
 import {randomSeed, type GenerationRecord, type Llama} from '../gen/llama'
-import {asking, FIRST_ASK, MAX_CANDIDATES, showing, startable, starting, type Ask} from '../gen/ask'
+import {
+    asking,
+    CANVAS_SIZES,
+    FIRST_ASK,
+    MAX_CANDIDATES,
+    showing,
+    startable,
+    starting,
+    type Ask
+} from '../gen/ask'
+import {swatchesOf} from '../gen/palette'
 import {clientOf, connect, CONNECTING, type Connection} from '../gen/connect'
 import type {Library} from '../gen/library'
 import type {Veto} from '../gen/veto'
@@ -110,6 +120,7 @@ export const GenerateDialog = ({
     llama,
     store,
     files,
+    volume,
     scorer,
     veto,
     onClose,
@@ -130,6 +141,14 @@ export const GenerateDialog = ({
      * back to; that rule now lives at the seam instead of in a duplicated construction.
      */
     files: Files
+    /**
+     * The open document, for its palette and for nothing else — see `gen/palette.ts`.
+     *
+     * The whole volume rather than the palette bytes, because "the project's colours" is the
+     * derivation `projectPalette` makes and that one needs the voxels: a slot counts when the model
+     * paints with it or when somebody chose it, and filler counts as neither.
+     */
+    volume: Volume
     scorer: Scorer
     /** The naming judge — see `gen/veto.ts`. Same server as `llama`, different question. */
     veto: Veto
@@ -149,7 +168,7 @@ export const GenerateDialog = ({
      * rules written inline below, two of them written twice.
      */
     const [ask, setAsk] = useState<Ask>(FIRST_ASK)
-    const {prompt, count, naming} = ask
+    const {prompt, count, naming, enforcePalette, canvas} = ask
     /** The batch, whole, as `gen/batch.ts` last published it. */
     const [batch, setBatch] = useState<BatchState>(() => idleBatch(FIRST_ASK.count))
     /**
@@ -249,6 +268,10 @@ export const GenerateDialog = ({
                 prompt,
                 count,
                 naming,
+                canvas,
+                // Read at the moment the batch starts, not on every render: the palette a candidate
+                // is held to is the one that was open when the artist pressed Generate.
+                ...(enforcePalette ? {swatches: swatchesOf(volume)} : {}),
                 seed: randomSeed(),
                 teach: ids => (connection.kind === 'loading' ? [] : connection.library.teach(ids)),
                 ...(reference ? {reference} : {})
@@ -256,7 +279,7 @@ export const GenerateDialog = ({
             setBatch,
             controller.signal
         )
-    }, [connection, reference, scorer, veto, naming, prompt, count])
+    }, [connection, reference, scorer, veto, naming, prompt, count, canvas, enforcePalette, volume])
 
     const busy = batch.stage === 'generating'
     const ready = startable(connection, batch)
@@ -390,16 +413,56 @@ export const GenerateDialog = ({
                     )}
                 </div>
 
-                <Switch
-                    label='Ask what each result looks like'
-                    description='Slower. Puts the model’s own word under each picture.'
-                    size='sm'
-                    value={naming}
-                    isDisabled={busy}
-                    onChange={value => {
-                        setAsk(held => asking(held, {naming: value}))
-                    }}
-                />
+                {/*
+                 * The two things that constrain a candidate rather than describe it. Both are
+                 * rules about the document that comes out, so they sit above the pictures rather
+                 * than beside the prompt.
+                 */}
+                <div className='generate-limits'>
+                    <SegmentedControl
+                        label='Canvas'
+                        size='sm'
+                        value={canvas === undefined ? 'off' : String(canvas)}
+                        isDisabled={busy}
+                        onChange={value => {
+                            setAsk(held =>
+                                asking(held, {canvas: value === 'off' ? undefined : Number(value)})
+                            )
+                        }}
+                    >
+                        <SegmentedControlItem
+                            value='off'
+                            label='Off'
+                        />
+                        {CANVAS_SIZES.map(size => (
+                            <SegmentedControlItem
+                                key={size}
+                                value={String(size)}
+                                label={`${String(size)}³`}
+                            />
+                        ))}
+                    </SegmentedControl>
+                    <Switch
+                        label='Keep to the project palette'
+                        description='Every colour snapped to the nearest one you already have.'
+                        size='sm'
+                        value={enforcePalette}
+                        isDisabled={busy}
+                        onChange={value => {
+                            setAsk(held => asking(held, {enforcePalette: value}))
+                        }}
+                    />
+                    <Switch
+                        label='Ask what each result looks like'
+                        description='Slower. Puts the model’s own word under each picture.'
+                        size='sm'
+                        value={naming}
+                        isDisabled={busy}
+                        onChange={value => {
+                            setAsk(held => asking(held, {naming: value}))
+                        }}
+                    />
+                </div>
 
                 {busy && (
                     <ProgressBar
