@@ -30,9 +30,9 @@ export interface Flags {
      * Let the model choose which language the subject wants — see `gen/auto.ts`.
      *
      * One cheap call per batch, and it **overrides the four language switches below**: whichever it
-     * names is turned on and the other three off. The four policy switches — repair, gates, retry,
-     * one example — are untouched, because they are about broken output rather than about the
-     * subject and the model has nothing to say about them.
+     * names is turned on and the other three off. The three policy switches — repair, gates, retry —
+     * are untouched, because they are about broken output rather than about the subject and the
+     * model has nothing to say about them.
      *
      * It picks one language or none, never a set. The picking call is measured to pad when it is
      * unsure (`GEN_RESEARCH.md`, 2026-08-09) and here padding is not a wash but a contradiction:
@@ -101,14 +101,6 @@ export interface Flags {
      * found does nothing for geometry and which died here three times.
      */
     readonly retryEmpty: boolean
-    /**
-     * §8 — show the batch one worked example instead of up to three.
-     *
-     * Measured 2026-08-09 and the measurement says one: the picking call pads when it is unsure, so
-     * `a knight` got `farmer, chicken, dog` and grew the chicken's comb on the helmet. It is a flag
-     * rather than a changed constant only so that the before and after are one click apart.
-     */
-    readonly onePick: boolean
 }
 
 export const DEFAULT_FLAGS: Flags = {
@@ -119,8 +111,7 @@ export const DEFAULT_FLAGS: Flags = {
     relational: false,
     procedural: false,
     faces: false,
-    retryEmpty: false,
-    onePick: false
+    retryEmpty: false
 }
 
 /**
@@ -159,12 +150,6 @@ export const FLAG_NOTES: readonly FlagNote[] = [
         title: 'Reject and resample',
         note: 'Throw away a candidate that is debris or a brick, and spend another seed.',
         where: 'gen/gate.ts'
-    },
-    {
-        key: 'onePick',
-        title: 'One worked example',
-        note: 'Teach with the closest example only. Measured better; three grew a comb on a knight.',
-        where: 'gen/bank.ts'
     },
     {
         key: 'retryEmpty',

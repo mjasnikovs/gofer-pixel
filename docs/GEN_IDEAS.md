@@ -197,12 +197,16 @@ Two versions, both of which use seams the app already has:
 The second is the one to build. It is deterministic, instant, and it turns the decomposer that
 already exists into a feature rather than a prompt ingredient.
 
-## 8. Put real assets in the bank, and drop `MAX_PICKS` to 1
+## 8. Put real assets in the bank, and drop `MAX_PICKS` to 1 — half done
 
 Not new — it is the standing lead in `GEN_RESEARCH.md` — and it is still the highest-leverage
 _known_ thing, because the examples are measured to be the ceiling in both directions. One line for
 the second half. The first half is five CC0 `.vox` files that fit inside 32³ and decompose under 80
 lines, and a before/after at fixed seeds for each swap.
+
+**The second half is done, 2026-08-12.** One example per batch, and the `onePick` flag deleted with
+the branch it guarded — `GEN_RESEARCH.md` has the numbers. The first half is still five `.vox` files
+nobody has made.
 
 It is listed eighth rather than first only because everything above it attacks the geometry and this
 attacks the taste. Do it anyway; it is the least speculative item on the page.

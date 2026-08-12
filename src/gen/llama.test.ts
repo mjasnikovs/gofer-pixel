@@ -12,7 +12,7 @@ import {
     type Candidate
 } from './llama'
 import {DEFAULT_FLAGS} from './flags'
-import {MAX_PICKS, readManifest, type Manifest, type WorkedExample} from './bank'
+import {readManifest, type Manifest, type WorkedExample} from './bank'
 import MANIFEST from '../assets/examples/examples.json'
 
 const manifest: Manifest = readManifest(MANIFEST) ?? {fallback: 'tower', entries: []}
@@ -302,8 +302,10 @@ test('the picking call sends the manifest as its prompt and reads ids back', asy
         )
     }) as unknown as typeof fetch
     try {
-        const picks = await browserLlama(manifest, 'http://x:8080').pick('a knight', MAX_PICKS)
-        expect(picks).toEqual(['farmer', 'dog'])
+        const picks = await browserLlama(manifest, 'http://x:8080').pick('a knight')
+        // The reply names two and the batch is taught by one: the padding is thrown away here
+        // rather than believed. A knight collecting `farmer, chicken, dog` is the measured case.
+        expect(picks).toEqual(['farmer'])
     } finally {
         globalThis.fetch = original
     }
@@ -326,23 +328,23 @@ test('a pick that fails falls back rather than sinking the batch', async () => {
         // The server is down.
         globalThis.fetch = (() =>
             Promise.reject(new Error('ECONNREFUSED'))) as unknown as typeof fetch
-        expect(await browserLlama(manifest).pick('a knight', MAX_PICKS)).toEqual(fallback)
+        expect(await browserLlama(manifest).pick('a knight')).toEqual(fallback)
 
         // The server is there and unhappy.
         globalThis.fetch = (() =>
             Promise.resolve(new Response('busy', {status: 503}))) as unknown as typeof fetch
-        expect(await browserLlama(manifest).pick('a knight', MAX_PICKS)).toEqual(fallback)
+        expect(await browserLlama(manifest).pick('a knight')).toEqual(fallback)
 
         // The server answered with nothing an id could be read out of.
         globalThis.fetch = (() =>
             Promise.resolve(
                 new Response(JSON.stringify({choices: [{message: {content: 'no idea'}}]}))
             )) as unknown as typeof fetch
-        expect(await browserLlama(manifest).pick('a knight', MAX_PICKS)).toEqual(fallback)
+        expect(await browserLlama(manifest).pick('a knight')).toEqual(fallback)
 
         // And a reply with no choices at all, which is a proxy answering rather than the server.
         globalThis.fetch = (() => Promise.resolve(new Response('{}'))) as unknown as typeof fetch
-        expect(await browserLlama(manifest).pick('a knight', MAX_PICKS)).toEqual(fallback)
+        expect(await browserLlama(manifest).pick('a knight')).toEqual(fallback)
     } finally {
         globalThis.fetch = original
     }
@@ -359,9 +361,7 @@ test('a cancelled pick carries the signal to the server', async () => {
         )
     }) as unknown as typeof fetch
     try {
-        expect(await browserLlama(manifest).pick('a dog', MAX_PICKS, control.signal)).toEqual([
-            'dog'
-        ])
+        expect(await browserLlama(manifest).pick('a dog', control.signal)).toEqual(['dog'])
     } finally {
         globalThis.fetch = original
     }
@@ -429,22 +429,16 @@ test('the swatches hold a candidate to the palette, after the shading and not be
 })
 
 /*
- * §8, `onePick` — the flag has to move the cap *and* the sentence that states it, which is why the
- * number travels down the call rather than sitting as a constant in two files. Measured 2026-08-09:
- * `a knight` read as an armoured figure 3 of 3 with one example and 0 of 3 with three.
+ * One example, with no switch left to ask for more. Measured 2026-08-09: `a knight` read as an
+ * armoured figure 3 of 3 taught by one example and 0 of 3 taught by three, two of the three growing
+ * the chicken example's red comb on the helmet.
+ *
+ * The port is asked here rather than `readPicks` — that is `bank.test.ts` — because the thing that
+ * used to be able to break is the batch teaching with more than the picking call sent.
  */
-test('the picking call asks for three examples, and for one when the experiment is on', async () => {
-    const plain = memoryLlama([tower], 'memory', ['dog', 'tower'])
-    await generateMany(plain, 'a knight', 1, {now: at})
-    expect(plain.asked).toEqual([MAX_PICKS])
-
-    const one = memoryLlama([tower], 'memory', ['dog', 'tower'])
-    const attempts = await generateMany(one, 'a knight', 1, {
-        now: at,
-        flags: {...DEFAULT_FLAGS, onePick: true}
-    })
-    expect(one.asked).toEqual([1])
-    // And the batch is taught with what the cap allowed, not with what the bank happened to name.
+test('a batch is taught with one example, whatever the bank names', async () => {
+    const llama = memoryLlama([tower], 'memory', ['dog', 'tower', 'chicken'])
+    const attempts = await generateMany(llama, 'a knight', 1, {now: at})
     expect(attempts[0]?.ok === true && attempts[0].candidate.record.examples).toEqual(['dog'])
 })
 

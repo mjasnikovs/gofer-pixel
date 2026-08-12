@@ -762,16 +762,20 @@ test('the relational switch replaces the language the server is asked for', asyn
     await close(mounted.root, mounted.host)
 })
 
-test('one worked example instead of three is what the picking call is asked for', async () => {
+/*
+ * One worked example, and no switch for it. It was the `onePick` experiment until 2026-08-12; the
+ * measurement said one and the flag was deleted with the branch it guarded, so what this asserts is
+ * that the dialog no longer offers the choice.
+ */
+test('the dialog has no switch for how many worked examples teach a batch', async () => {
     const llama = memoryLlama([carved('tower', '#808080')], 'qwen', ['tower', 'dog'])
     const mounted = await open(llama, undefined, memoryStore())
 
-    await generate(mounted)
-    expect(llama.asked[0]).toBe(3)
+    expect(mounted.host.textContent).not.toContain('One worked example')
 
-    await toggleSwitch('One worked example')
     await generate(mounted)
-    expect(llama.asked[llama.asked.length - 1]).toBe(1)
+    const sent = llama.seen[0]
+    expect(sent?.brief.examples).toHaveLength(1)
 
     await close(mounted.root, mounted.host)
 })

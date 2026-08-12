@@ -1,7 +1,7 @@
 import {expect, test} from 'bun:test'
 import MANIFEST from '../assets/examples/examples.json'
 import {volumeFromFile} from '../doc/models'
-import {MAX_PICKS, pickPrompt, readManifest, readPicks, type Manifest} from './bank'
+import {pickPrompt, readManifest, readPicks, type Manifest} from './bank'
 import {exampleFrom, overBudget} from './teaching'
 import {BUILT_IN_REPLIES} from './builtin'
 import {specFromCode} from './code'
@@ -69,15 +69,23 @@ test('the picking prompt is the manifest, so a new entry needs no code', () => {
         expect(prompt).toContain(entry.id)
         expect(prompt).toContain(entry.use)
     }
-    expect(prompt).toContain(String(MAX_PICKS))
+    // One id, said in the sentence as well as enforced in `readPicks` — the two have to agree.
+    expect(prompt).toContain('a single id')
+    expect(prompt).toContain('one id only')
 })
 
-test('a pick is the ids it named, in order, capped and deduplicated', () => {
-    expect(readPicks('dog, chicken', manifest)).toEqual(['dog', 'chicken'])
-    // Order is the model's answer, not the manifest's.
-    expect(readPicks('tower farmer', manifest)).toEqual(['tower', 'farmer'])
+/*
+ * One, and the first one — measured 2026-08-09: `a knight` read as an armoured figure 3 of 3 taught
+ * by one example and 0 of 3 taught by three, two of the three growing the chicken's comb on the
+ * helmet. The picking call pads when it is unsure, so this is where the padding is thrown away.
+ */
+test('a pick is the first id it named, and only that one', () => {
+    expect(readPicks('dog, chicken', manifest)).toEqual(['dog'])
+    // The model's order, not the manifest's: `tower` is named first and `farmer` never arrives.
+    expect(readPicks('tower farmer', manifest)).toEqual(['tower'])
     expect(readPicks('dog, dog, dog', manifest)).toEqual(['dog'])
-    expect(readPicks('dog chicken farmer mushroom tower', manifest)).toHaveLength(MAX_PICKS)
+    // A reply that ignores "one id only" is held to one here rather than believed.
+    expect(readPicks('dog chicken farmer mushroom tower', manifest)).toEqual(['dog'])
     // Words that are not ids are dropped rather than guessed at.
     expect(readPicks('probably some kind of dog really', manifest)).toEqual(['dog'])
 })

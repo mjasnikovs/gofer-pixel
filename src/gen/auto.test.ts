@@ -79,7 +79,7 @@ test('choosing nothing leaves every language off', () => {
 })
 
 /**
- * The four policy switches are not the model's business. They are about what to do with output that
+ * The three policy switches are not the model's business. They are about what to do with output that
  * came back broken, not about the subject, so nothing here may touch them.
  */
 test('the policy switches are copied through whatever the language is', () => {
@@ -87,15 +87,13 @@ test('the policy switches are copied through whatever the language is', () => {
         ...on,
         repair: true,
         gates: true,
-        retryEmpty: true,
-        onePick: true
+        retryEmpty: true
     }
     for (const chosen of [...LANGUAGES, undefined] as (Language | undefined)[]) {
         const running = resolveFlags(policies, chosen)
         expect(running.repair).toBe(true)
         expect(running.gates).toBe(true)
         expect(running.retryEmpty).toBe(true)
-        expect(running.onePick).toBe(true)
         expect(running.auto).toBe(true)
     }
 })

@@ -120,9 +120,8 @@ were already hard, which is the worst place to run an untested change.
 
 **The examples average into a shape that is none of them**, which was the open risk, and the comb on
 the knight's head is it happening in a way you can point at. The knight result is one-sided; the
-fish is a wash. Recommendation: `MAX_PICKS = 1` in `src/gen/bank.ts`. It is left at 3 pending a call
-— the constant is the whole change, and the multi-example plumbing costs nothing when only one is
-picked.
+fish is a wash. Recommendation: one example. **Done on 2026-08-12** — see the section at the bottom
+of this file.
 
 Order is still untested: the closest pick is sent last, nearest the prompt, on recency reasoning
 alone. At one example it does not matter.
@@ -159,8 +158,8 @@ off. **It picks one or none, never a set** — the example picking call is measu
 (`a knight → farmer, chicken, dog`, above), and here padding is a contradiction rather than a wash,
 because `relational` replaces the example set and would send the face help with nothing teaching it.
 
-The four _policy_ switches — `repair`, `gates`, `retryEmpty`, `onePick` — are deliberately out of
-reach. They are about what to do with output that came back broken, not about the subject.
+The three _policy_ switches — `repair`, `gates`, `retryEmpty` — are deliberately out of reach. They
+are about what to do with output that came back broken, not about the subject.
 
 Measured live against Qwen3.6-27B, fifteen prompts, temp 0:
 
@@ -386,4 +385,42 @@ show a left face. That is the argument for the harness existing.
   generate cat, knight, chicken, mushroom and tower at fixed seeds before and after each swap, plus
   a second subject per entry to catch the known failure mode: an example that makes cats better and
   drags foxes into cat shapes.
-- **Drop `MAX_PICKS` to 1**, on the knight measurement above. One line.
+- ~~Drop `MAX_PICKS` to 1~~ — done 2026-08-12, see below.
+
+### One worked example, and the switch is gone (2026-08-12)
+
+The first experiment to graduate. `onePick` is deleted, along with `MAX_PICKS`, `picksFor`, the
+`picks` parameter on `pickPrompt` and `readPicks`, the cap on `Llama.pick`, and the `asked` hook
+`memoryLlama` carried so a test could watch the cap reach the wire. A batch is taught by one example
+and there is no number left between the sentence and the code for the two to disagree over.
+
+The measurement is the 2026-08-09 one above and it is unchanged: `a knight` read as an armoured
+figure **3 of 3 taught by one example and 0 of 3 taught by three**, two of the three growing the
+chicken example's red comb on the helmet; `a fish` was a wash at 2/3 against 1/3. The knight is
+one-sided, the fish is not, and n is three seeds on two subjects — thin, and all of it pointing the
+same way.
+
+What actually changed, beyond the count:
+
+- **`readPicks` returns the first id it recognises**, rather than filling a list up to a cap. A
+  reply that ignores "one id only" and answers with three is held to one here, so the prompt and the
+  behaviour cannot drift apart.
+- **The list survives, the cap does not.** `GenerationRecord.examples` is still `readonly string[]`
+  because files written before today hold three ids, and a record is history rather than a setting.
+- **`memoryLlama` hands back one**, sliced. A canned port that could return three would let a test
+  assert on a batch the real server can no longer produce.
+
+Verified live against Qwen3.6-27B after the change, five prompts through the real `browserLlama`:
+
+| prompt            | picks    |
+| ----------------- | -------- |
+| a knight          | `farmer` |
+| a cat             | `dog`    |
+| a fish            | `dog`    |
+| a stone tower     | `tower`  |
+| a cheese sandwich | `tower`  |
+
+One id every time, and `a knight` is the measured case: it came back `farmer, chicken, dog` before
+and comes back `farmer` now. The sandwich is the `auto` caveat again in a second place — nothing in
+the bank is a sandwich and the call still answers rather than declining, which is what `fallback` is
+for and is not what happened.

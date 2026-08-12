@@ -1,6 +1,6 @@
 import {MAX_SIZE, rasterise, type VoxSpec} from './ops'
 import {snapTo, type Swatches} from './palette'
-import {picksFor, pickPrompt, readPicks, type Manifest, type WorkedExample} from './bank'
+import {pickPrompt, readPicks, type Manifest, type WorkedExample} from './bank'
 import {DEFAULT_FLAGS, type Flags} from './flags'
 import {asking, autoPrompt, readLanguage, resolveFlags, type Language} from './auto'
 import {SILHOUETTE_EXAMPLES} from './shape'
@@ -240,14 +240,14 @@ export interface Llama {
     /** Is the server there? The dialog asks before it offers to spend a minute. */
     readonly probe: () => Promise<string | undefined>
     /**
-     * Which worked examples this subject should be shown, closest first. Once per batch — the
-     * answer is a property of the subject, not of the seed. See `bank.ts`'s `pickPrompt`.
+     * Which worked example this subject should be shown. Once per batch — the answer is a property
+     * of the subject, not of the seed. See `bank.ts`'s `pickPrompt`.
+     *
+     * One id, not a list of them, and the list it still returns is `GenerationRecord.examples`'s
+     * shape rather than a cap waiting to be raised: three examples was measured worse than one on
+     * 2026-08-09 and the switch that allowed three is gone.
      */
-    readonly pick: (
-        prompt: string,
-        picks: number,
-        signal?: AbortSignal
-    ) => Promise<readonly string[]>
+    readonly pick: (prompt: string, signal?: AbortSignal) => Promise<readonly string[]>
     /**
      * Which language this subject wants, or `undefined` for none — see `gen/auto.ts`.
      *
@@ -299,7 +299,7 @@ export const browserLlama = (manifest: Manifest, endpoint: string = DEFAULT_ENDP
             return undefined
         }
     },
-    pick: async (prompt, picks, signal) => {
+    pick: async (prompt, signal) => {
         try {
             const response = await fetch(`${endpoint}/v1/chat/completions`, {
                 method: 'POST',
@@ -307,17 +307,18 @@ export const browserLlama = (manifest: Manifest, endpoint: string = DEFAULT_ENDP
                 ...(signal ? {signal} : {}),
                 body: JSON.stringify({
                     messages: [
-                        {role: 'system', content: pickPrompt(manifest, picks)},
+                        {role: 'system', content: pickPrompt(manifest)},
                         {role: 'user', content: prompt}
                     ],
-                    // A short list of ids. The headroom below is for a model that draws.
+                    // One id, with headroom for a model that answers in a sentence anyway. The
+                    // 4096 below is the budget for a model that draws.
                     max_tokens: 32,
                     temperature: 0
                 })
             })
             if (!response.ok) return [manifest.fallback]
             const body = (await response.json()) as ChatReply
-            return readPicks(body.choices?.[0]?.message?.content ?? '', manifest, picks)
+            return readPicks(body.choices?.[0]?.message?.content ?? '', manifest)
         } catch {
             // A failed pick must not sink the batch: the fallback still generates, just generically.
             return [manifest.fallback]
@@ -407,20 +408,16 @@ export const memoryLlama = (
     model = 'memory',
     picks: readonly string[] = ['dog'],
     language?: Language
-): Llama & {readonly seen: SeenCall[]; readonly asked: number[]} => {
+): Llama & {readonly seen: SeenCall[]} => {
     const seen: SeenCall[] = []
-    /** The cap each picking call was made with, so a test can see the `onePick` flag reach the wire. */
-    const asked: number[] = []
     let next = 0
     return {
         seen,
-        asked,
         probe: () => Promise.resolve(model),
         pickLanguage: () => Promise.resolve(language),
-        pick: (_prompt, cap) => {
-            asked.push(cap)
-            return Promise.resolve(picks.slice(0, Math.max(1, cap)))
-        },
+        // One, like the real one: a canned port that could hand back three would let a test assert
+        // on a batch the server can no longer produce.
+        pick: () => Promise.resolve(picks.slice(0, 1)),
         generate: (prompt, sampler, brief, signal) => {
             seen.push({prompt, sampler, brief})
             if (signal?.aborted === true) return Promise.reject(new Error('cancelled'))
@@ -573,7 +570,7 @@ export const generateMany = async (
     const running = resolveFlags(flags, chosen)
     onLanguage?.(chosen)
     // Once, before the loop: which example fits belongs to the subject, not to the seed.
-    const picked = await llama.pick(prompt, picksFor(running.onePick), signal)
+    const picked = await llama.pick(prompt, signal)
     onPick?.(picked)
     /*
      * The worked examples, with the experiments' own in front of the bank's when one is on.

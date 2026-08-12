@@ -43,30 +43,22 @@ export interface Manifest {
 }
 
 /**
- * How many examples one prompt may carry.
+ * One example per prompt, and it is not a cap — it is the whole answer.
  *
- * Three, and it is **not measured**. Everything on the record was measured at one — finding 8 says
- * one example is not neutral, and nothing has ever compared one against several. Two plausible
- * failures are open: the examples average into a shape that is none of them, and the token cost
- * triples on every candidate in every batch. Measure before trusting it.
+ * It used to be three, behind a `onePick` experiment that defaulted off. The measurement said one
+ * and the switch is gone: live on 2026-08-09 against three fixed seeds, `a knight` read as an
+ * armoured figure **3 of 3 with one example and 0 of 3 with three**, two of the three growing the
+ * chicken example's red comb on the helmet.
+ *
+ * The reason is in the picking call rather than in the examples. It is honest about easy subjects
+ * and **pads when it is unsure** — `a cat → dog`, but `a knight → farmer, chicken, dog` — so the
+ * subjects that collected three examples were exactly the ones that were already hard, and each
+ * extra teacher rode in every message of every candidate in the batch.
+ *
+ * There is deliberately no constant and no parameter left. A number that can be varied is a number
+ * `pickPrompt` has to state in the sentence it sends, and the two moving apart is how a batch asks
+ * for three and keeps one.
  */
-export const MAX_PICKS = 3
-
-/**
- * One example instead of three, when the `onePick` experiment is on — `gen/flags.ts`, §8.
- *
- * The measurement says one. Live on 2026-08-09 against three fixed seeds: `a knight` read as an
- * armoured figure 3 of 3 with one example and 0 of 3 with three, two of the three growing the
- * chicken example's red comb on the helmet. The picking call is honest about easy subjects and
- * **pads when it is unsure**, so the subjects that collect three examples are exactly the ones that
- * were already hard.
- *
- * It is a cap passed down the call rather than a different constant, because `pickPrompt` writes the
- * number into the sentence it sends the model: the cap and the prompt that states it have to move
- * together, and a flag that moved only one of them would ask for three and keep one.
- */
-export const picksFor = (onePick: boolean): number => (onePick ? 1 : MAX_PICKS)
-
 const isString = (value: unknown): value is string => typeof value === 'string' && value !== ''
 
 const readEntry = (value: unknown): BankEntry | undefined => {
@@ -110,44 +102,34 @@ export const readManifest = (value: unknown): Manifest | undefined => {
  * grammar here would buy nothing. Asked once per *batch* — which example fits is a property of the
  * subject, not of the seed — so it costs about two seconds against ten to twenty per candidate.
  */
-export const pickPrompt = (manifest: Manifest, picks: number = MAX_PICKS): string => {
+export const pickPrompt = (manifest: Manifest): string => {
     const width = Math.max(...manifest.entries.map(entry => entry.id.length))
     const lines = manifest.entries.map(entry => `${entry.id.padEnd(width)}  ${entry.use}`)
-    if (picks <= 1) {
-        return `Which one of these examples is the subject most like? Reply with a single id from this list.
+    return `Which one of these examples is the subject most like? Reply with a single id from this list.
 
 ${lines.join('\n')}
 
 Answer with one id only, nothing else.`
-    }
-    return `Which of these examples is the subject most like? Reply with up to ${String(picks)} ids from this list, closest first, separated by commas.
-
-${lines.join('\n')}
-
-Answer with ids only, nothing else.`
 }
 
 /**
- * The ids a reply names, in the order it named them, capped and deduplicated.
+ * The one id a reply names — the first it names that the bank knows.
  *
- * Anything unrecognised is dropped, and a reply that names nothing falls back to one id rather than
- * to none: a prompt with no worked example in it is the 0-of-12 case from finding 7, and that is a
- * worse outcome than a badly chosen teacher.
+ * Held to one here as well as asked for in the sentence, because a model told "one id only" answers
+ * with three often enough, and a reply that got past this would teach the batch a number the prompt
+ * never asked for.
+ *
+ * Anything unrecognised is dropped, and a reply that names nothing falls back to the manifest's own
+ * fallback rather than to nothing: a prompt with no worked example in it is the 0-of-12 case from
+ * finding 7, and that is a worse outcome than a badly chosen teacher.
+ *
+ * Still a list, because `GenerationRecord.examples` is one and files written when this was three
+ * hold three. What is read back is history; what is sent from now on is one.
  */
-export const readPicks = (
-    value: string,
-    manifest: Manifest,
-    picks: number = MAX_PICKS
-): readonly string[] => {
+export const readPicks = (value: string, manifest: Manifest): readonly string[] => {
     const known = new Set(manifest.entries.map(entry => entry.id))
-    // The cap is enforced here as well as asked for: a model told "one id" that answers with three
-    // must be held to one, or the experiment measures the prompt rather than the number.
-    const cap = Math.max(1, Math.floor(picks))
-    const out: string[] = []
     for (const word of value.toLowerCase().split(/[^a-z0-9]+/)) {
-        if (!known.has(word) || out.includes(word)) continue
-        out.push(word)
-        if (out.length === cap) break
+        if (known.has(word)) return [word]
     }
-    return out.length === 0 ? [manifest.fallback] : out
+    return [manifest.fallback]
 }

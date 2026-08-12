@@ -169,11 +169,13 @@ call's prompt is generated from the manifest, so adding an entry needs no code. 
 `src/assets/examples/README.md` before adding one.
 
 A `.vox` or `.gpix` dropped on the generate dialog teaches the next batch ahead of the bank, and is
-remembered in `localStorage`. **`MAX_PICKS` is 3 and the measurement says it should be 1** — the
-picking call pads when unsure, so a knight gets `farmer, chicken, dog` and grows the chicken's comb
-on its helmet. See `docs/GEN_RESEARCH.md`, 2026-08-09. It stays in `bank.ts` rather than moving to
-`teaching.ts` with the other three rules, because `pickPrompt` writes the cap into the sentence it
-sends the model: the number and the prompt that states it have to move together.
+remembered in `localStorage`. **A batch is taught by exactly one example from the bank**, and there
+is no constant and no switch left to raise it — `pickPrompt` asks for one id and `readPicks` keeps
+the first it recognises. It was three behind a `onePick` experiment until 2026-08-12; the
+measurement said one and the flag went with the branch it guarded. The reason is the picking call
+rather than the examples: it pads when unsure, so `a knight` collected `farmer, chicken, dog` and
+grew the chicken's comb on its helmet, while the subjects that padded were exactly the ones already
+hard. See `docs/GEN_RESEARCH.md`, 2026-08-09.
 
 Two switches in the dialog bound what a batch may produce rather than describe it, and both are in
 `gen/ask.ts`:
@@ -241,7 +243,6 @@ the pictures — a batch judged by eye without knowing which generator made it i
 | ------------ | ----------------------------------------------------------------------- | --------------- |
 | `repair`     | debris, one-voxel gaps, the floor, spindles, near-symmetry — in code    | `gen/repair.ts` |
 | `gates`      | a reject costs a seed, not a slot; rejection sampling, nothing fed back | `gen/gate.ts`   |
-| `onePick`    | one worked example instead of three                                     | `gen/bank.ts`   |
 | `retryEmpty` | one retry carrying the _error_, never a render                          | `gen/llama.ts`  |
 | `silhouette` | `front()`/`side()` — two outlines, extruded and intersected             | `gen/shape.ts`  |
 | `procedural` | `tree()`/`tower()`/`rock()` — numbers in, hundreds of voxels out        | `gen/grow.ts`   |

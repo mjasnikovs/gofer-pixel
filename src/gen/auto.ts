@@ -14,9 +14,9 @@ import {DEFAULT_FLAGS, type Flags} from './flags'
  * selects, and over-selecting here is not a wash but a contradiction: `relational` replaces the whole
  * example set, so `relational` and `faces` together send the face help with nothing demonstrating it.
  *
- * The other four experiments are deliberately out of reach. `repair`, `gates`, `retryEmpty` and
- * `onePick` are about what to do with output that came back broken, not about the subject, so the
- * model has nothing to say about them and is not asked. They stay the artist's.
+ * The other three experiments are deliberately out of reach. `repair`, `gates` and `retryEmpty` are
+ * about what to do with output that came back broken, not about the subject, so the model has
+ * nothing to say about them and is not asked. They stay the artist's.
  */
 export type Language = 'silhouette' | 'procedural' | 'relational' | 'faces'
 

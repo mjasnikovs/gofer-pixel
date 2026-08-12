@@ -22,8 +22,9 @@ import type {BankEntry, WorkedExample} from './bank'
  * So `WorkedExample` is now only built here, through a constructor that can fail, and both paths
  * go through it.
  *
- * `MAX_PICKS` stays in `bank.ts` on purpose: `pickPrompt` writes the cap into the sentence it sends
- * the model, so the number and the prompt that states it have to move together.
+ * How *many* examples teach a batch is not a question this module answers, and no longer a question
+ * anywhere: `bank.ts` sends one, the sentence `pickPrompt` writes says one, and there is no constant
+ * between them to drift.
  */
 
 /**
