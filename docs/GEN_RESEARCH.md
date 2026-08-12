@@ -424,3 +424,106 @@ One id every time, and `a knight` is the measured case: it came back `farmer, ch
 and comes back `farmer` now. The sandwich is the `auto` caveat again in a second place — nothing in
 the bank is a sandwich and the call still answers rather than declining, which is what `fallback` is
 for and is not what happened.
+
+## The experiments, measured against each other (2026-08-12)
+
+Ninety candidates: six subjects, three fixed seeds, `off` against each of the four language
+switches. Harness in `docs/spikes/flags/`, raw rows in `out/flags/cells.json`, contact sheets from
+`sheet.ts`. The three _policy_ switches need no arms of their own — `repair` is a pure function of a
+finished volume so it runs on these same candidates as a before and after of one model, `gates` is a
+decision over scores, and `retryEmpty` only needs a count.
+
+**Did the model use the language it was handed?** Counted off the raw reply, because every
+experiment emits the same three ops by design and a spec cannot answer it.
+
+| subject             | silhouette | procedural | relational | faces |
+| ------------------- | ---------- | ---------- | ---------- | ----- |
+| a cat               | 0/3        | 0/3        | **0/3**    | 0/3   |
+| a chicken           | 0/3        | 0/3        | 2/3        | 0/3   |
+| a knight            | 1/3        | 0/3        | **0/3**    | 0/3   |
+| a red mushroom      | 2/3        | 0/3        | 3/3        | 1/3   |
+| a stone tower       | 2/3        | **3/3**    | 3/3        | 0/3   |
+| a Mario brick block | 0/3        | 0/3        | 1/3        | 3/3   |
+
+- **`procedural` and `faces` fire exactly where they should.** Both are told to be used only for
+  what they are for; of these six subjects only the tower and the block qualify, and both scored 3/3
+  on their own subject and near zero elsewhere. That is the language self-restricting, not failing.
+- **`relational` is aimed backwards.** 3/3 on the mushroom and the tower, **0/3 on the cat and the
+  knight** — which are the subjects a parts-and-limbs language exists for. Where it does fire it
+  helps: the mushroom gains a wide tiered cap with spots against a narrow stepped cone with it off.
+  It also owns 2 of the 3 empty replies and 4 replies naming functions that are not in scope.
+- **`silhouette` is inconsistent**, 5 of 18, never on the cat or chicken, and its tower came back at
+  84 % solid, which is a brick.
+
+**The policy switches, off the same run:**
+
+- **`gates` rejected 15 of 87, and 8 of those are the brick block with `faces` off** — the defect
+  this file already describes, reproduced. With `faces` on the block passes.
+- **`retryEmpty` would recover 3 of 90.** `GEN_IDEAS.md` §11 set its own bar at one candidate in six
+  before building anything. This is one in thirty. Not worth it — except under `relational`, where
+  it is 2 of 18.
+- **`repair` fired on 33 of 87**, far from the no-op it is on the worked examples, and `symmetrise`
+  is 19 of those 33. It saved a knight — two floating specks dropped, a lopsided figure filled out —
+  and it cost a chicken its beak, because taking the better half throws away asymmetric detail.
+  Mirroring is the rule that needs its own switch.
+- **The prop declaration is wrong 1 time in 18**, not the general problem the earlier note implies.
+
+### The examples are the ceiling — but not in the direction anybody assumed (2026-08-12)
+
+The bank has never held a real model. Every number in this file was produced by a hand-typed
+example, including the two 2026-08-08 measurements that established "the examples are the ceiling".
+So the claim that a _real_ model teaches better had never been tested at all.
+
+**Test one — real models instead of typed ones.** Four CC-BY models from
+[mikelovesrobots/mmmm](https://github.com/mikelovesrobots/mmmm) through `teaching.ts`'s own
+`exampleFrom`: a bear for `dog`, a penguin for `chicken`, a mailman for `farmer`, a tree for
+`mushroom`. Six subjects, three seeds, everything else identical.
+
+| arm        | mean voxels | connectivity |
+| ---------- | ----------- | ------------ |
+| typed      | 2525        | 0.993        |
+| real model | 1849        | 0.851        |
+
+**Worse, not better.** The cat went from a solid quadruped to a thin scaffold with a floating rod.
+
+**Test two — the same model, narrated.** The obvious explanation was that a decomposed model is
+mute: forty literal `box(...)` calls in coordinate order, no proportions comment, no named parts, no
+loop over a mirrored pair. A 20-line reply in the house style, built to the bear's own proportions,
+was run as a third arm on `a cat`, `a fox`, `a horse`:
+
+| arm               | lines | voxels | connectivity |
+| ----------------- | ----- | ------ | ------------ |
+| typed             | 12    | 1204   | 0.984        |
+| narrated          | 20    | 548    | 0.993        |
+| decomposed (mute) | 45    | 501    | 0.923        |
+
+Narrating fixed the fragmentation and did not bring the size back. So it is not the commentary
+either.
+
+**Test three — the length ladder, and this is the finding.** Three hand-written dogs at the _same_
+proportions in the _same_ style, differing only in how much is spelled out, plus the decomposed one:
+
+| lines in the example | mean voxels | connectivity | empty replies |
+| -------------------- | ----------- | ------------ | ------------- |
+| 6                    | **2881**    | 0.956        | 0             |
+| 11                   | 1233        | 0.973        | 0             |
+| 20                   | 939         | 0.997        | 0             |
+| 45 (decomposed)      | 645         | 0.729        | 1             |
+
+**Monotone. A 4.5× swing in the size of the output from nothing but the length of the example.**
+Same dog, same seeds, same subjects, same system prompt. By eye it goes the same way: at 6 lines the
+cat and the horse come back with volume — a body on legs, a raised head — and at 20 they are slabs.
+
+The reading is that the model imitates _effort_ as well as shape. A short confident example gets a
+confident answer; a long one teaches it to fiddle. Connectivity moves the other way up to 20 lines,
+so it is a trade and not a free win — but the 45-line arm loses on both, and it is also the only
+machine-written one, so length and style are confounded at that end and nowhere else.
+
+**This inverts `GEN_IDEAS.md` §8.** "Put real assets in the bank" is a plan to make every example
+longer, and length is measured here as the thing that shrinks the output. Before any asset is
+checked in, the cheap test is the opposite one: cut the five built-in replies down rather than
+replacing them.
+
+Caveats, stated because the ladder is the most actionable thing in this file: n = 9 per arm, one
+teacher, three subjects, one canvas. `LINE_BUDGET` is also no longer what it was — it is 80 because
+three examples used to ride in every call, and since 2026-08-12 only one does.

@@ -1,0 +1,2545 @@
+[
+  {
+    "subject": "a cat",
+    "arm": "off",
+    "seed": 4200,
+    "taught": "dog",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 9,
+    "voxels": 5230,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.40076628352490423,
+    "shellColors": 3,
+    "rank": 0.8797701149425287,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": true,
+      "changed": true
+    },
+    "file": "a-cat_off_4200.png",
+    "repairedFile": "a-cat_off_4200-repaired.png",
+    "ms": 14393.339740999998
+  },
+  {
+    "subject": "a cat",
+    "arm": "off",
+    "seed": 4201,
+    "taught": "dog",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 12,
+    "voxels": 254,
+    "connectivity": 0.952755905511811,
+    "sliceUsage": 1,
+    "bboxFill": 0.3527777777777778,
+    "shellColors": 3,
+    "rank": 0.875269028871391,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 2,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": true
+    },
+    "file": "a-cat_off_4201.png",
+    "repairedFile": "a-cat_off_4201-repaired.png",
+    "ms": 12401.406678
+  },
+  {
+    "subject": "a cat",
+    "arm": "off",
+    "seed": 4202,
+    "taught": "dog",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 10,
+    "voxels": 409,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.4869047619047619,
+    "shellColors": 3,
+    "rank": 0.8539285714285714,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-cat_off_4202.png",
+    "ms": 13598.068756
+  },
+  {
+    "subject": "a cat",
+    "arm": "silhouette",
+    "seed": 4200,
+    "taught": "dog",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 10,
+    "voxels": 498,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.503030303030303,
+    "shellColors": 4,
+    "rank": 0.849090909090909,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-cat_silhouette_4200.png",
+    "ms": 10250.017851999997
+  },
+  {
+    "subject": "a cat",
+    "arm": "silhouette",
+    "seed": 4201,
+    "taught": "dog",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 9,
+    "voxels": 410,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.47453703703703703,
+    "shellColors": 3,
+    "rank": 0.8576388888888888,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-cat_silhouette_4201.png",
+    "ms": 16420.168321999998
+  },
+  {
+    "subject": "a cat",
+    "arm": "silhouette",
+    "seed": 4202,
+    "taught": "dog",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 10,
+    "voxels": 512,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.38095238095238093,
+    "shellColors": 4,
+    "rank": 0.8857142857142857,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": true,
+      "changed": true
+    },
+    "file": "a-cat_silhouette_4202.png",
+    "repairedFile": "a-cat_silhouette_4202-repaired.png",
+    "ms": 13116.865859999998
+  },
+  {
+    "subject": "a cat",
+    "arm": "procedural",
+    "seed": 4200,
+    "taught": "dog",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 17,
+    "voxels": 433,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.23130341880341881,
+    "shellColors": 4,
+    "rank": 0.9306089743589743,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-cat_procedural_4200.png",
+    "ms": 15967.529273
+  },
+  {
+    "subject": "a cat",
+    "arm": "procedural",
+    "seed": 4201,
+    "taught": "dog",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 10,
+    "voxels": 353,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.30017006802721086,
+    "shellColors": 4,
+    "rank": 0.9099489795918367,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-cat_procedural_4201.png",
+    "ms": 12388.133424
+  },
+  {
+    "subject": "a cat",
+    "arm": "procedural",
+    "seed": 4202,
+    "taught": "dog",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 10,
+    "voxels": 520,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.48148148148148145,
+    "shellColors": 3,
+    "rank": 0.8555555555555555,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-cat_procedural_4202.png",
+    "ms": 14299.743149000002
+  },
+  {
+    "subject": "a cat",
+    "arm": "relational",
+    "seed": 4200,
+    "taught": "dog",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 10,
+    "voxels": 719,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.42797619047619045,
+    "shellColors": 4,
+    "rank": 0.8716071428571428,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-cat_relational_4200.png",
+    "ms": 11259.552891
+  },
+  {
+    "subject": "a cat",
+    "arm": "relational",
+    "seed": 4201,
+    "taught": "dog",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 7,
+    "voxels": 508,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.5131313131313131,
+    "shellColors": 2,
+    "rank": 0.846060606060606,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-cat_relational_4201.png",
+    "ms": 11583.068025
+  },
+  {
+    "subject": "a cat",
+    "arm": "relational",
+    "seed": 4202,
+    "taught": "dog",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 9,
+    "voxels": 456,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.44970414201183434,
+    "shellColors": 4,
+    "rank": 0.8650887573964496,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-cat_relational_4202.png",
+    "ms": 13858.270132000005
+  },
+  {
+    "subject": "a cat",
+    "arm": "faces",
+    "seed": 4200,
+    "taught": "dog",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 10,
+    "voxels": 544,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.3269230769230769,
+    "shellColors": 4,
+    "rank": 0.9019230769230768,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-cat_faces_4200.png",
+    "ms": 13572.770321999997
+  },
+  {
+    "subject": "a cat",
+    "arm": "faces",
+    "seed": 4201,
+    "taught": "dog",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 11,
+    "voxels": 461,
+    "connectivity": 0.8481561822125814,
+    "sliceUsage": 1,
+    "bboxFill": 0.3430059523809524,
+    "shellColors": 4,
+    "rank": 0.8363606871707469,
+    "gate": "debris",
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-cat_faces_4201.png",
+    "ms": 19560.909472999992
+  },
+  {
+    "subject": "a cat",
+    "arm": "faces",
+    "seed": 4202,
+    "taught": "dog",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 10,
+    "voxels": 582,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.3803921568627451,
+    "shellColors": 4,
+    "rank": 0.8858823529411765,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": true,
+      "changed": true
+    },
+    "file": "a-cat_faces_4202.png",
+    "repairedFile": "a-cat_faces_4202-repaired.png",
+    "ms": 15513.048148000002
+  },
+  {
+    "subject": "a chicken",
+    "arm": "off",
+    "seed": 4200,
+    "taught": "chicken",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 20,
+    "voxels": 4056,
+    "connectivity": 0.8949704142011834,
+    "sliceUsage": 0.96875,
+    "bboxFill": 0.23045454545454547,
+    "shellColors": 6,
+    "rank": 0.8794768020441097,
+    "repaired": {
+      "dropped": 216,
+      "bridged": 18,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": true,
+      "changed": true
+    },
+    "file": "a-chicken_off_4200.png",
+    "repairedFile": "a-chicken_off_4200-repaired.png",
+    "ms": 21416.611431000012
+  },
+  {
+    "subject": "a chicken",
+    "arm": "off",
+    "seed": 4201,
+    "taught": "chicken",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 10,
+    "voxels": 10427,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.6716264090177133,
+    "shellColors": 5,
+    "rank": 0.798512077294686,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-chicken_off_4201.png",
+    "ms": 18496.790605999995
+  },
+  {
+    "subject": "a chicken",
+    "arm": "off",
+    "seed": 4202,
+    "taught": "chicken",
+    "called": [
+      "box",
+      "ball",
+      "front"
+    ],
+    "surface": false,
+    "ops": 15,
+    "voxels": 820,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.4672364672364672,
+    "shellColors": 3,
+    "rank": 0.8598290598290598,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 3,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": true
+    },
+    "file": "a-chicken_off_4202.png",
+    "repairedFile": "a-chicken_off_4202-repaired.png",
+    "ms": 31640.05625600001
+  },
+  {
+    "subject": "a chicken",
+    "arm": "silhouette",
+    "seed": 4200,
+    "taught": "chicken",
+    "called": [
+      "box",
+      "ball"
+    ],
+    "surface": false,
+    "ops": 8,
+    "voxels": 237,
+    "connectivity": 0.7721518987341772,
+    "sliceUsage": 1,
+    "bboxFill": 0.17633928571428573,
+    "shellColors": 4,
+    "rank": 0.8559589737793851,
+    "gate": "debris",
+    "repaired": {
+      "dropped": 0,
+      "bridged": 7,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": true
+    },
+    "file": "a-chicken_silhouette_4200.png",
+    "repairedFile": "a-chicken_silhouette_4200-repaired.png",
+    "ms": 10774.807740999997
+  },
+  {
+    "subject": "a chicken",
+    "arm": "silhouette",
+    "seed": 4201,
+    "taught": "chicken",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 11,
+    "voxels": 283,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.33690476190476193,
+    "shellColors": 5,
+    "rank": 0.8989285714285714,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-chicken_silhouette_4201.png",
+    "ms": 10274.037354
+  },
+  {
+    "subject": "a chicken",
+    "arm": "silhouette",
+    "seed": 4202,
+    "taught": "chicken",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 11,
+    "voxels": 283,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.33690476190476193,
+    "shellColors": 5,
+    "rank": 0.8989285714285714,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-chicken_silhouette_4202.png",
+    "ms": 6545.787221000006
+  },
+  {
+    "subject": "a chicken",
+    "arm": "procedural",
+    "seed": 4200,
+    "taught": "chicken",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 11,
+    "voxels": 283,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.33690476190476193,
+    "shellColors": 5,
+    "rank": 0.8989285714285714,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-chicken_procedural_4200.png",
+    "ms": 9799.735801000003
+  },
+  {
+    "subject": "a chicken",
+    "arm": "procedural",
+    "seed": 4201,
+    "taught": "chicken",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 7,
+    "voxels": 152,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.46060606060606063,
+    "shellColors": 4,
+    "rank": 0.8618181818181817,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": true,
+      "changed": true
+    },
+    "file": "a-chicken_procedural_4201.png",
+    "repairedFile": "a-chicken_procedural_4201-repaired.png",
+    "ms": 14323.485887999996
+  },
+  {
+    "subject": "a chicken",
+    "arm": "procedural",
+    "seed": 4202,
+    "taught": "chicken",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 11,
+    "voxels": 283,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.33690476190476193,
+    "shellColors": 5,
+    "rank": 0.8989285714285714,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-chicken_procedural_4202.png",
+    "ms": 8032.450639000017
+  },
+  {
+    "subject": "a chicken",
+    "arm": "relational",
+    "seed": 4200,
+    "taught": "chicken",
+    "called": [
+      "part",
+      "attach",
+      "legs"
+    ],
+    "surface": false,
+    "ops": 14,
+    "voxels": 906,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.21571428571428572,
+    "shellColors": 6,
+    "rank": 0.9352857142857143,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 20,
+      "mirrored": false,
+      "changed": true
+    },
+    "file": "a-chicken_relational_4200.png",
+    "repairedFile": "a-chicken_relational_4200-repaired.png",
+    "ms": 18719.17104299998
+  },
+  {
+    "subject": "a chicken",
+    "arm": "relational",
+    "seed": 4201,
+    "taught": "chicken",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 8,
+    "voxels": 363,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.40513392857142855,
+    "shellColors": 4,
+    "rank": 0.8784598214285714,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-chicken_relational_4201.png",
+    "ms": 13230.503976999986
+  },
+  {
+    "subject": "a chicken",
+    "arm": "relational",
+    "seed": 4202,
+    "taught": "chicken",
+    "called": [
+      "part",
+      "attach",
+      "legs"
+    ],
+    "surface": false,
+    "ops": 16,
+    "voxels": 843,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.25089285714285714,
+    "shellColors": 5,
+    "rank": 0.9247321428571428,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 10,
+      "mirrored": true,
+      "changed": true
+    },
+    "file": "a-chicken_relational_4202.png",
+    "repairedFile": "a-chicken_relational_4202-repaired.png",
+    "ms": 25279.946194999997
+  },
+  {
+    "subject": "a chicken",
+    "arm": "faces",
+    "seed": 4200,
+    "taught": "chicken",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 11,
+    "voxels": 283,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.33690476190476193,
+    "shellColors": 5,
+    "rank": 0.8989285714285714,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-chicken_faces_4200.png",
+    "ms": 12407.388360000012
+  },
+  {
+    "subject": "a chicken",
+    "arm": "faces",
+    "seed": 4201,
+    "taught": "chicken",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 14,
+    "voxels": 268,
+    "connectivity": 0.8955223880597015,
+    "sliceUsage": 0.9333333333333333,
+    "bboxFill": 0.28359788359788357,
+    "shellColors": 4,
+    "rank": 0.8531295901445155,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 4,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": true,
+      "changed": true
+    },
+    "file": "a-chicken_faces_4201.png",
+    "repairedFile": "a-chicken_faces_4201-repaired.png",
+    "ms": 21416.403495999984
+  },
+  {
+    "subject": "a chicken",
+    "arm": "faces",
+    "seed": 4202,
+    "taught": "chicken",
+    "called": [
+      "box",
+      "ball",
+      "erase"
+    ],
+    "surface": false,
+    "ops": 11,
+    "voxels": 1367,
+    "connectivity": 0.9341623994147769,
+    "sliceUsage": 0.9642857142857143,
+    "bboxFill": 0.2347184065934066,
+    "shellColors": 5,
+    "rank": 0.892535152073603,
+    "repaired": {
+      "dropped": 90,
+      "bridged": 0,
+      "lifted": 6,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": true
+    },
+    "file": "a-chicken_faces_4202.png",
+    "repairedFile": "a-chicken_faces_4202-repaired.png",
+    "ms": 22086.826961999992
+  },
+  {
+    "subject": "a knight",
+    "arm": "off",
+    "seed": 4200,
+    "taught": "farmer",
+    "called": [
+      "box",
+      "ball",
+      "erase"
+    ],
+    "surface": false,
+    "ops": 39,
+    "voxels": 1941,
+    "connectivity": 0.9917568263781555,
+    "sliceUsage": 1,
+    "bboxFill": 0.16046626984126985,
+    "shellColors": 6,
+    "rank": 0.9485628495988814,
+    "repaired": {
+      "dropped": 16,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": true,
+      "changed": true
+    },
+    "file": "a-knight_off_4200.png",
+    "repairedFile": "a-knight_off_4200-repaired.png",
+    "ms": 52854.82125899996
+  },
+  {
+    "subject": "a knight",
+    "arm": "off",
+    "seed": 4201,
+    "taught": "farmer",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 10,
+    "voxels": 773,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.517056856187291,
+    "shellColors": 3,
+    "rank": 0.8448829431438126,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-knight_off_4201.png",
+    "ms": 15348.028941999975
+  },
+  {
+    "subject": "a knight",
+    "arm": "off",
+    "seed": 4202,
+    "taught": "farmer",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 13,
+    "voxels": 1871,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.5220424107142857,
+    "shellColors": 3,
+    "rank": 0.8433872767857142,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": true,
+      "changed": true
+    },
+    "file": "a-knight_off_4202.png",
+    "repairedFile": "a-knight_off_4202-repaired.png",
+    "ms": 16199.428896000027
+  },
+  {
+    "subject": "a knight",
+    "arm": "silhouette",
+    "seed": 4200,
+    "taught": "farmer",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 13,
+    "voxels": 1471,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.41043526785714285,
+    "shellColors": 4,
+    "rank": 0.8768694196428571,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": true,
+      "changed": true
+    },
+    "file": "a-knight_silhouette_4200.png",
+    "repairedFile": "a-knight_silhouette_4200-repaired.png",
+    "ms": 20485.487632000004
+  },
+  {
+    "subject": "a knight",
+    "arm": "silhouette",
+    "seed": 4201,
+    "taught": "farmer",
+    "called": [
+      "box",
+      "front",
+      "side"
+    ],
+    "surface": false,
+    "ops": 14,
+    "voxels": 1471,
+    "connectivity": 0.7681849082256968,
+    "sliceUsage": 1,
+    "bboxFill": 0.37834362139917693,
+    "shellColors": 9,
+    "rank": 0.7937708768705257,
+    "gate": "debris",
+    "repaired": {
+      "dropped": 40,
+      "bridged": 34,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": true
+    },
+    "file": "a-knight_silhouette_4201.png",
+    "repairedFile": "a-knight_silhouette_4201-repaired.png",
+    "ms": 18061.928370999987
+  },
+  {
+    "subject": "a knight",
+    "arm": "silhouette",
+    "seed": 4202,
+    "taught": "farmer",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 8,
+    "voxels": 1892,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.4255510571300045,
+    "shellColors": 2,
+    "rank": 0.8723346828609986,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-knight_silhouette_4202.png",
+    "ms": 13269.301024999993
+  },
+  {
+    "subject": "a knight",
+    "arm": "procedural",
+    "seed": 4200,
+    "taught": "farmer",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 16,
+    "voxels": 798,
+    "connectivity": 0.9786967418546366,
+    "sliceUsage": 1,
+    "bboxFill": 0.4910769230769231,
+    "shellColors": 4,
+    "rank": 0.8441556198187777,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 7,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": true,
+      "changed": true
+    },
+    "file": "a-knight_procedural_4200.png",
+    "repairedFile": "a-knight_procedural_4200-repaired.png",
+    "ms": 16709.79693499999
+  },
+  {
+    "subject": "a knight",
+    "arm": "procedural",
+    "seed": 4201,
+    "taught": "farmer",
+    "called": [
+      "box",
+      "legs",
+      "arms"
+    ],
+    "surface": false,
+    "ops": 17,
+    "voxels": 1332,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.3552,
+    "shellColors": 5,
+    "rank": 0.89344,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-knight_procedural_4201.png",
+    "ms": 18524.556899000017
+  },
+  {
+    "subject": "a knight",
+    "arm": "procedural",
+    "seed": 4202,
+    "taught": "farmer",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 16,
+    "voxels": 2095,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.41716447630426123,
+    "shellColors": 3,
+    "rank": 0.8748506571087216,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": true,
+      "changed": true
+    },
+    "file": "a-knight_procedural_4202.png",
+    "repairedFile": "a-knight_procedural_4202-repaired.png",
+    "ms": 21215.894756999973
+  },
+  {
+    "subject": "a knight",
+    "arm": "relational",
+    "seed": 4200,
+    "taught": "farmer",
+    "called": [
+      "box",
+      "erase"
+    ],
+    "surface": false,
+    "ops": 12,
+    "voxels": 941,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.4308608058608059,
+    "shellColors": 4,
+    "rank": 0.8707417582417581,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": true,
+      "changed": true
+    },
+    "file": "a-knight_relational_4200.png",
+    "repairedFile": "a-knight_relational_4200-repaired.png",
+    "ms": 10898.825924000004
+  },
+  {
+    "subject": "a knight",
+    "arm": "relational",
+    "seed": 4201,
+    "taught": "farmer",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 15,
+    "voxels": 712,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.52046783625731,
+    "shellColors": 4,
+    "rank": 0.843859649122807,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": true,
+      "changed": true
+    },
+    "file": "a-knight_relational_4201.png",
+    "repairedFile": "a-knight_relational_4201-repaired.png",
+    "ms": 14909.66285199998
+  },
+  {
+    "subject": "a knight",
+    "arm": "relational",
+    "seed": 4202,
+    "taught": "farmer",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 12,
+    "voxels": 1024,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.3282051282051282,
+    "shellColors": 5,
+    "rank": 0.9015384615384615,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-knight_relational_4202.png",
+    "ms": 12460.70746299997
+  },
+  {
+    "subject": "a knight",
+    "arm": "faces",
+    "seed": 4200,
+    "taught": "farmer",
+    "called": [
+      "box",
+      "erase",
+      "legs",
+      "arms"
+    ],
+    "surface": false,
+    "ops": 11,
+    "voxels": 1444,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.35813492063492064,
+    "shellColors": 3,
+    "rank": 0.8925595238095237,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-knight_faces_4200.png",
+    "ms": 15513.602305000008
+  },
+  {
+    "subject": "a knight",
+    "arm": "faces",
+    "seed": 4201,
+    "taught": "farmer",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 8,
+    "voxels": 639,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.3380952380952381,
+    "shellColors": 4,
+    "rank": 0.8985714285714286,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-knight_faces_4201.png",
+    "ms": 10713.356772999978
+  },
+  {
+    "subject": "a knight",
+    "arm": "faces",
+    "seed": 4202,
+    "taught": "farmer",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 7,
+    "voxels": 972,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.5625,
+    "shellColors": 4,
+    "rank": 0.8312499999999999,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-knight_faces_4202.png",
+    "ms": 14524.987014999962
+  },
+  {
+    "subject": "a red mushroom",
+    "arm": "off",
+    "seed": 4200,
+    "taught": "mushroom",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 7,
+    "voxels": 360,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.4017857142857143,
+    "shellColors": 5,
+    "rank": 0.8794642857142857,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-red-mushroom_off_4200.png",
+    "ms": 6835.6597700000275
+  },
+  {
+    "subject": "a red mushroom",
+    "arm": "off",
+    "seed": 4201,
+    "taught": "mushroom",
+    "called": [
+      "box",
+      "erase"
+    ],
+    "surface": false,
+    "ops": 14,
+    "voxels": 1295,
+    "connectivity": 0.6216216216216216,
+    "sliceUsage": 1,
+    "bboxFill": 0.338562091503268,
+    "shellColors": 4,
+    "rank": 0.7470800211976683,
+    "gate": "debris",
+    "repaired": {
+      "dropped": 0,
+      "bridged": 52,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": true
+    },
+    "file": "a-red-mushroom_off_4201.png",
+    "repairedFile": "a-red-mushroom_off_4201-repaired.png",
+    "ms": 32567.21743000002
+  },
+  {
+    "subject": "a red mushroom",
+    "arm": "off",
+    "seed": 4202,
+    "taught": "mushroom",
+    "called": [
+      "box",
+      "ball"
+    ],
+    "surface": false,
+    "ops": 9,
+    "voxels": 4970,
+    "connectivity": 0.7215291750503018,
+    "sliceUsage": 1,
+    "bboxFill": 0.27420689655172414,
+    "shellColors": 4,
+    "rank": 0.8063496010546034,
+    "gate": "debris",
+    "repaired": {
+      "dropped": 0,
+      "bridged": 15,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": true,
+      "changed": true
+    },
+    "file": "a-red-mushroom_off_4202.png",
+    "repairedFile": "a-red-mushroom_off_4202-repaired.png",
+    "ms": 12385.55764199997
+  },
+  {
+    "subject": "a red mushroom",
+    "arm": "silhouette",
+    "seed": 4200,
+    "taught": "mushroom",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 6,
+    "voxels": 424,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.37857142857142856,
+    "shellColors": 3,
+    "rank": 0.8864285714285713,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-red-mushroom_silhouette_4200.png",
+    "ms": 4896.20687200001
+  },
+  {
+    "subject": "a red mushroom",
+    "arm": "silhouette",
+    "seed": 4201,
+    "taught": "mushroom",
+    "called": [
+      "box",
+      "front",
+      "side"
+    ],
+    "surface": false,
+    "ops": 9,
+    "voxels": 518,
+    "connectivity": 0.9961389961389961,
+    "sliceUsage": 1,
+    "bboxFill": 0.30833333333333335,
+    "shellColors": 3,
+    "rank": 0.9059555984555985,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 3,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": true
+    },
+    "file": "a-red-mushroom_silhouette_4201.png",
+    "repairedFile": "a-red-mushroom_silhouette_4201-repaired.png",
+    "ms": 9213.756326999981
+  },
+  {
+    "subject": "a red mushroom",
+    "arm": "silhouette",
+    "seed": 4202,
+    "taught": "mushroom",
+    "called": [
+      "box",
+      "front",
+      "side"
+    ],
+    "surface": false,
+    "ops": 7,
+    "voxels": 432,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.3323076923076923,
+    "shellColors": 3,
+    "rank": 0.9003076923076923,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-red-mushroom_silhouette_4202.png",
+    "ms": 5528.662173999997
+  },
+  {
+    "subject": "a red mushroom",
+    "arm": "procedural",
+    "seed": 4200,
+    "taught": "mushroom",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 7,
+    "voxels": 352,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.3384615384615385,
+    "shellColors": 5,
+    "rank": 0.8984615384615384,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": true,
+      "changed": true
+    },
+    "file": "a-red-mushroom_procedural_4200.png",
+    "repairedFile": "a-red-mushroom_procedural_4200-repaired.png",
+    "ms": 18718.160138999985
+  },
+  {
+    "subject": "a red mushroom",
+    "arm": "procedural",
+    "seed": 4201,
+    "taught": "mushroom",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 7,
+    "voxels": 424,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.37857142857142856,
+    "shellColors": 4,
+    "rank": 0.8864285714285713,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-red-mushroom_procedural_4201.png",
+    "ms": 6780.747474999982
+  },
+  {
+    "subject": "a red mushroom",
+    "arm": "procedural",
+    "seed": 4202,
+    "taught": "mushroom",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 7,
+    "voxels": 424,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.37857142857142856,
+    "shellColors": 4,
+    "rank": 0.8864285714285713,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-red-mushroom_procedural_4202.png",
+    "ms": 4111.470695999975
+  },
+  {
+    "subject": "a red mushroom",
+    "arm": "relational",
+    "seed": 4200,
+    "taught": "mushroom",
+    "called": [
+      "part",
+      "attach"
+    ],
+    "surface": false,
+    "ops": 10,
+    "voxels": 862,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.24051339285714285,
+    "shellColors": 5,
+    "rank": 0.9278459821428571,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-red-mushroom_relational_4200.png",
+    "ms": 13694.815533999994
+  },
+  {
+    "subject": "a red mushroom",
+    "arm": "relational",
+    "seed": 4201,
+    "taught": "mushroom",
+    "called": [
+      "part",
+      "attach"
+    ],
+    "surface": false,
+    "ops": 12,
+    "voxels": 288,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.26181818181818184,
+    "shellColors": 4,
+    "rank": 0.9214545454545454,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-red-mushroom_relational_4201.png",
+    "ms": 12896.394639000006
+  },
+  {
+    "subject": "a red mushroom",
+    "arm": "relational",
+    "seed": 4202,
+    "taught": "mushroom",
+    "called": [
+      "box",
+      "part",
+      "attach"
+    ],
+    "surface": false,
+    "ops": 0,
+    "voxels": 0,
+    "connectivity": 0,
+    "sliceUsage": 0,
+    "bboxFill": 0,
+    "shellColors": 0,
+    "rank": 0,
+    "gate": "empty",
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "thickened": 0,
+      "lifted": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "failed": "the reply held no usable ops",
+    "file": "",
+    "ms": 109500.13208400004
+  },
+  {
+    "subject": "a red mushroom",
+    "arm": "faces",
+    "seed": 4200,
+    "taught": "mushroom",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 7,
+    "voxels": 316,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.28214285714285714,
+    "shellColors": 3,
+    "rank": 0.9153571428571428,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-red-mushroom_faces_4200.png",
+    "ms": 5219.345174000016
+  },
+  {
+    "subject": "a red mushroom",
+    "arm": "faces",
+    "seed": 4201,
+    "taught": "mushroom",
+    "called": [
+      "box",
+      "face"
+    ],
+    "surface": true,
+    "ops": 6,
+    "voxels": 426,
+    "connectivity": 0.9953051643192489,
+    "sliceUsage": 1,
+    "bboxFill": 0.3457792207792208,
+    "shellColors": 4,
+    "rank": 0.8781220657276996,
+    "repaired": {
+      "dropped": 2,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": true
+    },
+    "file": "a-red-mushroom_faces_4201.png",
+    "repairedFile": "a-red-mushroom_faces_4201-repaired.png",
+    "ms": 5208.711119999993
+  },
+  {
+    "subject": "a red mushroom",
+    "arm": "faces",
+    "seed": 4202,
+    "taught": "mushroom",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 6,
+    "voxels": 730,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.3168402777777778,
+    "shellColors": 6,
+    "rank": 0.9049479166666666,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-red-mushroom_faces_4202.png",
+    "ms": 5887.78729800001
+  },
+  {
+    "subject": "a stone tower",
+    "arm": "off",
+    "seed": 4200,
+    "taught": "tower",
+    "called": [
+      "box",
+      "erase"
+    ],
+    "surface": false,
+    "ops": 59,
+    "voxels": 13627,
+    "connectivity": 0.5922800322888383,
+    "sliceUsage": 0.8333333333333334,
+    "bboxFill": 0.4726673603884842,
+    "shellColors": 4,
+    "rank": 0.6451118047989901,
+    "gate": "debris",
+    "repaired": {
+      "dropped": 32,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": true
+    },
+    "file": "a-stone-tower_off_4200.png",
+    "repairedFile": "a-stone-tower_off_4200-repaired.png",
+    "ms": 21530.164867999963
+  },
+  {
+    "subject": "a stone tower",
+    "arm": "off",
+    "seed": 4201,
+    "taught": "tower",
+    "called": [
+      "box",
+      "ball",
+      "erase"
+    ],
+    "surface": false,
+    "ops": 26,
+    "voxels": 2494,
+    "connectivity": 0.9983961507618284,
+    "sliceUsage": 1,
+    "bboxFill": 0.15463789682539683,
+    "shellColors": 5,
+    "rank": 0.9529670912571123,
+    "repaired": {
+      "dropped": 4,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": true
+    },
+    "file": "a-stone-tower_off_4201.png",
+    "repairedFile": "a-stone-tower_off_4201-repaired.png",
+    "ms": 18135.666278000048
+  },
+  {
+    "subject": "a stone tower",
+    "arm": "off",
+    "seed": 4202,
+    "taught": "tower",
+    "called": [
+      "box",
+      "erase"
+    ],
+    "surface": false,
+    "ops": 23,
+    "voxels": 2277,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.7115625,
+    "shellColors": 4,
+    "rank": 0.7865312499999999,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-stone-tower_off_4202.png",
+    "ms": 8607.79595
+  },
+  {
+    "subject": "a stone tower",
+    "arm": "silhouette",
+    "seed": 4200,
+    "taught": "tower",
+    "called": [
+      "box",
+      "erase",
+      "front",
+      "side"
+    ],
+    "surface": false,
+    "ops": 14,
+    "voxels": 915,
+    "connectivity": 0.9989071038251366,
+    "sliceUsage": 1,
+    "bboxFill": 0.31508264462809915,
+    "shellColors": 4,
+    "rank": 0.9050380481416249,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 1,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": true
+    },
+    "file": "a-stone-tower_silhouette_4200.png",
+    "repairedFile": "a-stone-tower_silhouette_4200-repaired.png",
+    "ms": 10378.76638300001
+  },
+  {
+    "subject": "a stone tower",
+    "arm": "silhouette",
+    "seed": 4201,
+    "taught": "tower",
+    "called": [
+      "box",
+      "erase"
+    ],
+    "surface": false,
+    "ops": 20,
+    "voxels": 2850,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.8412042502951594,
+    "shellColors": 5,
+    "rank": 0.7476387249114521,
+    "gate": "brick",
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-stone-tower_silhouette_4201.png",
+    "ms": 12588.124500999926
+  },
+  {
+    "subject": "a stone tower",
+    "arm": "silhouette",
+    "seed": 4202,
+    "taught": "tower",
+    "called": [
+      "box",
+      "erase",
+      "front",
+      "side"
+    ],
+    "surface": false,
+    "ops": 9,
+    "voxels": 394,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.49747474747474746,
+    "shellColors": 3,
+    "rank": 0.8507575757575757,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-stone-tower_silhouette_4202.png",
+    "ms": 7913.124202999985
+  },
+  {
+    "subject": "a stone tower",
+    "arm": "procedural",
+    "seed": 4200,
+    "taught": "tower",
+    "called": [
+      "tower"
+    ],
+    "surface": false,
+    "ops": 25,
+    "voxels": 2033,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.6222834404652586,
+    "shellColors": 3,
+    "rank": 0.8133149678604223,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-stone-tower_procedural_4200.png",
+    "ms": 4379.802422999986
+  },
+  {
+    "subject": "a stone tower",
+    "arm": "procedural",
+    "seed": 4201,
+    "taught": "tower",
+    "called": [
+      "tower"
+    ],
+    "surface": false,
+    "ops": 33,
+    "voxels": 2220,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.592948717948718,
+    "shellColors": 3,
+    "rank": 0.8221153846153846,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-stone-tower_procedural_4201.png",
+    "ms": 3814.248278999934
+  },
+  {
+    "subject": "a stone tower",
+    "arm": "procedural",
+    "seed": 4202,
+    "taught": "tower",
+    "called": [
+      "tower"
+    ],
+    "surface": false,
+    "ops": 35,
+    "voxels": 1964,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.6242848061029879,
+    "shellColors": 3,
+    "rank": 0.8127145581691035,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-stone-tower_procedural_4202.png",
+    "ms": 6035.2523029999575
+  },
+  {
+    "subject": "a stone tower",
+    "arm": "relational",
+    "seed": 4200,
+    "taught": "tower",
+    "called": [
+      "face",
+      "part",
+      "attach"
+    ],
+    "surface": false,
+    "ops": 12,
+    "voxels": 0,
+    "connectivity": 0,
+    "sliceUsage": 0,
+    "bboxFill": 0,
+    "shellColors": 0,
+    "rank": 0,
+    "gate": "empty",
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "thickened": 0,
+      "lifted": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "failed": "the reply painted no voxels",
+    "file": "",
+    "ms": 40287.25489600003
+  },
+  {
+    "subject": "a stone tower",
+    "arm": "relational",
+    "seed": 4201,
+    "taught": "tower",
+    "called": [
+      "box",
+      "erase",
+      "side",
+      "part",
+      "attach"
+    ],
+    "surface": false,
+    "ops": 8,
+    "voxels": 1870,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.6233333333333333,
+    "shellColors": 3,
+    "rank": 0.813,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-stone-tower_relational_4201.png",
+    "ms": 110039.79683100001
+  },
+  {
+    "subject": "a stone tower",
+    "arm": "relational",
+    "seed": 4202,
+    "taught": "tower",
+    "called": [
+      "box",
+      "erase",
+      "part",
+      "attach"
+    ],
+    "surface": false,
+    "ops": 12,
+    "voxels": 2450,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.6543803418803419,
+    "shellColors": 4,
+    "rank": 0.8036858974358974,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-stone-tower_relational_4202.png",
+    "ms": 11636.122107999981
+  },
+  {
+    "subject": "a stone tower",
+    "arm": "faces",
+    "seed": 4200,
+    "taught": "tower",
+    "called": [
+      "box",
+      "erase"
+    ],
+    "surface": false,
+    "ops": 27,
+    "voxels": 3796,
+    "connectivity": 0.9947312961011591,
+    "sliceUsage": 1,
+    "bboxFill": 0.5491898148148148,
+    "shellColors": 3,
+    "rank": 0.8331355739960192,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 18,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": true
+    },
+    "file": "a-stone-tower_faces_4200.png",
+    "repairedFile": "a-stone-tower_faces_4200-repaired.png",
+    "ms": 11614.461731999996
+  },
+  {
+    "subject": "a stone tower",
+    "arm": "faces",
+    "seed": 4201,
+    "taught": "tower",
+    "called": [
+      "box",
+      "ball",
+      "erase"
+    ],
+    "surface": false,
+    "ops": 13,
+    "voxels": 1452,
+    "connectivity": 0.9972451790633609,
+    "sliceUsage": 1,
+    "bboxFill": 0.605,
+    "shellColors": 3,
+    "rank": 0.8173980716253444,
+    "repaired": {
+      "dropped": 4,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": true
+    },
+    "file": "a-stone-tower_faces_4201.png",
+    "repairedFile": "a-stone-tower_faces_4201-repaired.png",
+    "ms": 9064.597379000043
+  },
+  {
+    "subject": "a stone tower",
+    "arm": "faces",
+    "seed": 4202,
+    "taught": "tower",
+    "called": [
+      "box",
+      "erase",
+      "front"
+    ],
+    "surface": false,
+    "ops": 20,
+    "voxels": 3930,
+    "connectivity": 0.9969465648854962,
+    "sliceUsage": 1,
+    "bboxFill": 0.6396484375,
+    "shellColors": 5,
+    "rank": 0.8068840947041985,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 12,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": true,
+      "changed": true
+    },
+    "file": "a-stone-tower_faces_4202.png",
+    "repairedFile": "a-stone-tower_faces_4202-repaired.png",
+    "ms": 16337.941240999964
+  },
+  {
+    "subject": "a Mario brick block",
+    "arm": "off",
+    "seed": 4200,
+    "taught": "tower",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 6,
+    "voxels": 626,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.7728395061728395,
+    "shellColors": 3,
+    "rank": 0.7681481481481481,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": true,
+      "changed": true
+    },
+    "file": "a-Mario-brick-block_off_4200.png",
+    "repairedFile": "a-Mario-brick-block_off_4200-repaired.png",
+    "ms": 6482.2321919999085
+  },
+  {
+    "subject": "a Mario brick block",
+    "arm": "off",
+    "seed": 4201,
+    "taught": "tower",
+    "called": [],
+    "surface": false,
+    "ops": 0,
+    "voxels": 0,
+    "connectivity": 0,
+    "sliceUsage": 0,
+    "bboxFill": 0,
+    "shellColors": 0,
+    "rank": 0,
+    "gate": "empty",
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "thickened": 0,
+      "lifted": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "failed": "the reply held no usable ops",
+    "file": "",
+    "ms": 2801.891405000002
+  },
+  {
+    "subject": "a Mario brick block",
+    "arm": "off",
+    "seed": 4202,
+    "taught": "tower",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 14,
+    "voxels": 800,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 1,
+    "shellColors": 3,
+    "rank": 0.7,
+    "gate": "brick",
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-Mario-brick-block_off_4202.png",
+    "ms": 7715.461065999931
+  },
+  {
+    "subject": "a Mario brick block",
+    "arm": "silhouette",
+    "seed": 4200,
+    "taught": "tower",
+    "called": [
+      "box",
+      "erase"
+    ],
+    "surface": false,
+    "ops": 9,
+    "voxels": 256,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 1,
+    "shellColors": 2,
+    "rank": 0.7,
+    "gate": "brick",
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-Mario-brick-block_silhouette_4200.png",
+    "ms": 12055.908199999947
+  },
+  {
+    "subject": "a Mario brick block",
+    "arm": "silhouette",
+    "seed": 4201,
+    "taught": "tower",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 13,
+    "voxels": 8192,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 1,
+    "shellColors": 2,
+    "rank": 0.7,
+    "gate": "brick",
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-Mario-brick-block_silhouette_4201.png",
+    "ms": 13281.240630000015
+  },
+  {
+    "subject": "a Mario brick block",
+    "arm": "silhouette",
+    "seed": 4202,
+    "taught": "tower",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 15,
+    "voxels": 4096,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 1,
+    "shellColors": 3,
+    "rank": 0.7,
+    "gate": "brick",
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-Mario-brick-block_silhouette_4202.png",
+    "ms": 15188.095164000057
+  },
+  {
+    "subject": "a Mario brick block",
+    "arm": "procedural",
+    "seed": 4200,
+    "taught": "tower",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 21,
+    "voxels": 16484,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.9469209558823529,
+    "shellColors": 2,
+    "rank": 0.715923713235294,
+    "gate": "brick",
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-Mario-brick-block_procedural_4200.png",
+    "ms": 16821.826793999993
+  },
+  {
+    "subject": "a Mario brick block",
+    "arm": "procedural",
+    "seed": 4201,
+    "taught": "tower",
+    "called": [
+      "box",
+      "ball"
+    ],
+    "surface": false,
+    "ops": 16,
+    "voxels": 8380,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.7439630681818182,
+    "shellColors": 2,
+    "rank": 0.7768110795454545,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-Mario-brick-block_procedural_4201.png",
+    "ms": 15739.582632999984
+  },
+  {
+    "subject": "a Mario brick block",
+    "arm": "procedural",
+    "seed": 4202,
+    "taught": "tower",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 11,
+    "voxels": 256,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 1,
+    "shellColors": 1,
+    "rank": 0.7,
+    "gate": "brick",
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-Mario-brick-block_procedural_4202.png",
+    "ms": 10185.040402999963
+  },
+  {
+    "subject": "a Mario brick block",
+    "arm": "relational",
+    "seed": 4200,
+    "taught": "tower",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 8,
+    "voxels": 125,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 1,
+    "shellColors": 3,
+    "rank": 0.7,
+    "gate": "brick",
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-Mario-brick-block_relational_4200.png",
+    "ms": 11313.064690000028
+  },
+  {
+    "subject": "a Mario brick block",
+    "arm": "relational",
+    "seed": 4201,
+    "taught": "tower",
+    "called": [
+      "box",
+      "part"
+    ],
+    "surface": false,
+    "ops": 11,
+    "voxels": 130,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 0.65,
+    "shellColors": 4,
+    "rank": 0.8049999999999999,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": true,
+      "changed": true
+    },
+    "file": "a-Mario-brick-block_relational_4201.png",
+    "repairedFile": "a-Mario-brick-block_relational_4201-repaired.png",
+    "ms": 13350.919538000016
+  },
+  {
+    "subject": "a Mario brick block",
+    "arm": "relational",
+    "seed": 4202,
+    "taught": "tower",
+    "called": [
+      "box"
+    ],
+    "surface": false,
+    "ops": 10,
+    "voxels": 576,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 1,
+    "shellColors": 3,
+    "rank": 0.7,
+    "gate": "brick",
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-Mario-brick-block_relational_4202.png",
+    "ms": 7957.937077000039
+  },
+  {
+    "subject": "a Mario brick block",
+    "arm": "faces",
+    "seed": 4200,
+    "taught": "tower",
+    "called": [
+      "box",
+      "face"
+    ],
+    "surface": true,
+    "ops": 42,
+    "voxels": 4096,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 1,
+    "shellColors": 4,
+    "rank": 0.8799999999999999,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-Mario-brick-block_faces_4200.png",
+    "ms": 10842.051058999961
+  },
+  {
+    "subject": "a Mario brick block",
+    "arm": "faces",
+    "seed": 4201,
+    "taught": "tower",
+    "called": [
+      "box",
+      "face"
+    ],
+    "surface": true,
+    "ops": 53,
+    "voxels": 4096,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 1,
+    "shellColors": 4,
+    "rank": 0.8799999999999999,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-Mario-brick-block_faces_4201.png",
+    "ms": 20230.038252
+  },
+  {
+    "subject": "a Mario brick block",
+    "arm": "faces",
+    "seed": 4202,
+    "taught": "tower",
+    "called": [
+      "box",
+      "face"
+    ],
+    "surface": true,
+    "ops": 74,
+    "voxels": 4096,
+    "connectivity": 1,
+    "sliceUsage": 1,
+    "bboxFill": 1,
+    "shellColors": 3,
+    "rank": 0.82,
+    "repaired": {
+      "dropped": 0,
+      "bridged": 0,
+      "lifted": 0,
+      "thickened": 0,
+      "mirrored": false,
+      "changed": false
+    },
+    "file": "a-Mario-brick-block_faces_4202.png",
+    "ms": 7386.988516999991
+  }
+]

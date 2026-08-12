@@ -289,7 +289,7 @@ const runOne = async (job: {subject: string; arm: Arm; seed: number}): Promise<C
             ms: performance.now() - started
         }
     }
-    await writeFile(`${OUT}/png/${key}.js`, reply)
+    await writeFile(`${OUT}/png/${key}.txt`, reply)
 
     const spec: VoxSpec | undefined = specFromCode(reply, subject, CANVAS, flags)
     const flat = spec ? rasterise(spec, CANVAS) : undefined

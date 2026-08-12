@@ -136,6 +136,43 @@ sections.push(`<section>
   }
 </section>`)
 
+/* ---- did the model use the language it was given? ---- */
+const ADDS: Readonly<Record<string, readonly string[]>> = {
+    silhouette: ['front', 'side'],
+    procedural: ['tree', 'tower', 'rock'],
+    relational: ['part', 'attach', 'legs', 'arms'],
+    faces: ['face']
+}
+const usedNew = (cell: Cell): boolean =>
+    (ADDS[cell.arm] ?? []).some(name => cell.called.includes(name))
+
+const uptakeRows = SUBJECTS.map(subject => {
+    const tds = ARMS.slice(1)
+        .map(arm => {
+            const mine = cells.filter(cell => cell.subject === subject && cell.arm === arm)
+            const used = mine.filter(usedNew).length
+            const klass = used === 0 ? 'bad' : used === mine.length ? 'good' : ''
+            return `<td class="${klass}">${String(used)}/${String(mine.length)}</td>`
+        })
+        .join('')
+    return `<tr><th>${escape(subject)}</th>${tds}</tr>`
+}).join('')
+
+sections.push(`<section>
+  <h2>did the model use the language it was handed?</h2>
+  <p class="lede">Counted off the raw reply, not the ops — every experiment emits the same three ops
+  by design, so a spec cannot answer this. <code>GEN_IDEAS.md</code> §2 names ignoring the new
+  language as the way each of these ideas dies.</p>
+  <div class="scroll"><table class="facts wide">
+    <thead><tr><th>subject</th>${ARMS.slice(1).map(arm => `<th>${arm}</th>`).join('')}</tr></thead>
+    <tbody>${uptakeRows}</tbody>
+  </table></div>
+  <p class="lede"><code>procedural</code> and <code>faces</code> are told in the system prompt to be
+  used only for what they are for — a plant, a building, a rock; a block, a tile, a crate. Of these
+  six subjects only the tower and the block qualify, so their scores should be read as
+  &ldquo;on the eligible subject&rdquo; rather than as a rate over all six.</p>
+</section>`)
+
 /* ---- gates, retryEmpty, and the prop declaration ---- */
 const rejected = cells.filter(cell => cell.gate !== undefined && cell.failed === undefined)
 const empties = cells.filter(cell => cell.failed !== undefined)
@@ -216,6 +253,8 @@ const html = `<title>Which switches earn their place</title>
   table.facts.wide { width:100%; font-family:var(--mono); font-size:12px; }
   table.facts tr:last-child th, table.facts tr:last-child td { border-bottom:none; }
   .bad { color:var(--bad); }
+  table.facts td.good { color:var(--accent); font-weight:600; }
+  table.facts td.bad { color:var(--bad); font-weight:600; }
   code { font-family:var(--mono); font-size:.88em; background:var(--surface-2); padding:1px 5px; border-radius:3px; }
 </style>
 <div class="wrap">
