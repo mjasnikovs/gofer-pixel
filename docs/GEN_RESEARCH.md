@@ -527,3 +527,55 @@ replacing them.
 Caveats, stated because the ladder is the most actionable thing in this file: n = 9 per arm, one
 teacher, three subjects, one canvas. `LINE_BUDGET` is also no longer what it was — it is 80 because
 three examples used to ride in every call, and since 2026-08-12 only one does.
+
+### The ladder did not survive its own follow-up, and here is the number that says why (2026-08-12)
+
+The length finding above was acted on the same day: all five built-in replies were cut roughly in
+half — dog 12 → 6, chicken 12 → 6, farmer 14 → 7, mushroom 8 → 5, tower 13 → 7 — each still a
+connected model that renders as what it claims. Six subjects, three fixed seeds, long against short.
+
+| arm   | mean voxels | connectivity |
+| ----- | ----------- | ------------ |
+| long  | 2430        | 0.976        |
+| short | 2325        | 0.956        |
+
+**Nothing.** And per subject it goes both ways: the cat halved, the tower doubled.
+
+So the spread was measured instead, across all 132 candidates from the four experiments above.
+Inside a single cell — same subject, same example, same everything but the seed — voxel counts land
+like this:
+
+| cell                 | the three seeds  | max / min |
+| -------------------- | ---------------- | --------- |
+| a cat, 12-line dog   | 290, 546, 5974   | **20.6×** |
+| a cat, short dog     | 82, 520, 5377    | **65.6×** |
+| a horse, 6-line dog  | 768, 817, 7172   | 9.3×      |
+| a stone tower, short | 2556, 3017, 3059 | 1.2×      |
+
+Median 2.7× in one run and 3.4× in the other. As a standard deviation: **SD of log2(voxels) inside a
+cell is 0.88**, so a typical seed lands 1.8× away from its own cell's mean. From that:
+
+| difference to detect | seeds needed per arm |
+| -------------------- | -------------------- |
+| 3×                   | 5                    |
+| 2×                   | 13                   |
+| 1.5×                 | 36                   |
+
+**Three seeds per cell is the protocol this whole file was written on, and it can only see a
+threefold effect.** That is not a footnote about the ladder; it applies backwards to every "measured
+live, three fixed seeds, one candidate per cell" table above. The ones that survive are the
+one-sided ones — 3 of 3 against 0 of 3 is a different kind of claim than a mean moving 20 % — and
+the ones that do not are any comparison of a continuous number.
+
+What the ladder is left with: its span, 6 lines against 45, is 4.5× and clears the bar, but the
+45-line arm is also the only machine-written one, so length and style are confounded exactly there.
+The hand-written 6 against 20 is 3.1×, right at the limit. Everything between is noise.
+
+And the deeper mistake is mine and worth naming: **voxel count was standing in for "commits to
+shape", and it is not that.** Bigger is not better — the record's own `bboxFill` finding is that a
+model filling its own box has no silhouette. A proxy metric on an underpowered protocol is how the
+ladder read as monotone.
+
+**The rule this leaves behind:** a claim about a mean needs thirteen seeds, not three. A claim about
+whether the model _uses_ a language, or whether a gate fires, is a count and stays cheap. Prefer the
+countable question.
