@@ -23,6 +23,11 @@ produce pixels.
 6. `docs/VALIDATE.md` — how to find out whether a gesture actually works, and the paste-able prompt
    for it. Read it before saying a tool does or does not do something: `bun test` cannot see the
    input layer, and three bugs in one session hid there.
+7. `docs/GEN_VISION.md` — what the vision model can and cannot do with a render of a voxel model, as
+   a benchmark with a floor rather than an impression. Read it before proposing anything that sends
+   a picture to the model: back-feeding, ranking, gating, a second opinion. **It reads the pictures
+   at 92 % and it still cannot rank two seeds apart**, and the four things it does read well are the
+   four `score.ts` and `repair.ts` already compute exactly and for free.
 
 ## The rebuild
 
@@ -129,7 +134,7 @@ brick. All three are in `src/gen/ops.ts` and `src/gen/llama.ts`, with the number
    Plant and building are the strongest; bird is the weakest and still sometimes leaves a mirror
    seam.
 
-Four things were tried against the same problem and **all four failed**. Do not spend a session
+Five things were tried against the same problem and **all five failed**. Do not spend a session
 re-running them:
 
 - **Feeding the renders back and asking for a revision.** The critique is accurate and specific
@@ -140,6 +145,12 @@ re-running them:
   looked like a fix at n=3 and was a wash at n=6, for three times the wall clock.
 - **The model as a yes/no judge over candidates**, which finding 2 says is its one reliable vision
   skill. It gave 4/4 and 1/4 to pictures that could not be told apart. It does not rank.
+- **The model as a _forced choice_ between two candidates**, which is the same idea asked the one
+  way that was left — five views, grammar-constrained to A or B, 2026-08-12. It spots deliberate
+  damage at 92 %, and on real candidates of one prompt its answer survives being asked the other way
+  round **7 times in 12, where a coin manages 6**. Every flip names whichever model came second.
+  Full numbers and method in `docs/GEN_VISION.md`; it also measures that the model reads the renders
+  far better than finding 2 implies, and that this buys the pipeline nothing.
 
 What is different from the legacy build: **nothing rasterises a spec twice, and nothing scores it
 with a model.** Legacy shipped the op list to Python and re-rasterised and re-rendered it there with

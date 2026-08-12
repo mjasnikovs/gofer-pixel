@@ -1,0 +1,17 @@
+generating 5 candidates for "a cat"
+  seed 4200: score 0.890
+  seed 4201: score 0.802
+  seed 4202: no usable ops
+  seed 4203: score 0.839
+  seed 4204: score 0.827
+
+pairs, each asked both ways round:
+  4200 vs 4201   said B then A   consistent   scores 0.890 / 0.802
+  4200 vs 4203   said B then A   consistent   scores 0.890 / 0.839
+  4200 vs 4204   said B then A   consistent   scores 0.890 / 0.827
+  4201 vs 4203   said A then B   consistent   scores 0.802 / 0.839
+  4201 vs 4204   said B then B   FLIPPED   scores 0.802 / 0.827
+  4203 vs 4204   said B then B   FLIPPED   scores 0.839 / 0.827
+
+survived the swap: 4 of 6 (67 %) — a coin manages 50 %
+agreed with overallScore, on the consistent pairs: 0 of 4

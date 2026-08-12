@@ -325,6 +325,60 @@ not tuned until they did something.
 The default path is byte-identical to the old one, verified float for float, so the switch is a real
 before/after and not a new baseline.
 
+### The model can read a render, and it does not help (2026-08-12)
+
+Full write-up in **`docs/GEN_VISION.md`**; harness in `docs/spikes/vision/`; 1484 calls, every one a
+fresh session, ground truth computed from the grid, and a no-image control as the floor.
+
+The record had three deaths for feeding a render back and had never asked whether the model sees the
+picture. It does: **92 % across five closed geometric questions against a 28 % blind floor**, at
+five views, 96 px, 32³, with a GBNF grammar on the answer.
+
+What that bought, and did not:
+
+- **Nothing for the generator.** The four geometric questions it answers well are the ones
+  `score.ts` and `repair.ts` already compute exactly, from the grid, for free. Spending 7.3 s and
+  five renders on a 92 %-accurate estimate of a number the code knows exactly is not an improvement.
+- **Nothing for the naming call.** The five bank models named under `veto.ts`'s current single 224
+  px view and under the best five-view configuration come back **identical** — the dog is "Cow" both
+  times, the farmer "Villager" both times. `veto.ts` needs no change.
+- **The revision loop stays dead.** These findings are about reading, and the revision findings are
+  about editing. A model that reads its own render at 92 % and still re-emits identical code is a
+  model that cannot express a fix.
+
+Three results are worth keeping anyway, because they are cheap and they are load-bearing if a vision
+call is ever added:
+
+- **Separate images, never a composite strip: 27 points.** The same four views scored 85 % sent as
+  four images and 58 % as one strip; counting pieces collapsed from 83 % to 33 %. Every four-view
+  result in this project's earlier record was a strip.
+- **One view cannot read depth: 4/18, below chance, and all 14 misses say "width".** Only a camera
+  directly above fixes it — four elevations do not, four three-quarter views do not. This is finding
+  4's front-to-back tank reversal, measured from the reading end.
+- **Three labelled example pictures are worth ten points** at one view (75 → 85 %), and six are not
+  better than three. Finding 7 holds in the image channel — and at five views the examples are worth
+  nothing, because the views already bought it.
+
+**And it cannot rank, measured a second way.** Asked as a forced choice over five views with a
+grammar — the configuration above, not the one-view free-form score finding 2 killed:
+
+- Against **known damage** it is right 92 % of the time (five views; 84 % at one view), over the
+  five bank models each paired with itself debris-scattered, holed, split into two floating halves
+  or squashed to half height. Pairs whose damage does not change the picture are skipped — measured,
+  not assumed: the shaft through the tower is inside its own walls.
+- Against **real candidates of the same prompt**, ten generated live at temperature 0.9, **7 of 12
+  pairs survive being asked with the two models swapped. A coin manages 6 of 12.**
+- **Every flip is "B then B"** — five of five — the model naming whichever candidate came second.
+  Shown the same model twice it says A, five times out of five, so this is not a flat position
+  prior; it is what appears when the difference is real and too fine to call.
+
+A damage detector, not a judge. What it detects is what `repair.ts` already finds in code and fixes.
+
+Three of the five near-misses this session were **harness bugs that would have shipped as
+findings**: an unbalanced corpus that scored 89 % blind, an 8-token cap truncating the answer, and a
+red-pixel detector that ignored `FACE_LIGHT` and reported the app's own camera ring as unable to
+show a left face. That is the argument for the harness existing.
+
 ## Leads worth wiring next
 
 - **Assets for the bank.** The decomposer is waiting on models. One good CC0 `.vox` per entry — dog,
