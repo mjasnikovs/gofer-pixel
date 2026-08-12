@@ -672,7 +672,20 @@ export const generateMany = async (
              * "a Mario brick block" at 83 % and 95 % solid.
              */
             const surface = attempt.candidate.spec.surface === true
-            const admission = admit(scoreModel(attempt.candidate.volume), tally, count, surface)
+            /*
+             * The candidate's own scores, not a second pass over the shaded grid.
+             *
+             * This used to be `scoreModel(attempt.candidate.volume)` — one argument, so `flat`
+             * defaulted to the shaded volume and `shellColors` was measured after `finish` had
+             * invented up to two tones per colour. Every prop's shell came back at 10 or more, and
+             * `MIN_SHELL_COLORS` is 3, so **the flat rule could not fire at all**: the gate's one
+             * rule for the one subject `face` exists for was dead, and a genuinely one-colour block
+             * passed it on the strength of shading the exporter never writes.
+             *
+             * `candidate.scores` is `scoreModel(shaded, volume)` — computed once, in the only place
+             * both grids exist, which is the reason that field is on the candidate at all.
+             */
+            const admission = admit(attempt.candidate.scores, tally, count, surface)
             tally = admission.tally
             onGate?.(tally)
             if (!admission.keep) {

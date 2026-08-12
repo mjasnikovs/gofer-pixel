@@ -519,6 +519,51 @@ test('the gate spends another seed on a brick, and the grid still fills', async 
 })
 
 /*
+ * The gate reads the candidate's *own* scores, and this test is here because it did not.
+ *
+ * `gateReason` is asked about `flat` directly in `gate.test.ts`, so the rule was covered and the
+ * wiring was not: `generateMany` re-scored the shaded volume with one argument, `shellColors` was
+ * therefore measured after `finish` had invented up to two tones per colour, and every prop's shell
+ * came back at 10 or more against a threshold of 3. The one rule written for the one subject `face`
+ * exists for could not fire.
+ *
+ * A one-colour block is exactly that case: `face` was declared, nothing was painted on the surface,
+ * and the shading is not content the exporter ever writes.
+ */
+test('a prop with one colour is rejected as flat, on its own colours and not its shading', async () => {
+    const bare: VoxSpec = {
+        name: 'block',
+        size: [8, 8, 8],
+        mirror_x: false,
+        surface: true,
+        ops: [{op: 'box', from: [0, 0, 0], to: [7, 7, 7], color: '#808080'}]
+    }
+    const painted: VoxSpec = {
+        ...bare,
+        ops: [
+            {op: 'box', from: [0, 0, 0], to: [7, 7, 7], color: '#808080'},
+            {op: 'box', from: [0, 0, 7], to: [7, 7, 7], color: '#c8b070'},
+            {op: 'box', from: [0, 7, 0], to: [7, 7, 7], color: '#5a4632'}
+        ]
+    }
+    const llama = memoryLlama([bare, painted])
+    const attempts = await generateMany(llama, 'a Mario brick block', 1, {
+        now: at,
+        seed: 60,
+        flags: {...DEFAULT_FLAGS, gates: true}
+    })
+
+    // The bare block burned seed 60 and the painted one filled the slot.
+    expect(llama.seen.map(call => call.sampler.seed)).toEqual([60, 61])
+    expect(attempts).toHaveLength(1)
+    expect(attempts[0]?.ok).toBe(true)
+
+    // And the brick rule stays down for a prop: the painted block is 100 % solid and kept.
+    const kept = landed(attempts)[0]
+    expect(kept?.scores.bboxFill).toBe(1)
+})
+
+/*
  * `auto` — one call per batch chooses the language, and everything after it reads the resolved
  * flags: the system prompt, the reply's scope and which worked examples are sent. See `gen/auto.ts`.
  */
