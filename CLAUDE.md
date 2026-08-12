@@ -269,6 +269,32 @@ Five things about how they are wired that are decisions, not plumbing:
 Two ideas from the document are **not** built and the reasons are external: the bank still has no
 real assets on this machine, and the TRELLIS-class spike needs llama-server unloaded off both GPUs.
 
+**Measured 2026-08-12, and it governs everything above: three seeds can only see a threefold
+effect.** Across 132 candidates, the standard deviation of `log2(voxels)` _inside one cell_ — same
+subject, same example, everything but the seed — is 0.88, so a typical seed lands 1.8× from its own
+cell's mean, and a cat taught by the same example came back at 290, 546 and 5974 voxels. Detecting a
+2× difference needs about 13 seeds an arm; 1.5× needs 36. `GEN_RESEARCH.md` is largely written on
+three, so **its one-sided claims stand and its comparisons of a mean do not** — 3 of 3 against 0 of
+3 is a different kind of statement from a mean moving 20 %.
+
+So: **prefer the countable question.** Did the reply call the new function. Did the gate fire. Did
+the picking call name one id. Those are cheap at three seeds and they are what the flag verdicts in
+`GEN_RESEARCH.md` are built from. Anything phrased as "bigger" or "better" needs the thirteen, and
+`voxels` is not a quality measure at all — `bboxFill` is already on record that a model filling its
+own box has no silhouette.
+
+Three flag verdicts from that run, all counts: **`procedural` and `faces` fire 3 of 3 on their own
+subject and near zero elsewhere**, which is the language self-restricting; **`relational` is aimed
+backwards**, 3 of 3 on the mushroom and tower and 0 of 3 on the cat and knight, which are the two
+subjects a parts-and-limbs language exists for; and **`retryEmpty` would recover 3 of 90**, against
+the one-in-six bar `GEN_IDEAS.md` §11 set for itself.
+
+**`GEN_IDEAS.md` §8's first half is also in doubt.** Real CC-BY models in the bank were measured
+_worse_ than the hand-typed replies, and narrating one in the house style did not recover it. The
+decomposer needs about 300 boxes to cover an organic sculpture against a budget of 80, so only
+blocky models can ever fit — and `LINE_BUDGET` is 80 because three examples used to ride in every
+call, which since 2026-08-12 is one.
+
 ## Twenty-one seams worth knowing about
 
 The app layer is deliberately thin, and twenty-one modules under it hold what would otherwise be
