@@ -247,7 +247,7 @@ test('the GPU is the GPU — a 512x512 frame through 32³ costs a fraction of a 
      * NVIDIA box. The string goes in the failure message only.
      *
      * The bound separates two measured populations, not one number from a guess. On the hardware
-     * device: 0.17 ms idle, up to 2.4 ms while the GPU is also serving llama-server, which owns
+     * device: 0.17 ms idle, up to 2.4 ms while the GPU is also serving something else, which owns
      * ~95 % of its memory and most of its time. On SwiftShader: 58–63 ms. Ten milliseconds sits
      * four times above the worst hardware sample and six times below the best software one, so it
      * cannot pass by accident on software and cannot fail by accident under load.

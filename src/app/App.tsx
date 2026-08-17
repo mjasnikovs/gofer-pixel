@@ -3,9 +3,6 @@ import {shownVolume} from '../doc/objects'
 import {saveDocument} from '../doc/save'
 import type {Files} from '../doc/files'
 import {clearSnapshots, putSnapshot, snapshots, type Store} from '../doc/store'
-import type {Llama} from '../gen/llama'
-import {defaultLibrary, type Library} from '../gen/library'
-import {browserVeto, type Veto} from '../gen/veto'
 import type {Volume} from '../render/volume'
 import {BrushPanel} from './BrushPanel'
 import {ExportDialog} from './ExportDialog'
@@ -93,23 +90,12 @@ import {
  *
  * The keyboard is `keys.ts`; what a key means is a table, and what is here is the listener.
  */
-/**
- * The two stateless ports, built once at module load rather than per render.
- *
- * They close over an endpoint string and nothing else, so a second instance is a waste rather than
- * a bug — which is exactly why they may have a default and `store` and `files` may not.
- */
-const DEFAULT_VETO = browserVeto()
-
 export const App = ({
     volume: source,
     name,
     opened,
     store,
-    files,
-    library = defaultLibrary,
-    llama,
-    veto = DEFAULT_VETO
+    files
 }: {
     volume: Volume
     name: string
@@ -133,16 +119,6 @@ export const App = ({
      * only way to say so is to refuse to make one here.
      */
     files: Files
-    /** The local model — see `src/gen/llama.ts`. A port, so a test needs no GPU. */
-    llama?: Llama
-    /**
-     * The worked-example bank — see `src/gen/library.ts`. A thunk, not a value, because loading it
-     * decomposes every model in `src/assets/examples/` and nothing should pay for that until the
-     * generate dialog is actually opened.
-     */
-    library?: () => Promise<Library>
-    /** The naming judge — see `src/gen/veto.ts`. The same server as `llama`. */
-    veto?: Veto
 }) => {
     const [state, dispatch] = useReducer(reduce, source, start => initialState(start, name, opened))
     // Everything below reads the *document's* volume, not the one the file was opened with. They
@@ -445,19 +421,8 @@ export const App = ({
 
             {dialog.kind === 'generate' && (
                 <GenerateDialog
-                    library={library}
-                    {...(llama ? {llama} : {})}
-                    store={store}
-                    files={files}
-                    volume={shown}
-                    veto={veto}
                     onClose={() => {
                         take(closed())
-                    }}
-                    onPick={(built, made, record) => {
-                        take(closed())
-                        files.forget()
-                        dispatch({type: 'generate', volume: built, name: made, record})
                     }}
                 />
             )}

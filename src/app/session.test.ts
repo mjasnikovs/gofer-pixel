@@ -45,8 +45,7 @@ const asSaved = (grid = createVolume(8, 8, 8, volume.palette)) => ({
     cameras: [],
     references: [],
     symmetry: NO_SYMMETRY,
-    output: DEFAULT_OUTPUT,
-    origin: undefined
+    output: DEFAULT_OUTPUT
 })
 
 /** A port that always hands back this one file, whatever it was asked for. */

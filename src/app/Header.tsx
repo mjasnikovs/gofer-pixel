@@ -240,8 +240,14 @@ export const Header = ({
                      * thing an artist does once before they start rather than while they draw —
                      * and because a candidate replaces the open document, which is a File-menu
                      * kind of promise, not a tool.
+                     *
+                     * Disabled, because `src/gen/` has been removed and `GenerateDialog.tsx` is a
+                     * shell. It stays in the menu rather than going with the code: the region is
+                     * still in `docs/featureset.png`, and a greyed row says "not built" where a
+                     * missing row says nothing at all — the same reading Measure had while it was
+                     * a stub in the tool rail.
                      */
-                    {label: 'Generate a model…', onClick: onGenerate},
+                    {label: 'Generate a model…', isDisabled: true, onClick: onGenerate},
                     ...(restores.length > 0 ? [{type: 'divider' as const}] : []),
                     ...restoreLabels(restores).map(entry => ({
                         label: entry.label,

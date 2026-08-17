@@ -9,7 +9,6 @@ import {latestSnapshot, memoryStore, snapshots, type Store} from '../doc/store'
 import {memoryFiles, type Files} from '../doc/files'
 import {initialObjects} from '../doc/objects'
 import {NO_SYMMETRY} from '../doc/symmetry'
-import {memoryLlama, type Llama} from '../gen/llama'
 import {handle} from './handle'
 import {fakeGl, withFakeGl} from '../../test/fake-gl'
 
@@ -25,8 +24,7 @@ const volume = readVox(
  */
 const mount = async (
     store: Store = memoryStore(),
-    files: Files = memoryFiles(),
-    llama?: Llama
+    files: Files = memoryFiles()
 ): Promise<{root: Root; host: HTMLElement}> => {
     const host = document.createElement('div')
     document.body.appendChild(host)
@@ -38,7 +36,6 @@ const mount = async (
                 name='car.vox'
                 store={store}
                 files={files}
-                {...(llama ? {llama} : {})}
             />
         )
     })
@@ -312,99 +309,20 @@ test('a .gpix on the disk opens over what is on screen', async () => {
 })
 
 /*
- * Generation — `src/gen/`. Two things only the whole window can answer: that the menu reaches it at
- * all, and that a picked candidate lands in the *document* rather than in the dialog's own state.
- * Everything else about the dialog is in `GenerateDialog.test.tsx`, against the same canned ports.
+ * Generation is gone — `src/gen/` was removed and the menu item that opened it is disabled. What
+ * is left is `GenerateDialog.tsx`, a shell nothing in the running app can reach, so the two tests
+ * that lived here (the menu reaching the pipeline, a candidate landing in the document) went with
+ * the code they were about. The one claim worth keeping is that the row is still there and greyed.
  */
-test('a generated candidate becomes the open document, provenance and all', async () => {
-    const tower = {
-        name: 'tower',
-        size: [8, 8, 12] as [number, number, number],
-        mirror_x: false,
-        ops: [
-            {
-                // Ops are y-up: 6 wide, 12 tall, 6 deep. See `gen/ops.ts`.
-                op: 'box' as const,
-                from: [1, 0, 1] as [number, number, number],
-                to: [6, 11, 6] as [number, number, number],
-                color: '#808080'
-            }
-        ]
-    }
-    const mounted = await mount(memoryStore(), memoryFiles(), memoryLlama([tower], 'qwen'))
+test('the generate menu item is present and disabled', async () => {
+    const mounted = await mount()
 
     await act(async () => {
         control(mounted.host, 'Main menu').click()
     })
-    await act(async () => {
-        menuItem('Generate a model…').click()
-    })
-    expect(openDialogTitle()).toBe('Generate a model')
+    const item = menuItem('Generate a model…')
 
-    /*
-     * The canvas off, so the candidate is the 6 × 6 × 12 tower rather than the default 64³.
-     *
-     * Not a detail of what is under test — this is about the menu reaching the pipeline and the
-     * document coming out the other side — and it is worth 19 seconds. React's development build
-     * writes every changed prop into its Performance track and walks a `Uint8Array` one index at a
-     * time; the panel seam hands `volume` down as a prop, so replacing the document with a 64³ one
-     * walks half a million indices per panel. `PixelCanvas` has the same note about pixel buffers.
-     * The built bundle does none of it. Everything about the canvas itself is in
-     * `GenerateDialog.test.tsx`, where the tree is one dialog rather than a window.
-     */
-    await act(async () => {
-        control(global.document.body, 'Off').click()
-    })
-    await act(async () => {
-        control(global.document.body, 'Generate').click()
-    })
-    /*
-     * A second, empty act. The click starts a batch it does not own, and the tail of that batch —
-     * the failure count, the CLIP note — lands after the handler has returned. Not a wait: `act`
-     * flushes what is already queued, and leaving it queued renders into a tree this test is about
-     * to unmount. `GenerateDialog.test.tsx` awaits the batch itself through `onRunning`.
-     */
-    await act(async () => {
-        // nothing to do; the flush is the point
-    })
-    await act(async () => {
-        control(global.document.body, 'Use this one').click()
-    })
-
-    // The grid is fitted to the ops, so the tower is 12 tall on the volume's z.
-    expect([handle.state?.volume.sx, handle.state?.volume.sz]).toEqual([6, 12])
-    expect(handle.state?.doc).toMatchObject({name: 'tower', dirty: true, savedAt: undefined})
-    expect(handle.state?.origin?.prompt).toBe('a stone tower')
-    expect(handle.state?.origin?.model).toBe('qwen')
-    // It is a document like any other from here — one object, cameras, an empty history.
-    expect(handle.state?.objects.list).toHaveLength(1)
-    expect(handle.state?.history.past).toHaveLength(0)
-    // And the dialog is gone rather than sitting over the model it just handed over.
-    expect(global.document.querySelector('[data-testid="generate-dialog"]')).toBeNull()
-
-    await unmount(mounted)
-})
-
-test('Generate with unsaved work asks before it opens, like New and Open', async () => {
-    const mounted = await mount(memoryStore(), memoryFiles(), memoryLlama([]))
-
-    await act(async () => {
-        handle.dispatch?.({type: 'object', op: {kind: 'add'}})
-    })
-    await act(async () => {
-        control(mounted.host, 'Main menu').click()
-    })
-    await act(async () => {
-        menuItem('Generate a model…').click()
-    })
-
-    // The guard, not the generate dialog: a candidate replaces the document, so the question is
-    // asked before the minute is spent rather than after it.
-    expect(openDialogTitle()).toContain('unsaved')
-    await act(async () => {
-        control(global.document.body, 'Discard').click()
-    })
-    expect(openDialogTitle()).toBe('Generate a model')
+    expect(item.getAttribute('aria-disabled') ?? item.getAttribute('disabled')).not.toBeNull()
 
     await unmount(mounted)
 })

@@ -28,8 +28,9 @@ design intention rather than a measurement, it says so.
 Deleted with this decision: sprite stacking (`src/vox/render.ts`, `slice.ts`, `render-worker.ts`,
 `voxrender.py` and the Python parity contract), the effects/scripting surface (`src/fx/`), the bone
 rig (`src/anim/rig.ts`), and the engine-specific exporters (`godot.ts`, `strip.ts`). Kept:
-`src/doc/` (volume, document, history, palette, serialize), `.vox` read/write, PNG encoding,
-`src/gen/`, and the pure gesture-replay pattern in `src/editor/state.ts`.
+`src/doc/` (volume, document, history, palette, serialize), `.vox` read/write, PNG encoding, and the
+pure gesture-replay pattern in `src/editor/state.ts`. `src/gen/` was kept, rebuilt, and then removed
+outright on 2026-08-17 — see §4.2.
 
 ---
 
@@ -226,9 +227,12 @@ Still open, and each one is a decision rather than a measurement:
    pipeline also quantises shading into N palette-aware steps (`FEATURESET.md` §22) changes the
    renderer's output stage. Not decided — and not on `docs/TASKS.md`, because §22 is postponed and
    the output stage should not be reshaped for something that is not being built.
-2. **What happens to `src/gen/`.** It survives the cut, but it currently scores candidates by
-   rendering them with the sprite-stacking renderer that is being deleted. It has to be repointed at
-   the raycaster.
+2. ~~**What happens to `src/gen/`.**~~ **Closed 2026-08-17: it is gone.** It was repointed at the
+   raycaster and rebuilt whole — the op language, the worked-example bank, the deterministic
+   scorers, the six experiment flags — and then deleted, along with `docs/GEN_*.md`, the spikes and
+   the browser suite for it. What is left is a disabled menu item and an empty `GenerateDialog.tsx`.
+   The measurements are in git and nowhere else; anything that replaces the pipeline starts from the
+   same door.
 3. ~~**Whether 2D slice editing survives.**~~ **Closed 2026-08-07: it survives, as a clip.**
    `FEATURESET.md` §6 asks for the current slice solid and the rest ghosted. What it asks for it
    _for_ is drawing interiors without fighting the camera, and what achieves that is the layers in

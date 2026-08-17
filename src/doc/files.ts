@@ -43,9 +43,11 @@ const picked = (name: string, bytes: Uint8Array): PickedFile => ({
  *
  * `remember` is the whole of it, and it is a *caller's* fact rather than the adapter's. Both
  * implementations used to sniff the extension — `if (name.endsWith('.gpix')) held = handle` —
- * which meant one rule written twice, and it meant a `.gpix` opened as the generate dialog's
- * reference model quietly became the file Save wrote the project back over. Only the project
- * picker asks to be remembered, so only the project picker says so.
+ * which meant one rule written twice, and it meant a `.gpix` opened for anything other than the
+ * project quietly became the file Save wrote the project back over. That was found through the
+ * generate dialog's reference model, which is gone; the rule outlives it, because a palette read
+ * and every reader added later have the same shape. Only the project picker asks to be remembered,
+ * so only the project picker says so.
  */
 export interface ReadFor {
     /** What the native picker calls this file kind in its own filter row. Nothing else. */
@@ -59,9 +61,10 @@ export interface Files {
      * `accept` is a comma-separated extension list, as an `<input accept>` takes.
      * `undefined` when the artist cancels, which is not an error and must not read like one.
      *
-     * Three things read a file off the artist's disk — the project picker, the palette loader and
-     * the generate dialog's reference model — and all three come through here. Exactly one of them
-     * passes `remember`, which is why all three can share one instance of this port.
+     * Two things read a file off the artist's disk — the project picker and the palette loader —
+     * and both come through here. Exactly one of them passes `remember`, which is why both can
+     * share one instance of this port. There was a third, the generate dialog's reference model,
+     * and it went with `src/gen/`.
      */
     open: (accept: string, read?: ReadFor) => Promise<PickedFile | undefined>
     /**

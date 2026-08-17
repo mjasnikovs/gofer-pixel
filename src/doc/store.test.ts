@@ -32,8 +32,7 @@ const document: Document = {
     cameras: [],
     references: [],
     symmetry: NO_SYMMETRY,
-    output: DEFAULT_OUTPUT,
-    origin: undefined
+    output: DEFAULT_OUTPUT
 }
 
 const at = (when: number, name = 'car.vox'): SavedDocument => saveDocument(document, name, when)

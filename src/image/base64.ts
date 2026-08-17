@@ -3,12 +3,15 @@
  *
  * One line of it is the whole reason this is a module: `String.fromCharCode(...bytes)` on a
  * megabyte blows the argument stack, so the loop below walks the buffer in 32 KB pieces. That fact
- * was written down twice — in `doc/save.ts`, which encodes whole documents, and in `gen/veto.ts`,
- * which encodes a PNG for the naming judge — character for character, with the same comment on both. Two
- * copies of a workaround is one copy nobody will remember to fix.
+ * was written down twice — in `doc/save.ts`, which encodes whole documents, and in the generator's
+ * `veto.ts`, which encoded a PNG for the naming judge — character for character, with the same
+ * comment on both. Two copies of a workaround is one copy nobody will remember to fix.
  *
- * It lives beside the PNG encoder because both callers are turning binary into something a JSON
- * body can carry.
+ * The second caller went with `src/gen/`. One is left, and the module stays: the argument-stack
+ * limit is a property of the platform, not of how many places happen to hit it today.
+ *
+ * It lives beside the PNG encoder because binary into something a JSON body can carry is what both
+ * of them were for.
  */
 
 const CHUNK = 0x8000

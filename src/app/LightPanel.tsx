@@ -28,7 +28,7 @@ import type {AppAction, AppState} from './state'
  *
  * **`onChange`, not `onChangeEnd`** — the light follows the drag. It is the right default and it is
  * also the cheap one, which is only true because the sun stops at the viewport: a step redraws one
- * GPU frame, 0.17 ms idle and 2.4 ms with llama-server on the same card, and no thumbnail, no
+ * GPU frame, 0.17 ms idle and 2.4 ms with something else on the same card, and no thumbnail, no
  * sprite cache entry and no sheet is touched. A sun that only moved when the mouse came up would be
  * asking the artist to aim a light they cannot see moving.
  */

@@ -1,4 +1,3 @@
-import type {GenerationRecord} from '../gen/llama'
 import type {NamedCamera} from './cameras'
 import type {Objects} from './objects'
 import {readReference, type Reference} from './reference'
@@ -39,14 +38,6 @@ export interface SavedDocument {
     readonly symmetry: Symmetry
     /** Version 2. What the sheet is packed and written as — `FEATURESET.md` §16, §37, §38. */
     readonly output: SavedOutput
-    /**
-     * Version 3. What generated this model, when one did — see `src/gen/llama.ts`.
-     *
-     * Absent on everything an artist drew or imported, which is most documents. A generated asset
-     * whose prompt, seed and sampler were not written down cannot be reproduced or nudged, only
-     * regenerated and hoped over — and the one place that record survives a reload is the file.
-     */
-    readonly origin?: GenerationRecord
 }
 
 /**
@@ -55,8 +46,11 @@ export interface SavedDocument {
  * Refusing an old one would throw away the crash recovery of every artist who upgrades mid-session,
  * which is the one moment `FEATURESET.md` §32 exists for. Older payloads load with the newer fields
  * at their defaults, because none of them can be inferred and a guess would be a lie about their
- * document. A v1 or v2 file has no `origin` and that is not a gap: it means nobody recorded one,
- * which is exactly what `undefined` says.
+ * document.
+ *
+ * Version 3 added an `origin` — what generated a model, when `src/gen/` did. The generator is gone
+ * and so is the field: a v3 file still loads whole, and its provenance line is read past rather
+ * than kept, because nothing left in the app can produce one or show one.
  *
  * `4` is the one exception to "older payloads load at their defaults", and it is worth the words:
  * a v1–v3 file has no `cellH` because a sprite cell could only be square, so the height is not
@@ -130,8 +124,6 @@ export interface Document {
     readonly references: readonly Reference[]
     readonly symmetry: Symmetry
     readonly output: SavedOutput
-    /** What generated this model, or `undefined` for one that was drawn or imported. */
-    readonly origin: GenerationRecord | undefined
 }
 
 export const saveDocument = (document: Document, name: string, at = Date.now()): SavedDocument => {
@@ -152,10 +144,7 @@ export const saveDocument = (document: Document, name: string, at = Date.now()):
         cameras: document.cameras,
         references: document.references,
         symmetry: document.symmetry,
-        output: document.output,
-        // Omitted rather than written as `null`, so a hand-drawn document says nothing about
-        // generation instead of saying it was not generated.
-        ...(document.origin === undefined ? {} : {origin: document.origin})
+        output: document.output
     }
 }
 
@@ -205,46 +194,6 @@ const readOutput = (value: unknown): SavedOutput | undefined => {
         bounds: bounds === true,
         preset,
         presets: presets as SavedOutput['presets']
-    }
-}
-
-/**
- * A generation record, or `undefined` for anything that is not a whole one.
- *
- * Whole, not partial: a record missing its seed is not a record, because the only thing it is for is
- * reproducing the model, and half a sampler cannot. Dropped rather than fatal — the voxels are the
- * document and a lost provenance line costs nobody their work.
- */
-const readOrigin = (value: unknown): GenerationRecord | undefined => {
-    if (typeof value !== 'object' || value === null) return undefined
-    const {prompt, sampler, model, at, plan, examples, canvas} = value as Record<string, unknown>
-    if (typeof prompt !== 'string' || typeof model !== 'string' || typeof at !== 'string') {
-        return undefined
-    }
-    if (typeof sampler !== 'object' || sampler === null) return undefined
-    const {temperature, seed} = sampler as Record<string, unknown>
-    if (typeof temperature !== 'number' || typeof seed !== 'number') return undefined
-    /*
-     * The examples are not part of "whole": a file written before the bank existed has none.
-     *
-     * A version-3 file carries `plan`, one word, from when the bank was five fixed body plans. It
-     * is read as a one-element list because that is exactly what it recorded — one example, shown
-     * once — so an old provenance line survives the format change instead of becoming a gap.
-     */
-    const shown =
-        Array.isArray(examples) ?
-            examples.filter((entry): entry is string => typeof entry === 'string')
-        : typeof plan === 'string' ? [plan]
-        : []
-    return {
-        prompt,
-        sampler: {temperature, seed},
-        model,
-        at,
-        ...(shown.length === 0 ? {} : {examples: shown}),
-        // Absent means the canvas switch was off, which is a real answer rather than a gap — every
-        // file written before the switch existed was generated at the fitted 32.
-        ...(typeof canvas === 'number' ? {canvas} : {})
     }
 }
 
@@ -320,7 +269,6 @@ export const loadDocument = (text: string): LoadedDocument | undefined => {
         references,
         symmetry: readSymmetry(saved['symmetry']),
         output,
-        origin: readOrigin(saved['origin']),
         name: typeof saved['name'] === 'string' ? saved['name'] : 'Recovered',
         at: typeof saved['at'] === 'number' ? saved['at'] : 0,
         version
